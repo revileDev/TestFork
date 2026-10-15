@@ -1131,30 +1131,31 @@ local DeployableESP_Config = {
     Beds = false,
     Traps = false,
     ShowDistance = true,
-    RenderDistance = 500,
+    RenderDistance = 600,
 }
 local DeployableESP_Cache = {}
 local EntitySignatures = {}
 
-local function classifyEntityName(rawName)
-    local lower = rawName:lower()
-    if lower:find("box") or lower:find("crate") or lower:find("chest") or lower:find("storage") then
-        return "Crates", "Crate", Color3.fromRGB(80, 200, 255)
-    elseif lower:find("workbench") or lower:find("bench") or lower:find("research") or lower:find("repair") then
-        return "Workbenches", "Workbench", Color3.fromRGB(215, 120, 255)
-    elseif lower:find("furnace") or lower:find("campfire") or lower:find("fire") or lower:find("bbq") or lower:find("barbecue") then
-        return "Furnaces", "Furnace", Color3.fromRGB(255, 145, 50)
-    elseif lower:find("bed") or lower:find("sleepingbag") or lower:find("sleeping_bag") or lower:find("bag") then
-        return "Beds", "Bed", Color3.fromRGB(110, 255, 130)
-    elseif lower:find("turret") or lower:find("trap") or lower:find("mine") or lower:find("spikes") then
-        return "Traps", "Defense", Color3.fromRGB(255, 70, 70)
-    end
-    return nil, nil, nil
-end
-
 local function cleanDisplayName(name)
     local formatted = name:gsub("(%l)(%u)", "%1 %2"):gsub("(%a)(%d)", "%1 %2")
     return formatted
+end
+
+local function classifyRawName(name)
+    if type(name) ~= "string" then return nil, nil, nil end
+    local lower = name:lower()
+    if lower:find("box") or lower:find("crate") or lower:find("chest") or lower:find("storage") then
+        return "Crates", cleanDisplayName(name), Color3.fromRGB(80, 200, 255)
+    elseif lower:find("workbench") or lower:find("research") or lower:find("repair") or lower:find("bench") then
+        return "Workbenches", cleanDisplayName(name), Color3.fromRGB(215, 120, 255)
+    elseif lower:find("furnace") or lower:find("campfire") or lower:find("fire") or lower:find("bbq") or lower:find("barbecue") then
+        return "Furnaces", cleanDisplayName(name), Color3.fromRGB(255, 145, 50)
+    elseif lower:find("bed") or lower:find("sleeping") or lower:find("bag") then
+        return "Beds", cleanDisplayName(name), Color3.fromRGB(110, 255, 130)
+    elseif lower:find("turret") or lower:find("trap") or lower:find("mine") or lower:find("spike") then
+        return "Traps", cleanDisplayName(name), Color3.fromRGB(255, 70, 70)
+    end
+    return nil, nil, nil
 end
 
 local function cacheEntitySignatures()
@@ -1162,18 +1163,17 @@ local function cacheEntitySignatures()
     local entities = shared and shared:FindFirstChild("entities")
     if not entities then return end
 
-    for _, entityFolder in ipairs(entities:GetChildren()) do
-        local rawName = entityFolder.Name
-        local category, shortName, color = classifyEntityName(rawName)
+    for _, item in ipairs(entities:GetDescendants()) do
+        local rawName = item.Name
+        local category, dispName, color = classifyRawName(rawName)
         if category then
-            local model = entityFolder:FindFirstChild("Model")
-            local primPart = model and (model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart"))
+            local model = item:IsA("Model") and item or item:FindFirstChild("Model")
+            local primPart = model and (model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true))
             if primPart then
                 EntitySignatures[rawName] = {
                     Category = category,
-                    DisplayName = cleanDisplayName(rawName),
+                    DisplayName = dispName,
                     Color = color,
-                    CollisionGroup = primPart.CollisionGroup,
                     Material = primPart.Material,
                     Color3 = primPart.Color,
                 }
@@ -1185,19 +1185,42 @@ pcall(cacheEntitySignatures)
 
 local function identifyDeployable(model)
     if not model or not model:IsA("Model") then return nil, nil end
-    local primPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-    if not primPart then return nil, nil end
 
-    local directSig = EntitySignatures[model.Name]
-    if directSig then
-        return directSig, primPart
+    -- Exclude characters and players
+    if model:FindFirstChild("Head") and (model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model:FindFirstChild("LowerTorso")) then
+        return nil, nil
+    end
+    if model == LocalPlayer.Character or Players:GetPlayerFromCharacter(model) then
+        return nil, nil
     end
 
-    for _, sig in pairs(EntitySignatures) do
-        if sig.Material == primPart.Material
-            and sig.CollisionGroup == primPart.CollisionGroup
-            and matchColor(sig.Color3, primPart.Color) then
-            return sig, primPart
+    local anchorPart = model.PrimaryPart
+        or model:FindFirstChild("Main")
+        or model:FindFirstChild("Hitbox")
+        or model:FindFirstChildWhichIsA("BasePart", true)
+    if not anchorPart then return nil, nil end
+
+    -- 1. Direct model name match
+    local cat, disp, col = classifyRawName(model.Name)
+    if cat then
+        return { Category = cat, DisplayName = disp, Color = col }, anchorPart
+    end
+
+    -- 2. Parent folder name match (if placed model is named generic "Model")
+    if model.Parent and model.Parent ~= Workspace then
+        local pCat, pDisp, pCol = classifyRawName(model.Parent.Name)
+        if pCat then
+            return { Category = pCat, DisplayName = pDisp, Color = pCol }, anchorPart
+        end
+    end
+
+    -- 3. Match against cached ReplicatedStorage entity signatures
+    for rawName, sig in pairs(EntitySignatures) do
+        if model.Name:find(rawName) or (model.Parent and model.Parent.Name:find(rawName)) then
+            return sig, anchorPart
+        end
+        if sig.Material == anchorPart.Material and matchColor(sig.Color3, anchorPart.Color) then
+            return sig, anchorPart
         end
     end
 
@@ -1215,6 +1238,7 @@ local function registerDeployable(model)
     txt.Outline = true
     txt.OutlineColor = Color3.fromRGB(0, 0, 0)
     txt.Color = sig.Color
+    txt.Transparency = 1
     txt.Visible = false
 
     DeployableESP_Cache[model] = {
@@ -1233,22 +1257,50 @@ local function registerDeployable(model)
 end
 
 local function anyDeployableESPEnabled()
-    return DeployableESP_Config.Enabled and (
-        DeployableESP_Config.Workbenches or
-        DeployableESP_Config.Crates or
-        DeployableESP_Config.Furnaces or
-        DeployableESP_Config.Beds or
-        DeployableESP_Config.Traps
-    )
+    return DeployableESP_Config.Enabled
+        or DeployableESP_Config.Workbenches
+        or DeployableESP_Config.Crates
+        or DeployableESP_Config.Furnaces
+        or DeployableESP_Config.Beds
+        or DeployableESP_Config.Traps
+end
+
+local function isCategoryActive(cat)
+    if DeployableESP_Config[cat] == true then return true end
+    if DeployableESP_Config.Enabled == true then
+        local anyFilter = DeployableESP_Config.Workbenches or DeployableESP_Config.Crates
+            or DeployableESP_Config.Furnaces or DeployableESP_Config.Beds or DeployableESP_Config.Traps
+        if not anyFilter then return true end
+    end
+    return false
+end
+
+local function scanContainerForDeployables(parent)
+    if not parent then return end
+    for _, child in ipairs(parent:GetChildren()) do
+        if child:IsA("Model") then
+            registerDeployable(child)
+        elseif child:IsA("Folder") or child.Name == "Const" or child.Name == "Entities" or child.Name == "Deployables" or child.Name == "Buildings" or child.Name == "Map" then
+            for _, sub in ipairs(child:GetChildren()) do
+                if sub:IsA("Model") then
+                    registerDeployable(sub)
+                elseif sub:IsA("Folder") then
+                    for _, sub2 in ipairs(sub:GetChildren()) do
+                        if sub2:IsA("Model") then registerDeployable(sub2) end
+                    end
+                end
+            end
+        end
+    end
 end
 
 trackTask(task.spawn(function()
     while true do
         if anyDeployableESPEnabled() then
             if not next(EntitySignatures) then pcall(cacheEntitySignatures) end
-            for _, m in ipairs(Workspace:GetChildren()) do
-                if m:IsA("Model") then registerDeployable(m) end
-            end
+            scanContainerForDeployables(Workspace)
+            local constFolder = Workspace:FindFirstChild("Const")
+            if constFolder then scanContainerForDeployables(constFolder) end
         end
         for model, entry in pairs(DeployableESP_Cache) do
             if not model.Parent then
@@ -1256,14 +1308,14 @@ trackTask(task.spawn(function()
                 DeployableESP_Cache[model] = nil
             end
         end
-        task.wait(2.5)
+        task.wait(2)
     end
 end))
 
-trackConnection(Workspace.ChildAdded:Connect(function(c)
-    if c:IsA("Model") and anyDeployableESPEnabled() then
+trackConnection(Workspace.DescendantAdded:Connect(function(desc)
+    if desc:IsA("Model") and anyDeployableESPEnabled() then
         task.wait(0.1)
-        registerDeployable(c)
+        registerDeployable(desc)
     end
 end))
 
@@ -1278,12 +1330,11 @@ trackConnection(RunService.RenderStepped:Connect(function()
     for model, entry in pairs(DeployableESP_Cache) do
         if entry.Part and entry.Part.Parent then
             local sig = entry.Signature
-            local categoryEnabled = DeployableESP_Config[sig.Category]
-            if categoryEnabled then
+            if isCategoryActive(sig.Category) then
                 local dist = (Camera.CFrame.Position - entry.Part.Position).Magnitude
                 if dist <= DeployableESP_Config.RenderDistance then
                     local screenPos, onScreen = Camera:WorldToViewportPoint(entry.Part.Position)
-                    if onScreen then
+                    if onScreen and screenPos.Z > 0 then
                         if DeployableESP_Config.ShowDistance then
                             entry.Drawing.Text = string.format("%s | %.0fm", sig.DisplayName, dist)
                         else
