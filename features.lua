@@ -1121,7 +1121,6 @@ _G.OnSlider("Ore Distance Esp", function(v) OreESPConfig.RenderDistance = v end)
 
 --//==================================================
 --// DEPLOYABLE & ENTITY OBJECT ESP (Crates, Workbenches, Furnaces, Beds, Traps)
---// Strictly blacklists Partbox/trees and accurately recognizes all Trident deployables
 --//==================================================
 
 local DeployableESP_Config = {
@@ -1142,38 +1141,42 @@ local function cleanDisplayName(name)
     return formatted
 end
 
-local function isBlacklisted(name)
+local function isTreeClutter(name)
     if type(name) ~= "string" then return true end
     local lower = name:lower()
-    return lower:find("partbox") ~= nil
-        or lower:find("tree") ~= nil
-        or lower:find("wood") ~= nil
-        or lower:find("foliage") ~= nil
-        or lower:find("leaf") ~= nil
-        or lower:find("leaves") ~= nil
-        or lower:find("trunk") ~= nil
-        or lower:find("branch") ~= nil
-        or lower:find("rock") ~= nil
-        or lower:find("bush") ~= nil
+    return lower == "partbox" or lower:find("partbox") ~= nil or lower:find("part_box") ~= nil or lower == "tree"
 end
 
 local function classifyDeployableName(rawName)
-    if isBlacklisted(rawName) then return nil, nil, nil end
-    local lower = rawName:lower()
+    if isTreeClutter(rawName) then return nil, nil, nil end
+    local lower = rawName:lower():gsub("[^%a%d]", "")
 
-    if lower:find("workbench") or lower:find("bench") or lower:find("research") or lower:find("repair") then
+    -- Workbenches
+    if lower:find("workbench") or lower:find("research") or lower:find("repair") or lower:find("bench") then
         return "Workbenches", cleanDisplayName(rawName), Color3.fromRGB(215, 120, 255)
-    elseif lower:find("smallbox") then
+    end
+
+    -- Crates & Storage
+    if lower:find("smallbox") then
         return "Crates", "Small Box", Color3.fromRGB(80, 200, 255)
     elseif lower:find("largebox") then
         return "Crates", "Large Box", Color3.fromRGB(80, 200, 255)
-    elseif lower:find("crate") or lower:find("chest") or lower:find("storage") or (lower:find("box") and not lower:find("part")) then
+    elseif lower:find("crate") or lower:find("chest") or lower:find("storage") or lower:find("box") then
         return "Crates", cleanDisplayName(rawName), Color3.fromRGB(80, 200, 255)
-    elseif lower:find("furnace") or lower:find("campfire") or lower:find("fire") or lower:find("bbq") or lower:find("barbecue") then
+    end
+
+    -- Furnaces & Campfires
+    if lower:find("furnace") or lower:find("campfire") or lower:find("fire") or lower:find("bbq") or lower:find("barbecue") then
         return "Furnaces", cleanDisplayName(rawName), Color3.fromRGB(255, 145, 50)
-    elseif lower:find("sleepingbag") or lower:find("bed") or lower:find("bag") then
+    end
+
+    -- Beds & Sleeping Bags
+    if lower:find("sleepingbag") or lower:find("bed") or lower:find("bag") then
         return "Beds", cleanDisplayName(rawName), Color3.fromRGB(110, 255, 130)
-    elseif lower:find("turret") or lower:find("trap") or lower:find("mine") or lower:find("spike") then
+    end
+
+    -- Traps & Defenses
+    if lower:find("turret") or lower:find("trap") or lower:find("mine") or lower:find("spike") then
         return "Traps", cleanDisplayName(rawName), Color3.fromRGB(255, 70, 70)
     end
 
@@ -1182,7 +1185,7 @@ end
 
 local function colorsMatch(c1, c2)
     if c1 == c2 then return true end
-    return math.abs(c1.R - c2.R) < 0.02 and math.abs(c1.G - c2.G) < 0.02 and math.abs(c1.B - c2.B) < 0.02
+    return math.abs(c1.R - c2.R) < 0.03 and math.abs(c1.G - c2.G) < 0.03 and math.abs(c1.B - c2.B) < 0.03
 end
 
 local function populateEntityIdentification()
@@ -1191,7 +1194,7 @@ local function populateEntityIdentification()
     if not entities then return end
 
     for _, v in ipairs(entities:GetChildren()) do
-        if v.Name ~= "Player" and v.Name ~= "NPC" and v.Name ~= "vehicles" and not isBlacklisted(v.Name) then
+        if v.Name ~= "Player" and v.Name ~= "NPC" and v.Name ~= "vehicles" and not isTreeClutter(v.Name) then
             local model = v:FindFirstChild("Model") or (v:IsA("Model") and v)
             if model and model.PrimaryPart then
                 enttiyidentification[v.Name] = {
@@ -1205,9 +1208,21 @@ local function populateEntityIdentification()
 end
 pcall(populateEntityIdentification)
 
+local function getAnchorPart(model)
+    if model.PrimaryPart then return model.PrimaryPart end
+    local main = model:FindFirstChild("Main")
+    if main and main:IsA("BasePart") then return main end
+    local hitbox = model:FindFirstChild("Hitbox")
+    if hitbox and hitbox:IsA("BasePart") then return hitbox end
+    for _, desc in ipairs(model:GetDescendants()) do
+        if desc:IsA("BasePart") then return desc end
+    end
+    return nil
+end
+
 local function identifyDeployable(model)
     if not model or model.ClassName ~= "Model" then return false, false end
-    if isBlacklisted(model.Name) then return false, false end
+    if isTreeClutter(model.Name) then return false, false end
     if model.Name == "Player" or (model:FindFirstChild("Head") and (model:FindFirstChild("Torso") or model:FindFirstChild("LowerTorso"))) then
         return false, false
     end
@@ -1215,13 +1230,10 @@ local function identifyDeployable(model)
         return false, false
     end
 
-    local anchorPart = model.PrimaryPart
-        or model:FindFirstChild("Main")
-        or model:FindFirstChild("Hitbox")
-        or model:FindFirstChildWhichIsA("BasePart", true)
+    local anchorPart = getAnchorPart(model)
     if not anchorPart then return false, false end
 
-    -- 1. Direct Name Classification (100% reliable for Trident Survival deployables)
+    -- 1. Direct Name Classification
     local directCategory, directDisplay, directColor = classifyDeployableName(model.Name)
     if directCategory then
         return {
@@ -1232,8 +1244,8 @@ local function identifyDeployable(model)
         }, anchorPart
     end
 
-    -- 2. Parent Name Classification (if model is wrapped in folder named after deployable)
-    if model.Parent and model.Parent ~= Workspace and not isBlacklisted(model.Parent.Name) then
+    -- 2. Parent Name Classification
+    if model.Parent and model.Parent ~= Workspace and not isTreeClutter(model.Parent.Name) then
         local pCategory, pDisplay, pColor = classifyDeployableName(model.Parent.Name)
         if pCategory then
             return {
@@ -1245,9 +1257,9 @@ local function identifyDeployable(model)
         end
     end
 
-    -- 3. Match against ReplicatedStorage entity signatures from Trident source
+    -- 3. Match against ReplicatedStorage entity signatures
     for name, entity in pairs(enttiyidentification) do
-        if not isBlacklisted(name) and entity.Material == anchorPart.Material and entity.CollisionGroup == anchorPart.CollisionGroup and colorsMatch(entity.Color, anchorPart.Color) then
+        if not isTreeClutter(name) and entity.Material == anchorPart.Material and colorsMatch(entity.Color, anchorPart.Color) then
             local cat, disp, col = classifyDeployableName(name)
             if cat then
                 return {
@@ -1264,32 +1276,34 @@ local function identifyDeployable(model)
 end
 
 local function registerDeployable(model)
-    if DeployableESP_Cache[model] then return end
-    local sig, anchorPart = identifyDeployable(model)
-    if not sig or not anchorPart then return end
+    local ok = pcall(function()
+        if not model or DeployableESP_Cache[model] then return end
+        local sig, anchorPart = identifyDeployable(model)
+        if not sig or not anchorPart then return end
 
-    local txt = newDrawing("Text")
-    txt.Size = 13
-    txt.Center = true
-    txt.Outline = true
-    txt.OutlineColor = Color3.fromRGB(0, 0, 0)
-    txt.Color = sig.Color
-    txt.Transparency = 1
-    txt.Visible = false
+        local txt = newDrawing("Text")
+        txt.Size = 13
+        txt.Center = true
+        txt.Outline = true
+        txt.OutlineColor = Color3.fromRGB(0, 0, 0)
+        txt.Color = sig.Color
+        txt.Transparency = 1
+        txt.Visible = false
 
-    DeployableESP_Cache[model] = {
-        Drawing = txt,
-        Signature = sig,
-        Part = anchorPart,
-    }
+        DeployableESP_Cache[model] = {
+            Drawing = txt,
+            Signature = sig,
+            Part = anchorPart,
+        }
 
-    trackConnection(model.Destroying:Connect(function()
-        local entry = DeployableESP_Cache[model]
-        if entry then
-            pcall(function() entry.Drawing:Remove() end)
-            DeployableESP_Cache[model] = nil
-        end
-    end))
+        trackConnection(model.Destroying:Connect(function()
+            local entry = DeployableESP_Cache[model]
+            if entry then
+                pcall(function() entry.Drawing:Remove() end)
+                DeployableESP_Cache[model] = nil
+            end
+        end))
+    end)
 end
 
 local function anyDeployableESPEnabled()
@@ -1313,21 +1327,23 @@ end
 
 local function scanDeployableContainer(parent)
     if not parent then return end
-    for _, child in ipairs(parent:GetChildren()) do
-        if child:IsA("Model") then
-            registerDeployable(child)
-        elseif child:IsA("Folder") or child.Name == "Const" or child.Name == "Buildings" or child.Name == "Deployables" or child.Name == "Map" then
-            for _, sub in ipairs(child:GetChildren()) do
-                if sub:IsA("Model") then
-                    registerDeployable(sub)
-                elseif sub:IsA("Folder") then
-                    for _, sub2 in ipairs(sub:GetChildren()) do
-                        if sub2:IsA("Model") then registerDeployable(sub2) end
+    pcall(function()
+        for _, child in ipairs(parent:GetChildren()) do
+            if child:IsA("Model") then
+                registerDeployable(child)
+            elseif child:IsA("Folder") or child.Name == "Const" then
+                for _, sub in ipairs(child:GetChildren()) do
+                    if sub:IsA("Model") then
+                        registerDeployable(sub)
+                    elseif sub:IsA("Folder") then
+                        for _, sub2 in ipairs(sub:GetChildren()) do
+                            if sub2:IsA("Model") then registerDeployable(sub2) end
+                        end
                     end
                 end
             end
         end
-    end
+    end)
 end
 
 trackTask(task.spawn(function()
@@ -1335,8 +1351,6 @@ trackTask(task.spawn(function()
         if anyDeployableESPEnabled() then
             if not next(enttiyidentification) then pcall(populateEntityIdentification) end
             scanDeployableContainer(Workspace)
-            local const = Workspace:FindFirstChild("Const")
-            if const then scanDeployableContainer(const) end
         end
         for model, entry in pairs(DeployableESP_Cache) do
             if not model.Parent then
@@ -1363,11 +1377,14 @@ trackConnection(RunService.RenderStepped:Connect(function()
         return
     end
 
+    local camPos = Camera and Camera.CFrame and Camera.CFrame.Position
+    if not camPos then return end
+
     for model, entry in pairs(DeployableESP_Cache) do
         if entry.Part and entry.Part.Parent then
             local sig = entry.Signature
             if isCategoryActive(sig.Category) then
-                local dist = (Camera.CFrame.Position - entry.Part.Position).Magnitude
+                local dist = (camPos - entry.Part.Position).Magnitude
                 if dist <= DeployableESP_Config.RenderDistance then
                     local screenPos, onScreen = Camera:WorldToViewportPoint(entry.Part.Position)
                     if onScreen and screenPos.Z > 0 then
