@@ -249,12 +249,8 @@ local function getPlayerParts(model)
 end
 
 local function isPlayerModel(model)
-    if not model or not model:IsA("Model") then return false end
-    if Players:GetPlayerFromCharacter(model) then return true end
     local torso = model:FindFirstChild("Torso")
-    if torso and torso:FindFirstChild("LeftBooster") ~= nil then return true end
-    if model:FindFirstChild("HandModel") then return true end
-    return false
+    return torso and torso:FindFirstChild("LeftBooster") ~= nil
 end
 
 local function isPlayerWhitelisted(model, name)
@@ -337,14 +333,18 @@ local function calculateCorners(model, head, torso)
     local center = Vector3.new((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
     local size = Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
     local halfSize = size * 0.5
-    local cframe = CFrame.new(center)
 
     local screenMinX, screenMinY = math.huge, math.huge
     local screenMaxX, screenMaxY = -math.huge, -math.huge
     local anyOnScreen = false
 
     for i = 1, #VERTICES_8 do
-        local worldPoint = (cframe + halfSize * VERTICES_8[i]).Position
+        local v = VERTICES_8[i]
+        local worldPoint = Vector3.new(
+            center.X + halfSize.X * v.X,
+            center.Y + halfSize.Y * v.Y,
+            center.Z + halfSize.Z * v.Z
+        )
         local screen, inBounds = Camera:WorldToViewportPoint(worldPoint)
         if screen.Z <= 0.1 then
             return calculateCornersSimple(head, torso)
@@ -732,9 +732,8 @@ trackConnection(RunService.RenderStepped:Connect(function()
         -- Skip local player's own character
         if model == LocalPlayer.Character or Players:GetPlayerFromCharacter(model) == LocalPlayer then
             hidePlayerDrawings(d)
-            continue
-        end
-        local valid = true
+        else
+            local valid = true
         local head, torso = d.head, d.torso
         if not head or not torso or not head.Parent or not torso.Parent then
             head, torso = getPlayerParts(model)
@@ -1017,6 +1016,7 @@ trackConnection(RunService.RenderStepped:Connect(function()
             else
                 for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
             end
+        end
         end
     end
 

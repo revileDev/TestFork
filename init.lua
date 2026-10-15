@@ -11,6 +11,10 @@ local UserInputService = game:GetService("UserInputService")
 -- If the initializer is run again, unload the previous UI/backend first.
 if _G.AtomwareUnload and (_G.AtomwareUILoaded or _G.AtomwareFeaturesLoaded) then
     pcall(_G.AtomwareUnload)
+    _G.AtomwareUILoaded = nil
+    _G.AtomwareFeaturesLoaded = nil
+    _G.AtomwareEvents = nil
+    _G.OnToggle = nil
 end
 
 -- Platform Detection
@@ -114,6 +118,10 @@ _G.AtomwareUnload = function()
     elseif gui then
         gui:Destroy()
     end
+    _G.AtomwareUILoaded = nil
+    _G.AtomwareFeaturesLoaded = nil
+    _G.AtomwareEvents = nil
+    _G.OnToggle = nil
 end
 
 -- Load Platform UI (mobile_ui.lua vs main_ui.lua)
@@ -135,12 +143,10 @@ repeat
 until _G.AtomwareUILoaded and _G.AtomwareEvents and _G.OnToggle
 
 -- 3. Load Shared Features Engine
-if not _G.AtomwareFeaturesLoaded then
-    if not loadModule("features.lua") then
-        warn("Atomware: feature backend could not be loaded; cleaning up startup.")
-        if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
-        return
-    end
+if not loadModule("features.lua") then
+    warn("Atomware: feature backend could not be loaded; cleaning up startup.")
+    if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
+    return
 end
 
 -- 4. Verify everything is online (timeout after 15 s)
