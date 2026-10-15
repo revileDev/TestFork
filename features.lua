@@ -164,6 +164,7 @@ _G.OnSlider("Head Transparency", function(v) headTransparency = v end)
 
 local ESP_Master = false
 local ESP_Box = false
+local ESP_BoxFill = false
 local ESP_Distance = false
 local ESP_Type = false
 local ESP_SleeperCheck = false
@@ -171,11 +172,25 @@ local ESP_Weapon = false
 local ESP_Skeleton = false
 
 local Color_Box = Color3.fromRGB(255, 255, 255)
+local Color_BoxFill = Color3.fromRGB(255, 0, 0)
+local BoxFill_Transparency = 0.3
 local Color_Skeleton = Color3.fromRGB(255, 255, 255)
 local Color_Text = Color3.fromRGB(255, 255, 255)
 
 local espCache = {}
 local cachedWeapons = {}
+local playerMemory = {}
+
+local VERTICES_8 = {
+    Vector3.new(-1, -1, -1),
+    Vector3.new(-1, 1, -1),
+    Vector3.new(-1, 1, 1),
+    Vector3.new(-1, -1, 1),
+    Vector3.new(1, -1, -1),
+    Vector3.new(1, 1, -1),
+    Vector3.new(1, 1, 1),
+    Vector3.new(1, -1, 1)
+}
 
 local skeletonBones = {
     { "Head", "Torso" }, { "Torso", "LeftUpperArm" }, { "LeftUpperArm", "LeftLowerArm" },
@@ -208,6 +223,102 @@ end
 local function isPlayerModel(model)
     local torso = model:FindFirstChild("Torso")
     return torso and torso:FindFirstChild("LeftBooster") ~= nil
+end
+
+local function isCharacterBodyPart(name)
+    return name == "Head" or name:find("Torso") or name:find("Leg") or name:find("Arm") or name:find("Foot") or name:find("Hand")
+end
+
+local function calculateCornersSimple(head, torso)
+    if not head or not torso then return nil end
+    local headPos, headOnScreen = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
+    local footPos, footOnScreen = Camera:WorldToViewportPoint(torso.Position - Vector3.new(0, 2.8, 0))
+    if not headOnScreen and not footOnScreen then return nil end
+    if headPos.Z <= 0.1 or footPos.Z <= 0.1 then return nil end
+
+    local height = math.abs(footPos.Y - headPos.Y)
+    local width = math.clamp(height * 0.62, 10, 600)
+    local topX = headPos.X
+    local topY = math.min(headPos.Y, footPos.Y)
+
+    return {
+        topLeft = Vector2.new(math.floor(topX - width * 0.5), math.floor(topY)),
+        topRight = Vector2.new(math.floor(topX + width * 0.5), math.floor(topY)),
+        bottomLeft = Vector2.new(math.floor(topX - width * 0.5), math.floor(topY + height)),
+        bottomRight = Vector2.new(math.floor(topX + width * 0.5), math.floor(topY + height)),
+        width = math.floor(width),
+        height = math.floor(height)
+    }
+end
+
+local function calculateCorners(model, head, torso)
+    local minX, minY, minZ = math.huge, math.huge, math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    local count = 0
+
+    local children = model:GetChildren()
+    for i = 1, #children do
+        local part = children[i]
+        if part:IsA("BasePart") and isCharacterBodyPart(part.Name) then
+            count = count + 1
+            local cf = part.CFrame
+            local sz = part.Size * 0.5
+            local p = cf.Position
+
+            local rx = math.abs(cf.RightVector.X) * sz.X + math.abs(cf.UpVector.X) * sz.Y + math.abs(cf.LookVector.X) * sz.Z
+            local ry = math.abs(cf.RightVector.Y) * sz.X + math.abs(cf.UpVector.Y) * sz.Y + math.abs(cf.LookVector.Y) * sz.Z
+            local rz = math.abs(cf.RightVector.Z) * sz.X + math.abs(cf.UpVector.Z) * sz.Y + math.abs(cf.LookVector.Z) * sz.Z
+
+            if p.X - rx < minX then minX = p.X - rx end
+            if p.Y - ry < minY then minY = p.Y - ry end
+            if p.Z - rz < minZ then minZ = p.Z - rz end
+
+            if p.X + rx > maxX then maxX = p.X + rx end
+            if p.Y + ry > maxY then maxY = p.Y + ry end
+            if p.Z + rz > maxZ then maxZ = p.Z + rz end
+        end
+    end
+
+    if count == 0 then return calculateCornersSimple(head, torso) end
+
+    local center = Vector3.new((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
+    local size = Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
+    local halfSize = size * 0.5
+    local cframe = CFrame.new(center)
+
+    local screenMinX, screenMinY = math.huge, math.huge
+    local screenMaxX, screenMaxY = -math.huge, -math.huge
+    local anyOnScreen = false
+
+    for i = 1, #VERTICES_8 do
+        local worldPoint = (cframe + halfSize * VERTICES_8[i]).Position
+        local screen, inBounds = Camera:WorldToViewportPoint(worldPoint)
+        if screen.Z <= 0.1 then
+            return calculateCornersSimple(head, torso)
+        end
+        if inBounds then anyOnScreen = true end
+        if screen.X < screenMinX then screenMinX = screen.X end
+        if screen.Y < screenMinY then screenMinY = screen.Y end
+        if screen.X > screenMaxX then screenMaxX = screen.X end
+        if screen.Y > screenMaxY then screenMaxY = screen.Y end
+    end
+
+    if not anyOnScreen then return nil end
+
+    local w = math.floor(screenMaxX - screenMinX)
+    local h = math.floor(screenMaxY - screenMinY)
+    if w <= 4 or h <= 4 then
+        return calculateCornersSimple(head, torso)
+    end
+
+    return {
+        topLeft = Vector2.new(math.floor(screenMinX), math.floor(screenMinY)),
+        topRight = Vector2.new(math.floor(screenMaxX), math.floor(screenMinY)),
+        bottomLeft = Vector2.new(math.floor(screenMinX), math.floor(screenMaxY)),
+        bottomRight = Vector2.new(math.floor(screenMaxX), math.floor(screenMaxY)),
+        width = w,
+        height = h
+    }
 end
 
 local function detectWeapon(model)
@@ -246,6 +357,14 @@ local function registerESP(model)
     outline.Color = Color3.fromRGB(0, 0, 0)
     outline.Visible = false
 
+    local boxFill = newDrawing("Square")
+    boxFill.Thickness = 0
+    boxFill.Filled = true
+    boxFill.Color = Color_BoxFill
+    boxFill.Transparency = BoxFill_Transparency
+    boxFill.Visible = false
+    boxFill.ZIndex = -2
+
     local txt = newDrawing("Text")
     txt.Size = 14
     txt.Center = true
@@ -270,18 +389,29 @@ local function registerESP(model)
     end
 
     espCache[model] = {
-        box = box, outline = outline, text = txt,
+        box = box, outline = outline, boxFill = boxFill, text = txt,
         weaponText = weaponTxt, head = head, torso = torso,
         skeletonLines = skelLines
     }
 
+    if not playerMemory[model] then
+        local p = Players:GetPlayerFromCharacter(model)
+        if p then
+            playerMemory[model] = p.DisplayName ~= p.Name and (p.DisplayName .. " (@" .. p.Name .. ")") or p.Name
+        elseif model.Name ~= "Model" and model.Name ~= "Character" and model.Name ~= "Player" and not model.Name:find("Rig") then
+            playerMemory[model] = model.Name
+        end
+    end
+
     trackConnection(model.Destroying:Connect(function()
         pcall(function() box:Remove() end)
         pcall(function() outline:Remove() end)
+        pcall(function() boxFill:Remove() end)
         pcall(function() txt:Remove() end)
         pcall(function() weaponTxt:Remove() end)
         for _, l in ipairs(skelLines) do pcall(function() l.line:Remove() end) end
         espCache[model] = nil
+        playerMemory[model] = nil
     end))
 end
 
@@ -298,6 +428,7 @@ trackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
         local d = espCache[char]
         pcall(function() d.box:Remove() end)
         pcall(function() d.outline:Remove() end)
+        if d.boxFill then pcall(function() d.boxFill:Remove() end) end
         pcall(function() d.text:Remove() end)
         pcall(function() d.weaponText:Remove() end)
         for _, l in ipairs(d.skeletonLines) do pcall(function() l.line:Remove() end) end
@@ -312,6 +443,14 @@ trackTask(task.spawn(function()
         end
         for m in pairs(espCache) do
             cachedWeapons[m] = detectWeapon(m)
+            if not playerMemory[m] then
+                local p = Players:GetPlayerFromCharacter(m)
+                if p then
+                    playerMemory[m] = p.DisplayName ~= p.Name and (p.DisplayName .. " (@" .. p.Name .. ")") or p.Name
+                elseif m.Name ~= "Model" and m.Name ~= "Character" and m.Name ~= "Player" and not m.Name:find("Rig") then
+                    playerMemory[m] = m.Name
+                end
+            end
         end
         task.wait(1.5)
     end
@@ -322,6 +461,7 @@ trackConnection(RunService.RenderStepped:Connect(function()
         for _, d in pairs(espCache) do
             d.box.Visible = false
             d.outline.Visible = false
+            if d.boxFill then d.boxFill.Visible = false end
             d.text.Visible = false
             d.weaponText.Visible = false
             for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
@@ -335,6 +475,7 @@ trackConnection(RunService.RenderStepped:Connect(function()
         if model == LocalPlayer.Character or Players:GetPlayerFromCharacter(model) == LocalPlayer then
             d.box.Visible = false
             d.outline.Visible = false
+            if d.boxFill then d.boxFill.Visible = false end
             d.text.Visible = false
             d.weaponText.Visible = false
             for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
@@ -348,13 +489,17 @@ trackConnection(RunService.RenderStepped:Connect(function()
             if not head or not torso then valid = false end
         end
 
-        if valid and ESP_SleeperCheck then
+        local isSleeping = false
+        if valid then
             local lowerTorso = model:FindFirstChild("LowerTorso")
             if lowerTorso then
                 local rootRig = lowerTorso:FindFirstChild("RootRig")
                 if rootRig and typeof(rootRig.CurrentAngle) == "number" and rootRig.CurrentAngle ~= 0 then
-                    valid = false
+                    isSleeping = true
                 end
+            end
+            if isSleeping and ESP_SleeperCheck then
+                valid = false
             end
         end
 
@@ -365,57 +510,79 @@ trackConnection(RunService.RenderStepped:Connect(function()
             if dist >= 3000 then valid = false end
         end
 
-        local screenPos, onScreen = nil, false
+        local corners = nil
         if valid then
-            screenPos, onScreen = Camera:WorldToViewportPoint((head.Position + torso.Position) * 0.5)
-            if not onScreen then valid = false end
+            corners = calculateCorners(model, head, torso)
+            if not corners then valid = false end
         end
 
-        if not valid then
+        if not valid or not corners then
             d.box.Visible = false
             d.outline.Visible = false
+            if d.boxFill then d.boxFill.Visible = false end
             d.text.Visible = false
             d.weaponText.Visible = false
             for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
         else
-            local scale = 1000 / (dist * 2) / math.tan(math.rad(Camera.FieldOfView / 1.7))
-            local w = math.clamp(math.floor(6.5 * scale), 10, 600)
-            local h = math.clamp(math.floor(9.5 * scale), 14, 800)
-            local bx = screenPos.X - w / 2
-            local by = screenPos.Y - h / 3.5
+            local isPlayer = isPlayerModel(model)
 
             if ESP_Box then
-                d.outline.Size = Vector2.new(w + 2, h + 2)
-                d.outline.Position = Vector2.new(bx - 1, by - 1)
+                d.outline.Size = Vector2.new(corners.width + 2, corners.height + 2)
+                d.outline.Position = Vector2.new(corners.topLeft.X - 1, corners.topLeft.Y - 1)
                 d.outline.Visible = true
 
-                d.box.Size = Vector2.new(w, h)
-                d.box.Position = Vector2.new(bx, by)
-                d.box.Color = isPlayerModel(model) and Color_Box or Color3.fromRGB(0, 150, 255)
+                d.box.Size = Vector2.new(corners.width, corners.height)
+                d.box.Position = corners.topLeft
+                d.box.Color = isPlayer and Color_Box or Color3.fromRGB(0, 150, 255)
                 d.box.Visible = true
+
+                if ESP_BoxFill and d.boxFill then
+                    d.boxFill.Size = d.box.Size
+                    d.boxFill.Position = d.box.Position
+                    d.boxFill.Color = Color_BoxFill
+                    d.boxFill.Transparency = BoxFill_Transparency
+                    d.boxFill.Visible = true
+                elseif d.boxFill then
+                    d.boxFill.Visible = false
+                end
             else
                 d.outline.Visible = false
                 d.box.Visible = false
+                if d.boxFill then d.boxFill.Visible = false end
             end
 
             local lbls = {}
-            if ESP_Type then table.insert(lbls, isPlayerModel(model) and "Player" or "Bot") end
-            if ESP_Distance then table.insert(lbls, math.floor(dist) .. "m") end
+            local cachedName = playerMemory[model]
+            if ESP_Type then
+                if cachedName then
+                    table.insert(lbls, cachedName)
+                else
+                    table.insert(lbls, isPlayer and "Player" or "Bot")
+                end
+            end
+            if isSleeping and not ESP_SleeperCheck then
+                table.insert(lbls, "[Sleeping]")
+            end
+            if ESP_Distance then
+                table.insert(lbls, math.floor(dist) .. "m")
+            end
             local txtStr = table.concat(lbls, " | ")
 
+            local midX = math.floor(corners.topLeft.X + corners.width * 0.5)
+
             if txtStr ~= "" then
-                d.text.Color = isPlayerModel(model) and Color_Text or Color3.fromRGB(0, 150, 255)
+                d.text.Color = isPlayer and Color_Text or Color3.fromRGB(0, 150, 255)
                 d.text.Text = txtStr
-                d.text.Position = Vector2.new(screenPos.X, by - 16)
+                d.text.Position = Vector2.new(midX, corners.topLeft.Y - 16)
                 d.text.Visible = true
             else
                 d.text.Visible = false
             end
 
             if ESP_Weapon then
-                d.weaponText.Color = isPlayerModel(model) and Color_Text or Color3.fromRGB(0, 150, 255)
+                d.weaponText.Color = isPlayer and Color_Text or Color3.fromRGB(0, 150, 255)
                 d.weaponText.Text = cachedWeapons[model] or "None"
-                d.weaponText.Position = Vector2.new(screenPos.X, by + h)
+                d.weaponText.Position = Vector2.new(midX, corners.bottomLeft.Y + 2)
                 d.weaponText.Visible = true
             else
                 d.weaponText.Visible = false
@@ -428,7 +595,7 @@ trackConnection(RunService.RenderStepped:Connect(function()
                     if pA and pB then
                         local posA, visA = Camera:WorldToViewportPoint(pA.Position)
                         local posB, visB = Camera:WorldToViewportPoint(pB.Position)
-                        if visA and visB then
+                        if visA and visB and posA.Z > 0.1 and posB.Z > 0.1 then
                             sk.line.From = Vector2.new(posA.X, posA.Y)
                             sk.line.To = Vector2.new(posB.X, posB.Y)
                             sk.line.Color = Color_Skeleton
@@ -449,6 +616,7 @@ end))
 
 _G.OnToggle("Enable ESP", function(s) ESP_Master = s end)
 _G.OnToggle("Box Esp", function(s) ESP_Box = s end)
+_G.OnToggle("Box Fill", function(s) ESP_BoxFill = s end)
 _G.OnToggle("Distance Esp", function(s) ESP_Distance = s end)
 _G.OnToggle("Player/Bot Esp", function(s) ESP_Type = s end)
 _G.OnToggle("Sleeper Check", function(s) ESP_SleeperCheck = s end)
@@ -456,6 +624,8 @@ _G.OnToggle("Weapon Esp", function(s) ESP_Weapon = s end)
 _G.OnToggle("Skeleton Esp", function(s) ESP_Skeleton = s end)
 
 _G.OnColorPicker("Box Color", function(c) Color_Box = c end)
+_G.OnColorPicker("Box Fill Color", function(c) Color_BoxFill = c end)
+_G.OnSlider("Box Fill Transparency", function(v) BoxFill_Transparency = math.clamp(v / 100, 0, 1) end)
 _G.OnColorPicker("Skeleton Color", function(c) Color_Skeleton = c end)
 _G.OnColorPicker("Text Color", function(c) Color_Text = c end)
 
@@ -973,13 +1143,11 @@ trackConnection(RunService.RenderStepped:Connect(function(dt)
     end
 end))
 --//==================================================
---// ORE ESP (Accurate Trident MeshId & Vertex Color Recognition)
+--// ORE ESP
 --//==================================================
 
 local OreESPConfig = { Stone = false, Iron = false, Nitrate = false, ShowDistance = false, RenderDistance = 750 }
 local oreCache = {}
-
-local ORE_MESH_ID = "rbxassetid://12939036056"
 
 local oreColors = {
     Stone = { Color3.fromRGB(72, 72, 72) },
@@ -993,66 +1161,34 @@ local oreLabelColors = {
 }
 
 local function matchColor(c1, c2)
-    return math.abs(c1.R - c2.R) < 0.05 and math.abs(c1.G - c2.G) < 0.05 and math.abs(c1.B - c2.B) < 0.05
+    return math.abs(c1.R - c2.R) < 0.03 and math.abs(c1.G - c2.G) < 0.03 and math.abs(c1.B - c2.B) < 0.03
 end
 
 local function identifyOre(model)
-    if not model or not model:IsA("Model") then return nil, nil end
-    local children = model:GetChildren()
-    if #children == 0 then return nil, nil end
-
-    -- Primary: Trident Survival MeshId match
-    local oreMeshPart = nil
-    for _, child in ipairs(children) do
-        if child:IsA("MeshPart") and child.MeshId == ORE_MESH_ID then
-            oreMeshPart = child
-            break
-        end
-    end
-
-    if oreMeshPart then
-        if #children == 1 then
-            return "Stone", oreMeshPart
-        else
-            for _, part in ipairs(children) do
-                if part:IsA("BasePart") then
-                    if matchColor(part.Color, Color3.fromRGB(248, 248, 248)) then
-                        return "Nitrate", part
-                    elseif matchColor(part.Color, Color3.fromRGB(199, 172, 120)) then
-                        return "Iron", part
-                    end
-                end
-            end
-            return "Stone", oreMeshPart
-        end
-    end
-
-    -- Fallback: Color-signature match for streaming/delayed MeshId
     local meshes = {}
-    for _, child in ipairs(children) do
+    for _, child in ipairs(model:GetChildren()) do
         if child:IsA("MeshPart") then table.insert(meshes, child) end
     end
     if #meshes == 1 and matchColor(meshes[1].Color, oreColors.Stone[1]) then
         return "Stone", meshes[1]
-    elseif #meshes >= 2 then
-        for _, part in ipairs(meshes) do
-            if matchColor(part.Color, Color3.fromRGB(248, 248, 248)) then
-                return "Nitrate", part
-            elseif matchColor(part.Color, Color3.fromRGB(199, 172, 120)) then
-                return "Iron", part
-            end
+    elseif #meshes == 2 then
+        local c1, c2 = meshes[1].Color, meshes[2].Color
+        if (matchColor(c1, oreColors.Iron[1]) and matchColor(c2, oreColors.Iron[2])) or (matchColor(c1, oreColors.Iron[2]) and matchColor(c2, oreColors.Iron[1])) then
+            return "Iron", meshes[1]
+        elseif (matchColor(c1, oreColors.Nitrate[1]) and matchColor(c2, oreColors.Nitrate[2])) or (matchColor(c1, oreColors.Nitrate[2]) and matchColor(c2, oreColors.Nitrate[1])) then
+            return "Nitrate", meshes[1]
         end
     end
-
     return nil, nil
 end
 
 -- Register an ore drawing unconditionally once identified.
--- Visibility is controlled per-frame in RenderStepped based on OreESPConfig flags.
+-- Visibility is controlled per-frame in RenderStepped based on OreESPConfig flags,
+-- so ores that were scanned before the toggle was enabled will still appear.
 local function registerOre(m)
     if oreCache[m] then return end
     local oType, oPart = identifyOre(m)
-    if not oType or not oPart then return end
+    if not oType then return end
     local txt = newDrawing("Text")
     txt.Size = 13
     txt.Center = true
@@ -1107,7 +1243,7 @@ trackConnection(RunService.RenderStepped:Connect(function()
                 d.Text.Visible = false
             end
         else
-            pcall(function() d.Text:Remove() end)
+            d.Text:Remove()
             oreCache[model] = nil
         end
     end
@@ -1118,308 +1254,6 @@ _G.OnToggle("Iron Esp", function(s) OreESPConfig.Iron = s end)
 _G.OnToggle("Nitrate Esp", function(s) OreESPConfig.Nitrate = s end)
 _G.OnToggle("Show Distance", function(s) OreESPConfig.ShowDistance = s end)
 _G.OnSlider("Ore Distance Esp", function(v) OreESPConfig.RenderDistance = v end)
-
---//==================================================
---// DEPLOYABLE & ENTITY OBJECT ESP (Crates, Workbenches, Furnaces, Beds, Traps)
---//==================================================
-
-local DeployableESP_Config = {
-    Enabled = false,
-    Workbenches = false,
-    Crates = false,
-    Furnaces = false,
-    Beds = false,
-    Traps = false,
-    ShowDistance = true,
-    RenderDistance = 600,
-}
-local DeployableESP_Cache = {}
-local enttiyidentification = {}
-
-local function cleanDisplayName(name)
-    local formatted = name:gsub("(%l)(%u)", "%1 %2"):gsub("(%a)(%d)", "%1 %2")
-    return formatted
-end
-
-local function isTreeClutter(name)
-    if type(name) ~= "string" then return true end
-    local lower = name:lower()
-    return lower == "partbox" or lower:find("partbox") ~= nil or lower:find("part_box") ~= nil or lower == "tree"
-end
-
-local function classifyDeployableName(rawName)
-    if isTreeClutter(rawName) then return nil, nil, nil end
-    local lower = rawName:lower():gsub("[^%a%d]", "")
-
-    -- Workbenches
-    if lower:find("workbench") or lower:find("research") or lower:find("repair") or lower:find("bench") then
-        return "Workbenches", cleanDisplayName(rawName), Color3.fromRGB(215, 120, 255)
-    end
-
-    -- Crates & Storage
-    if lower:find("smallbox") then
-        return "Crates", "Small Box", Color3.fromRGB(80, 200, 255)
-    elseif lower:find("largebox") then
-        return "Crates", "Large Box", Color3.fromRGB(80, 200, 255)
-    elseif lower:find("crate") or lower:find("chest") or lower:find("storage") or lower:find("box") then
-        return "Crates", cleanDisplayName(rawName), Color3.fromRGB(80, 200, 255)
-    end
-
-    -- Furnaces & Campfires
-    if lower:find("furnace") or lower:find("campfire") or lower:find("fire") or lower:find("bbq") or lower:find("barbecue") then
-        return "Furnaces", cleanDisplayName(rawName), Color3.fromRGB(255, 145, 50)
-    end
-
-    -- Beds & Sleeping Bags
-    if lower:find("sleepingbag") or lower:find("bed") or lower:find("bag") then
-        return "Beds", cleanDisplayName(rawName), Color3.fromRGB(110, 255, 130)
-    end
-
-    -- Traps & Defenses
-    if lower:find("turret") or lower:find("trap") or lower:find("mine") or lower:find("spike") then
-        return "Traps", cleanDisplayName(rawName), Color3.fromRGB(255, 70, 70)
-    end
-
-    return nil, nil, nil
-end
-
-local function colorsMatch(c1, c2)
-    if c1 == c2 then return true end
-    return math.abs(c1.R - c2.R) < 0.03 and math.abs(c1.G - c2.G) < 0.03 and math.abs(c1.B - c2.B) < 0.03
-end
-
-local function populateEntityIdentification()
-    local shared = ReplicatedStorage:FindFirstChild("Shared")
-    local entities = shared and shared:FindFirstChild("entities")
-    if not entities then return end
-
-    for _, v in ipairs(entities:GetChildren()) do
-        if v.Name ~= "Player" and v.Name ~= "NPC" and v.Name ~= "vehicles" and not isTreeClutter(v.Name) then
-            local model = v:FindFirstChild("Model") or (v:IsA("Model") and v)
-            if model and model.PrimaryPart then
-                enttiyidentification[v.Name] = {
-                    CollisionGroup = model.PrimaryPart.CollisionGroup,
-                    Material = model.PrimaryPart.Material,
-                    Color = model.PrimaryPart.Color
-                }
-            end
-        end
-    end
-end
-pcall(populateEntityIdentification)
-
-local function getAnchorPart(model)
-    if model.PrimaryPart then return model.PrimaryPart end
-    local main = model:FindFirstChild("Main")
-    if main and main:IsA("BasePart") then return main end
-    local hitbox = model:FindFirstChild("Hitbox")
-    if hitbox and hitbox:IsA("BasePart") then return hitbox end
-    for _, desc in ipairs(model:GetDescendants()) do
-        if desc:IsA("BasePart") then return desc end
-    end
-    return nil
-end
-
-local function identifyDeployable(model)
-    if not model or model.ClassName ~= "Model" then return false, false end
-    if isTreeClutter(model.Name) then return false, false end
-    if model.Name == "Player" or (model:FindFirstChild("Head") and (model:FindFirstChild("Torso") or model:FindFirstChild("LowerTorso"))) then
-        return false, false
-    end
-    if model == LocalPlayer.Character or Players:GetPlayerFromCharacter(model) then
-        return false, false
-    end
-
-    local anchorPart = getAnchorPart(model)
-    if not anchorPart then return false, false end
-
-    -- 1. Direct Name Classification
-    local directCategory, directDisplay, directColor = classifyDeployableName(model.Name)
-    if directCategory then
-        return {
-            Name = model.Name,
-            DisplayName = directDisplay,
-            Category = directCategory,
-            Color = directColor,
-        }, anchorPart
-    end
-
-    -- 2. Parent Name Classification
-    if model.Parent and model.Parent ~= Workspace and not isTreeClutter(model.Parent.Name) then
-        local pCategory, pDisplay, pColor = classifyDeployableName(model.Parent.Name)
-        if pCategory then
-            return {
-                Name = model.Parent.Name,
-                DisplayName = pDisplay,
-                Category = pCategory,
-                Color = pColor,
-            }, anchorPart
-        end
-    end
-
-    -- 3. Match against ReplicatedStorage entity signatures
-    for name, entity in pairs(enttiyidentification) do
-        if not isTreeClutter(name) and entity.Material == anchorPart.Material and colorsMatch(entity.Color, anchorPart.Color) then
-            local cat, disp, col = classifyDeployableName(name)
-            if cat then
-                return {
-                    Name = name,
-                    DisplayName = disp,
-                    Category = cat,
-                    Color = col,
-                }, anchorPart
-            end
-        end
-    end
-
-    return false, false
-end
-
-local function registerDeployable(model)
-    local ok = pcall(function()
-        if not model or DeployableESP_Cache[model] then return end
-        local sig, anchorPart = identifyDeployable(model)
-        if not sig or not anchorPart then return end
-
-        local txt = newDrawing("Text")
-        txt.Size = 13
-        txt.Center = true
-        txt.Outline = true
-        txt.OutlineColor = Color3.fromRGB(0, 0, 0)
-        txt.Color = sig.Color
-        txt.Transparency = 1
-        txt.Visible = false
-
-        DeployableESP_Cache[model] = {
-            Drawing = txt,
-            Signature = sig,
-            Part = anchorPart,
-        }
-
-        trackConnection(model.Destroying:Connect(function()
-            local entry = DeployableESP_Cache[model]
-            if entry then
-                pcall(function() entry.Drawing:Remove() end)
-                DeployableESP_Cache[model] = nil
-            end
-        end))
-    end)
-end
-
-local function anyDeployableESPEnabled()
-    return DeployableESP_Config.Enabled
-        or DeployableESP_Config.Workbenches
-        or DeployableESP_Config.Crates
-        or DeployableESP_Config.Furnaces
-        or DeployableESP_Config.Beds
-        or DeployableESP_Config.Traps
-end
-
-local function isCategoryActive(cat)
-    if DeployableESP_Config[cat] == true then return true end
-    if DeployableESP_Config.Enabled == true then
-        local anySub = DeployableESP_Config.Workbenches or DeployableESP_Config.Crates
-            or DeployableESP_Config.Furnaces or DeployableESP_Config.Beds or DeployableESP_Config.Traps
-        if not anySub then return true end
-    end
-    return false
-end
-
-local function scanDeployableContainer(parent)
-    if not parent then return end
-    pcall(function()
-        for _, child in ipairs(parent:GetChildren()) do
-            if child:IsA("Model") then
-                registerDeployable(child)
-            elseif child:IsA("Folder") or child.Name == "Const" then
-                for _, sub in ipairs(child:GetChildren()) do
-                    if sub:IsA("Model") then
-                        registerDeployable(sub)
-                    elseif sub:IsA("Folder") then
-                        for _, sub2 in ipairs(sub:GetChildren()) do
-                            if sub2:IsA("Model") then registerDeployable(sub2) end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
-
-trackTask(task.spawn(function()
-    while true do
-        if anyDeployableESPEnabled() then
-            if not next(enttiyidentification) then pcall(populateEntityIdentification) end
-            scanDeployableContainer(Workspace)
-        end
-        for model, entry in pairs(DeployableESP_Cache) do
-            if not model.Parent then
-                pcall(function() entry.Drawing:Remove() end)
-                DeployableESP_Cache[model] = nil
-            end
-        end
-        task.wait(2)
-    end
-end))
-
-trackConnection(Workspace.DescendantAdded:Connect(function(desc)
-    if desc:IsA("Model") and anyDeployableESPEnabled() then
-        task.wait(0.1)
-        registerDeployable(desc)
-    end
-end))
-
-trackConnection(RunService.RenderStepped:Connect(function()
-    if not anyDeployableESPEnabled() then
-        for _, entry in pairs(DeployableESP_Cache) do
-            entry.Drawing.Visible = false
-        end
-        return
-    end
-
-    local camPos = Camera and Camera.CFrame and Camera.CFrame.Position
-    if not camPos then return end
-
-    for model, entry in pairs(DeployableESP_Cache) do
-        if entry.Part and entry.Part.Parent then
-            local sig = entry.Signature
-            if isCategoryActive(sig.Category) then
-                local dist = (camPos - entry.Part.Position).Magnitude
-                if dist <= DeployableESP_Config.RenderDistance then
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(entry.Part.Position)
-                    if onScreen and screenPos.Z > 0 then
-                        if DeployableESP_Config.ShowDistance then
-                            entry.Drawing.Text = string.format("%s | %.0fm", sig.DisplayName, dist)
-                        else
-                            entry.Drawing.Text = sig.DisplayName
-                        end
-                        entry.Drawing.Position = Vector2.new(screenPos.X, screenPos.Y)
-                        entry.Drawing.Visible = true
-                    else
-                        entry.Drawing.Visible = false
-                    end
-                else
-                    entry.Drawing.Visible = false
-                end
-            else
-                entry.Drawing.Visible = false
-            end
-        else
-            pcall(function() entry.Drawing:Remove() end)
-            DeployableESP_Cache[model] = nil
-        end
-    end
-end))
-
-_G.OnToggle("Deployable ESP", function(s) DeployableESP_Config.Enabled = s end)
-_G.OnToggle("Workbench ESP", function(s) DeployableESP_Config.Workbenches = s end)
-_G.OnToggle("Crate ESP", function(s) DeployableESP_Config.Crates = s end)
-_G.OnToggle("Furnace ESP", function(s) DeployableESP_Config.Furnaces = s end)
-_G.OnToggle("Bed ESP", function(s) DeployableESP_Config.Beds = s end)
-_G.OnToggle("Trap ESP", function(s) DeployableESP_Config.Traps = s end)
-_G.OnToggle("Show Deployable Distance", function(s) DeployableESP_Config.ShowDistance = s end)
-_G.OnSlider("Deployable Distance", function(v) DeployableESP_Config.RenderDistance = v end)
-
 
 --//==================================================
 --// VEHICLE ESP
@@ -2607,7 +2441,7 @@ if _G.AtomwareConfig then
             end
         end)
 
-        for _, cache in ipairs({ espCache, ItemCache, CorpseCache, RaidCache, AirdropCache, oreCache, DeployableESP_Cache, VehicleESP_Cache }) do
+        for _, cache in ipairs({ espCache, ItemCache, CorpseCache, RaidCache, AirdropCache, oreCache, VehicleESP_Cache }) do
             table.clear(cache)
         end
         for _, drawing in ipairs(OwnedDrawings) do
