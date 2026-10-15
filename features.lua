@@ -165,17 +165,45 @@ _G.OnSlider("Head Transparency", function(v) headTransparency = v end)
 local ESP_Master = false
 local ESP_Box = false
 local ESP_BoxFill = false
+local ESP_HealthBar = false
 local ESP_Distance = false
 local ESP_Type = false
 local ESP_SleeperCheck = false
 local ESP_Weapon = false
 local ESP_Skeleton = false
+local ESP_Snaplines = false
+local ESP_HeadDot = false
+local ESP_OffscreenArrows = false
+local ESP_LookTracers = false
+local ESP_MaxDistance = 1500
 
 local Color_Box = Color3.fromRGB(255, 255, 255)
 local Color_BoxFill = Color3.fromRGB(255, 0, 0)
 local BoxFill_Transparency = 0.3
 local Color_Skeleton = Color3.fromRGB(255, 255, 255)
 local Color_Text = Color3.fromRGB(255, 255, 255)
+local Color_Snaplines = Color3.fromRGB(255, 255, 255)
+local Snapline_Origin = "Bottom"
+local Color_HeadDot = Color3.fromRGB(255, 50, 50)
+local HeadDot_Radius = 4
+local Color_LookTracer = Color3.fromRGB(255, 120, 0)
+local LookTracer_Length = 8
+local Color_OffscreenArrows = Color3.fromRGB(255, 50, 50)
+local Offscreen_Size = 14
+local Offscreen_Radius = 240
+local Offscreen_MaxDistance = 600
+
+-- Target Info HUD
+local TargetInfo_Enabled = false
+local TargetInfo_FOV = 250
+local targetInfoGui = nil
+local targetInfoCard = nil
+local targetNameLabel = nil
+local targetWeaponLabel = nil
+local targetDistanceLabel = nil
+local targetHealthBarFill = nil
+local targetHealthText = nil
+local targetArmorLabel = nil
 
 local espCache = {}
 local cachedWeapons = {}
@@ -221,12 +249,37 @@ local function getPlayerParts(model)
 end
 
 local function isPlayerModel(model)
+    if not model or not model:IsA("Model") then return false end
+    if Players:GetPlayerFromCharacter(model) then return true end
     local torso = model:FindFirstChild("Torso")
-    return torso and torso:FindFirstChild("LeftBooster") ~= nil
+    if torso and torso:FindFirstChild("LeftBooster") ~= nil then return true end
+    if model:FindFirstChild("HandModel") then return true end
+    return false
+end
+
+local function isPlayerWhitelisted(model, name)
+    if not _G.AtomwareWhitelist then return false end
+    if name and _G.AtomwareWhitelist[name] then return true end
+    local p = Players:GetPlayerFromCharacter(model)
+    if p then
+        if _G.AtomwareWhitelist[p.Name] or _G.AtomwareWhitelist[tostring(p.UserId)] or _G.AtomwareWhitelist[p.DisplayName] then
+            return true
+        end
+    end
+    if model and _G.AtomwareWhitelist[model.Name] then return true end
+    return false
 end
 
 local function isCharacterBodyPart(name)
     return name == "Head" or name:find("Torso") or name:find("Leg") or name:find("Arm") or name:find("Foot") or name:find("Hand")
+end
+
+local function getHealthColor(percent)
+    if percent >= 0.5 then
+        return Color3.fromRGB(255, 230, 0):Lerp(Color3.fromRGB(0, 255, 100), (percent - 0.5) * 2)
+    else
+        return Color3.fromRGB(255, 30, 30):Lerp(Color3.fromRGB(255, 230, 0), percent * 2)
+    end
 end
 
 local function calculateCornersSimple(head, torso)
@@ -336,6 +389,126 @@ local function detectWeapon(model)
     return bestMatch
 end
 
+local function createTargetInfoHUD()
+    if targetInfoGui then return end
+    local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not pGui then return end
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "AtomwareTargetHUD"
+    sg.ResetOnSpawn = false
+    sg.DisplayOrder = 95
+    sg.Parent = pGui
+    targetInfoGui = sg
+
+    local card = Instance.new("Frame")
+    card.Name = "Card"
+    card.AnchorPoint = Vector2.new(0.5, 0)
+    card.Position = UDim2.new(0.5, 0, 0.72, 0)
+    card.Size = UDim2.fromOffset(240, 84)
+    card.BackgroundColor3 = Color3.fromRGB(15, 17, 24)
+    card.BorderSizePixel = 0
+    card.Visible = false
+    card.Parent = sg
+    targetInfoCard = card
+
+    local cCorner = Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 8)
+    cCorner.Parent = card
+
+    local cStroke = Instance.new("UIStroke")
+    cStroke.Color = Color3.fromRGB(205, 104, 255)
+    cStroke.Thickness = 1.5
+    cStroke.Parent = card
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 6)
+    pad.PaddingBottom = UDim.new(0, 6)
+    pad.PaddingLeft = UDim.new(0, 10)
+    pad.PaddingRight = UDim.new(0, 10)
+    pad.Parent = card
+
+    targetNameLabel = Instance.new("TextLabel")
+    targetNameLabel.Size = UDim2.new(1, 0, 0, 18)
+    targetNameLabel.BackgroundTransparency = 1
+    targetNameLabel.Text = "Target: None"
+    targetNameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    targetNameLabel.TextSize = 12
+    targetNameLabel.Font = Enum.Font.GothamBold
+    targetNameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    targetNameLabel.Parent = card
+
+    local hbBg = Instance.new("Frame")
+    hbBg.Size = UDim2.new(1, 0, 0, 10)
+    hbBg.Position = UDim2.new(0, 0, 0, 24)
+    hbBg.BackgroundColor3 = Color3.fromRGB(30, 32, 44)
+    hbBg.BorderSizePixel = 0
+    hbBg.Parent = card
+    local hbCorner = Instance.new("UICorner")
+    hbCorner.CornerRadius = UDim.new(0, 4)
+    hbCorner.Parent = hbBg
+
+    targetHealthBarFill = Instance.new("Frame")
+    targetHealthBarFill.Size = UDim2.new(1, 0, 1, 0)
+    targetHealthBarFill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+    targetHealthBarFill.BorderSizePixel = 0
+    targetHealthBarFill.Parent = hbBg
+    local hbfCorner = Instance.new("UICorner")
+    hbfCorner.CornerRadius = UDim.new(0, 4)
+    hbfCorner.Parent = targetHealthBarFill
+
+    targetHealthText = Instance.new("TextLabel")
+    targetHealthText.Size = UDim2.new(1, 0, 1, 0)
+    targetHealthText.BackgroundTransparency = 1
+    targetHealthText.Text = "100 / 100"
+    targetHealthText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    targetHealthText.TextSize = 9
+    targetHealthText.Font = Enum.Font.GothamBold
+    targetHealthText.Parent = hbBg
+
+    targetWeaponLabel = Instance.new("TextLabel")
+    targetWeaponLabel.Size = UDim2.new(0.65, 0, 0, 16)
+    targetWeaponLabel.Position = UDim2.new(0, 0, 0, 40)
+    targetWeaponLabel.BackgroundTransparency = 1
+    targetWeaponLabel.Text = "Weapon: None"
+    targetWeaponLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    targetWeaponLabel.TextSize = 10
+    targetWeaponLabel.Font = Enum.Font.Gotham
+    targetWeaponLabel.TextXAlignment = Enum.TextXAlignment.Left
+    targetWeaponLabel.Parent = card
+
+    targetDistanceLabel = Instance.new("TextLabel")
+    targetDistanceLabel.Size = UDim2.new(0.35, 0, 0, 16)
+    targetDistanceLabel.Position = UDim2.new(0.65, 0, 0, 40)
+    targetDistanceLabel.BackgroundTransparency = 1
+    targetDistanceLabel.Text = "0m"
+    targetDistanceLabel.TextColor3 = Color3.fromRGB(205, 104, 255)
+    targetDistanceLabel.TextSize = 10
+    targetDistanceLabel.Font = Enum.Font.GothamBold
+    targetDistanceLabel.TextXAlignment = Enum.TextXAlignment.Right
+    targetDistanceLabel.Parent = card
+
+    targetArmorLabel = Instance.new("TextLabel")
+    targetArmorLabel.Size = UDim2.new(1, 0, 0, 14)
+    targetArmorLabel.Position = UDim2.new(0, 0, 0, 58)
+    targetArmorLabel.BackgroundTransparency = 1
+    targetArmorLabel.Text = "Armor: None"
+    targetArmorLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
+    targetArmorLabel.TextSize = 9
+    targetArmorLabel.Font = Enum.Font.Gotham
+    targetArmorLabel.TextXAlignment = Enum.TextXAlignment.Left
+    targetArmorLabel.Parent = card
+end
+
+if _G.AtomwareConfig then
+    _G.AtomwareConfig:OnUnload(function()
+        if targetInfoGui then
+            pcall(function() targetInfoGui:Destroy() end)
+            targetInfoGui = nil
+        end
+    end)
+end
+
 local function registerESP(model)
     if espCache[model] then return end
     -- Never draw ESP on the local player's own character
@@ -365,6 +538,55 @@ local function registerESP(model)
     boxFill.Visible = false
     boxFill.ZIndex = -2
 
+    local healthBarOutline = newDrawing("Square")
+    healthBarOutline.Thickness = 1
+    healthBarOutline.Filled = false
+    healthBarOutline.Color = Color3.fromRGB(0, 0, 0)
+    healthBarOutline.Visible = false
+
+    local healthBarBg = newDrawing("Square")
+    healthBarBg.Thickness = 0
+    healthBarBg.Filled = true
+    healthBarBg.Color = Color3.fromRGB(30, 30, 30)
+    healthBarBg.Transparency = 0.5
+    healthBarBg.Visible = false
+
+    local healthBar = newDrawing("Square")
+    healthBar.Thickness = 0
+    healthBar.Filled = true
+    healthBar.Color = Color3.fromRGB(0, 255, 100)
+    healthBar.Visible = false
+
+    local snapline = newDrawing("Line")
+    snapline.Thickness = 1.5
+    snapline.Color = Color_Snaplines
+    snapline.Visible = false
+
+    local headDot = newDrawing("Circle")
+    headDot.Radius = HeadDot_Radius
+    headDot.Filled = true
+    headDot.NumSides = 24
+    headDot.Color = Color_HeadDot
+    headDot.Visible = false
+
+    local lookTracer = newDrawing("Line")
+    lookTracer.Thickness = 1.5
+    lookTracer.Color = Color_LookTracer
+    lookTracer.Visible = false
+
+    local offscreenArrow = newDrawing("Triangle")
+    offscreenArrow.Filled = true
+    offscreenArrow.Color = Color_OffscreenArrows
+    offscreenArrow.Visible = false
+
+    local offscreenText = newDrawing("Text")
+    offscreenText.Size = 12
+    offscreenText.Center = true
+    offscreenText.Outline = true
+    offscreenText.OutlineColor = Color3.fromRGB(0, 0, 0)
+    offscreenText.Color = Color_OffscreenArrows
+    offscreenText.Visible = false
+
     local txt = newDrawing("Text")
     txt.Size = 14
     txt.Center = true
@@ -389,8 +611,12 @@ local function registerESP(model)
     end
 
     espCache[model] = {
-        box = box, outline = outline, boxFill = boxFill, text = txt,
-        weaponText = weaponTxt, head = head, torso = torso,
+        box = box, outline = outline, boxFill = boxFill,
+        healthBarOutline = healthBarOutline, healthBarBg = healthBarBg, healthBar = healthBar,
+        snapline = snapline, headDot = headDot, lookTracer = lookTracer,
+        offscreenArrow = offscreenArrow, offscreenText = offscreenText,
+        text = txt, weaponText = weaponTxt,
+        head = head, torso = torso,
         skeletonLines = skelLines
     }
 
@@ -407,6 +633,14 @@ local function registerESP(model)
         pcall(function() box:Remove() end)
         pcall(function() outline:Remove() end)
         pcall(function() boxFill:Remove() end)
+        pcall(function() healthBarOutline:Remove() end)
+        pcall(function() healthBarBg:Remove() end)
+        pcall(function() healthBar:Remove() end)
+        pcall(function() snapline:Remove() end)
+        pcall(function() headDot:Remove() end)
+        pcall(function() lookTracer:Remove() end)
+        pcall(function() offscreenArrow:Remove() end)
+        pcall(function() offscreenText:Remove() end)
         pcall(function() txt:Remove() end)
         pcall(function() weaponTxt:Remove() end)
         for _, l in ipairs(skelLines) do pcall(function() l.line:Remove() end) end
@@ -429,6 +663,14 @@ trackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
         pcall(function() d.box:Remove() end)
         pcall(function() d.outline:Remove() end)
         if d.boxFill then pcall(function() d.boxFill:Remove() end) end
+        if d.healthBarOutline then pcall(function() d.healthBarOutline:Remove() end) end
+        if d.healthBarBg then pcall(function() d.healthBarBg:Remove() end) end
+        if d.healthBar then pcall(function() d.healthBar:Remove() end) end
+        if d.snapline then pcall(function() d.snapline:Remove() end) end
+        if d.headDot then pcall(function() d.headDot:Remove() end) end
+        if d.lookTracer then pcall(function() d.lookTracer:Remove() end) end
+        if d.offscreenArrow then pcall(function() d.offscreenArrow:Remove() end) end
+        if d.offscreenText then pcall(function() d.offscreenText:Remove() end) end
         pcall(function() d.text:Remove() end)
         pcall(function() d.weaponText:Remove() end)
         for _, l in ipairs(d.skeletonLines) do pcall(function() l.line:Remove() end) end
@@ -456,29 +698,40 @@ trackTask(task.spawn(function()
     end
 end))
 
+local function hidePlayerDrawings(d)
+    d.box.Visible = false
+    d.outline.Visible = false
+    if d.boxFill then d.boxFill.Visible = false end
+    if d.healthBarOutline then d.healthBarOutline.Visible = false end
+    if d.healthBarBg then d.healthBarBg.Visible = false end
+    if d.healthBar then d.healthBar.Visible = false end
+    if d.snapline then d.snapline.Visible = false end
+    if d.headDot then d.headDot.Visible = false end
+    if d.lookTracer then d.lookTracer.Visible = false end
+    if d.offscreenArrow then d.offscreenArrow.Visible = false end
+    if d.offscreenText then d.offscreenText.Visible = false end
+    d.text.Visible = false
+    d.weaponText.Visible = false
+    for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
+end
+
 trackConnection(RunService.RenderStepped:Connect(function()
     if not ESP_Master then
-        for _, d in pairs(espCache) do
-            d.box.Visible = false
-            d.outline.Visible = false
-            if d.boxFill then d.boxFill.Visible = false end
-            d.text.Visible = false
-            d.weaponText.Visible = false
-            for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
-        end
+        for _, d in pairs(espCache) do hidePlayerDrawings(d) end
+        if targetInfoCard then targetInfoCard.Visible = false end
         return
     end
 
     local camPos = Camera.CFrame.Position
+    local screenCenter = Camera.ViewportSize * 0.5
+    local bestTargetModel = nil
+    local bestTargetDist = math.huge
+    local bestTargetData = nil
+
     for model, d in pairs(espCache) do
         -- Skip local player's own character
         if model == LocalPlayer.Character or Players:GetPlayerFromCharacter(model) == LocalPlayer then
-            d.box.Visible = false
-            d.outline.Visible = false
-            if d.boxFill then d.boxFill.Visible = false end
-            d.text.Visible = false
-            d.weaponText.Visible = false
-            for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
+            hidePlayerDrawings(d)
             continue
         end
         local valid = true
@@ -507,24 +760,72 @@ trackConnection(RunService.RenderStepped:Connect(function()
         if valid then
             local mid = (head.Position + torso.Position) * 0.5
             dist = (mid - camPos).Magnitude
-            if dist >= 3000 then valid = false end
+            if dist > ESP_MaxDistance then valid = false end
         end
 
         local corners = nil
         if valid then
             corners = calculateCorners(model, head, torso)
-            if not corners then valid = false end
         end
+
+        local cachedName = playerMemory[model]
+        local isWhitelisted = isPlayerWhitelisted(model, cachedName)
 
         if not valid or not corners then
             d.box.Visible = false
             d.outline.Visible = false
             if d.boxFill then d.boxFill.Visible = false end
+            if d.healthBarOutline then d.healthBarOutline.Visible = false end
+            if d.healthBarBg then d.healthBarBg.Visible = false end
+            if d.healthBar then d.healthBar.Visible = false end
+            if d.snapline then d.snapline.Visible = false end
+            if d.headDot then d.headDot.Visible = false end
+            if d.lookTracer then d.lookTracer.Visible = false end
             d.text.Visible = false
             d.weaponText.Visible = false
             for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
+
+            -- Off-Screen Arrow when outside viewport bounds (not for whitelisted players)
+            if valid and ESP_OffscreenArrows and not isWhitelisted and head and head.Parent and dist <= Offscreen_MaxDistance then
+                local camCF = Camera.CFrame
+                local toTarget = (head.Position - camCF.Position).Unit
+                local right = camCF.RightVector
+                local up = camCF.UpVector
+
+                local x = right:Dot(toTarget)
+                local y = -up:Dot(toTarget)
+                local angle = math.atan2(y, x)
+
+                local arrowPos = screenCenter + Vector2.new(math.cos(angle), math.sin(angle)) * Offscreen_Radius
+
+                local arrowSize = Offscreen_Size
+                local tip = arrowPos + Vector2.new(math.cos(angle), math.sin(angle)) * arrowSize
+                local leftPt = arrowPos + Vector2.new(math.cos(angle + 2.3), math.sin(angle + 2.3)) * (arrowSize * 0.65)
+                local rightPt = arrowPos + Vector2.new(math.cos(angle - 2.3), math.sin(angle - 2.3)) * (arrowSize * 0.65)
+
+                d.offscreenArrow.PointA = tip
+                d.offscreenArrow.PointB = leftPt
+                d.offscreenArrow.PointC = rightPt
+                d.offscreenArrow.Color = Color_OffscreenArrows
+                d.offscreenArrow.Filled = true
+                d.offscreenArrow.Visible = true
+
+                d.offscreenText.Text = math.floor(dist) .. "m"
+                d.offscreenText.Color = Color_OffscreenArrows
+                d.offscreenText.Position = arrowPos + Vector2.new(math.cos(angle), math.sin(angle)) * (arrowSize + 12) - Vector2.new(0, 6)
+                d.offscreenText.Visible = true
+            else
+                if d.offscreenArrow then d.offscreenArrow.Visible = false end
+                if d.offscreenText then d.offscreenText.Visible = false end
+            end
         else
+            -- On-Screen: hide off-screen indicators
+            if d.offscreenArrow then d.offscreenArrow.Visible = false end
+            if d.offscreenText then d.offscreenText.Visible = false end
+
             local isPlayer = isPlayerModel(model)
+            local currentBoxColor = isWhitelisted and Color3.fromRGB(50, 255, 120) or (isPlayer and Color_Box or Color3.fromRGB(0, 150, 255))
+            local currentTextColor = isWhitelisted and Color3.fromRGB(180, 255, 200) or (isPlayer and Color_Text or Color3.fromRGB(0, 150, 255))
 
             if ESP_Box then
                 d.outline.Size = Vector2.new(corners.width + 2, corners.height + 2)
@@ -533,13 +834,13 @@ trackConnection(RunService.RenderStepped:Connect(function()
 
                 d.box.Size = Vector2.new(corners.width, corners.height)
                 d.box.Position = corners.topLeft
-                d.box.Color = isPlayer and Color_Box or Color3.fromRGB(0, 150, 255)
+                d.box.Color = currentBoxColor
                 d.box.Visible = true
 
                 if ESP_BoxFill and d.boxFill then
                     d.boxFill.Size = d.box.Size
                     d.boxFill.Position = d.box.Position
-                    d.boxFill.Color = Color_BoxFill
+                    d.boxFill.Color = isWhitelisted and Color3.fromRGB(30, 120, 60) or Color_BoxFill
                     d.boxFill.Transparency = BoxFill_Transparency
                     d.boxFill.Visible = true
                 elseif d.boxFill then
@@ -551,8 +852,116 @@ trackConnection(RunService.RenderStepped:Connect(function()
                 if d.boxFill then d.boxFill.Visible = false end
             end
 
+            -- Health Bar
+            local hum = model:FindFirstChildOfClass("Humanoid")
+            local hp = 1
+            local curHp, maxHp = 100, 100
+            if hum and hum.MaxHealth > 0 then
+                curHp = math.floor(hum.Health)
+                maxHp = math.floor(hum.MaxHealth)
+                hp = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+            elseif model:GetAttribute("Health") and model:GetAttribute("MaxHealth") then
+                curHp = math.floor(model:GetAttribute("Health"))
+                maxHp = math.floor(model:GetAttribute("MaxHealth"))
+                hp = math.clamp(curHp / maxHp, 0, 1)
+            end
+
+            if ESP_HealthBar then
+                local barX = corners.topLeft.X - 6
+                local barY = corners.topLeft.Y
+                local barW = 3
+                local barH = corners.height
+
+                d.healthBarOutline.Position = Vector2.new(barX - 1, barY - 1)
+                d.healthBarOutline.Size = Vector2.new(barW + 2, barH + 2)
+                d.healthBarOutline.Visible = true
+
+                d.healthBarBg.Position = Vector2.new(barX, barY)
+                d.healthBarBg.Size = Vector2.new(barW, barH)
+                d.healthBarBg.Visible = true
+
+                local fillH = math.max(1, math.floor(barH * hp))
+                d.healthBar.Position = Vector2.new(barX, barY + (barH - fillH))
+                d.healthBar.Size = Vector2.new(barW, fillH)
+                d.healthBar.Color = getHealthColor(hp)
+                d.healthBar.Visible = true
+            else
+                if d.healthBarOutline then d.healthBarOutline.Visible = false end
+                if d.healthBarBg then d.healthBarBg.Visible = false end
+                if d.healthBar then d.healthBar.Visible = false end
+            end
+
+            local midX = math.floor(corners.topLeft.X + corners.width * 0.5)
+
+            -- Snaplines (Tracers)
+            if ESP_Snaplines then
+                local origin = (Snapline_Origin == "Center")
+                    and screenCenter
+                    or Vector2.new(Camera.ViewportSize.X * 0.5, Camera.ViewportSize.Y)
+                d.snapline.From = origin
+                d.snapline.To = Vector2.new(midX, corners.bottomLeft.Y)
+                d.snapline.Color = isWhitelisted and Color3.fromRGB(50, 255, 120) or Color_Snaplines
+                d.snapline.Visible = true
+            else
+                if d.snapline then d.snapline.Visible = false end
+            end
+
+            -- Head Dot
+            if ESP_HeadDot then
+                local headPos2D, headOnScreen = Camera:WorldToViewportPoint(head.Position)
+                if headOnScreen and headPos2D.Z > 0.1 then
+                    d.headDot.Position = Vector2.new(headPos2D.X, headPos2D.Y)
+                    d.headDot.Radius = HeadDot_Radius
+                    d.headDot.Color = isWhitelisted and Color3.fromRGB(50, 255, 120) or Color_HeadDot
+                    d.headDot.Visible = true
+                else
+                    if d.headDot then d.headDot.Visible = false end
+                end
+            else
+                if d.headDot then d.headDot.Visible = false end
+            end
+
+            -- Look Tracers (View Vectors)
+            if ESP_LookTracers and head and head.Parent then
+                local startPos = head.Position
+                local endPos = startPos + head.CFrame.LookVector * (LookTracer_Length * 3)
+                local p1, onScreen1 = Camera:WorldToViewportPoint(startPos)
+                local p2, onScreen2 = Camera:WorldToViewportPoint(endPos)
+                if p1.Z > 0.1 and p2.Z > 0.1 and (onScreen1 or onScreen2) then
+                    d.lookTracer.From = Vector2.new(p1.X, p1.Y)
+                    d.lookTracer.To = Vector2.new(p2.X, p2.Y)
+                    d.lookTracer.Color = Color_LookTracer
+                    d.lookTracer.Visible = true
+                else
+                    if d.lookTracer then d.lookTracer.Visible = false end
+                end
+            else
+                if d.lookTracer then d.lookTracer.Visible = false end
+            end
+
+            -- Target Info FOV calculation
+            if TargetInfo_Enabled then
+                local boxCenter = Vector2.new(midX, corners.topLeft.Y + corners.height * 0.5)
+                local sDist = (boxCenter - screenCenter).Magnitude
+                if sDist <= TargetInfo_FOV and sDist < bestTargetDist then
+                    bestTargetDist = sDist
+                    bestTargetModel = model
+                    bestTargetData = {
+                        name = cachedName or (isPlayer and "Player" or "Bot"),
+                        hp = hp,
+                        curHp = curHp,
+                        maxHp = maxHp,
+                        weapon = cachedWeapons[model] or "None",
+                        dist = dist,
+                        isWhitelisted = isWhitelisted
+                    }
+                end
+            end
+
             local lbls = {}
-            local cachedName = playerMemory[model]
+            if isWhitelisted then
+                table.insert(lbls, "[Friend]")
+            end
             if ESP_Type then
                 if cachedName then
                     table.insert(lbls, cachedName)
@@ -568,10 +977,8 @@ trackConnection(RunService.RenderStepped:Connect(function()
             end
             local txtStr = table.concat(lbls, " | ")
 
-            local midX = math.floor(corners.topLeft.X + corners.width * 0.5)
-
             if txtStr ~= "" then
-                d.text.Color = isPlayer and Color_Text or Color3.fromRGB(0, 150, 255)
+                d.text.Color = currentTextColor
                 d.text.Text = txtStr
                 d.text.Position = Vector2.new(midX, corners.topLeft.Y - 16)
                 d.text.Visible = true
@@ -580,7 +987,7 @@ trackConnection(RunService.RenderStepped:Connect(function()
             end
 
             if ESP_Weapon then
-                d.weaponText.Color = isPlayer and Color_Text or Color3.fromRGB(0, 150, 255)
+                d.weaponText.Color = currentTextColor
                 d.weaponText.Text = cachedWeapons[model] or "None"
                 d.weaponText.Position = Vector2.new(midX, corners.bottomLeft.Y + 2)
                 d.weaponText.Visible = true
@@ -598,7 +1005,7 @@ trackConnection(RunService.RenderStepped:Connect(function()
                         if visA and visB and posA.Z > 0.1 and posB.Z > 0.1 then
                             sk.line.From = Vector2.new(posA.X, posA.Y)
                             sk.line.To = Vector2.new(posB.X, posB.Y)
-                            sk.line.Color = Color_Skeleton
+                            sk.line.Color = isWhitelisted and Color3.fromRGB(50, 255, 120) or Color_Skeleton
                             sk.line.Visible = true
                         else
                             sk.line.Visible = false
@@ -612,20 +1019,55 @@ trackConnection(RunService.RenderStepped:Connect(function()
             end
         end
     end
+
+    -- Update Target Info HUD Card
+    if TargetInfo_Enabled and bestTargetData and targetInfoCard then
+        targetNameLabel.Text = (bestTargetData.isWhitelisted and "⭐ " or "") .. bestTargetData.name
+        targetNameLabel.TextColor3 = bestTargetData.isWhitelisted and Color3.fromRGB(50, 255, 120) or Color3.fromRGB(255, 255, 255)
+        targetHealthText.Text = string.format("%d / %d", bestTargetData.curHp, bestTargetData.maxHp)
+        targetHealthBarFill.Size = UDim2.new(bestTargetData.hp, 0, 1, 0)
+        targetHealthBarFill.BackgroundColor3 = getHealthColor(bestTargetData.hp)
+        targetWeaponLabel.Text = "Weapon: " .. bestTargetData.weapon
+        targetDistanceLabel.Text = string.format("%.0fm", bestTargetData.dist)
+        targetInfoCard.Visible = true
+    elseif targetInfoCard then
+        targetInfoCard.Visible = false
+    end
 end))
 
 _G.OnToggle("Enable ESP", function(s) ESP_Master = s end)
 _G.OnToggle("Box Esp", function(s) ESP_Box = s end)
 _G.OnToggle("Box Fill", function(s) ESP_BoxFill = s end)
+_G.OnToggle("Health Bar", function(s) ESP_HealthBar = s end)
 _G.OnToggle("Distance Esp", function(s) ESP_Distance = s end)
 _G.OnToggle("Player/Bot Esp", function(s) ESP_Type = s end)
 _G.OnToggle("Sleeper Check", function(s) ESP_SleeperCheck = s end)
 _G.OnToggle("Weapon Esp", function(s) ESP_Weapon = s end)
 _G.OnToggle("Skeleton Esp", function(s) ESP_Skeleton = s end)
+_G.OnToggle("Snaplines", function(s) ESP_Snaplines = s end)
+_G.OnToggle("Head Dot", function(s) ESP_HeadDot = s end)
+_G.OnToggle("Off-Screen Arrows", function(s) ESP_OffscreenArrows = s end)
+_G.OnToggle("Look Tracers", function(s) ESP_LookTracers = s end)
+_G.OnToggle("Target Info HUD", function(s)
+    TargetInfo_Enabled = s
+    if s then createTargetInfoHUD() elseif targetInfoCard then targetInfoCard.Visible = false end
+end)
 
+_G.OnSlider("Max Player Distance", function(v) ESP_MaxDistance = v end)
 _G.OnColorPicker("Box Color", function(c) Color_Box = c end)
 _G.OnColorPicker("Box Fill Color", function(c) Color_BoxFill = c end)
 _G.OnSlider("Box Fill Transparency", function(v) BoxFill_Transparency = math.clamp(v / 100, 0, 1) end)
+_G.OnColorPicker("Snapline Color", function(c) Color_Snaplines = c end)
+_G.OnDropdown("Snapline Origin", function(v) Snapline_Origin = v end)
+_G.OnColorPicker("Head Dot Color", function(c) Color_HeadDot = c end)
+_G.OnSlider("Head Dot Size", function(v) HeadDot_Radius = v end)
+_G.OnColorPicker("Off-Screen Color", function(c) Color_OffscreenArrows = c end)
+_G.OnSlider("Off-Screen Size", function(v) Offscreen_Size = v end)
+_G.OnSlider("Off-Screen Radius", function(v) Offscreen_Radius = v end)
+_G.OnSlider("Off-Screen Max Distance", function(v) Offscreen_MaxDistance = v end)
+_G.OnColorPicker("Look Tracer Color", function(c) Color_LookTracer = c end)
+_G.OnSlider("Look Tracer Length", function(v) LookTracer_Length = v end)
+_G.OnSlider("Target Info FOV", function(v) TargetInfo_FOV = v end)
 _G.OnColorPicker("Skeleton Color", function(c) Color_Skeleton = c end)
 _G.OnColorPicker("Text Color", function(c) Color_Text = c end)
 

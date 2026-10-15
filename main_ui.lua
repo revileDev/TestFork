@@ -888,11 +888,12 @@ end
 --//==================================================
 
 local tabsData = {
-    { Name = "Visuals",  Icon = "👁️" },
-    { Name = "Combat",   Icon = "🎯" },
-    { Name = "World",    Icon = "🌍" },
-    { Name = "Player",   Icon = "🧍" },
-    { Name = "Settings", Icon = "⚙️" }
+    { Name = "Visuals",   Icon = "👁️" },
+    { Name = "Combat",    Icon = "🎯" },
+    { Name = "World",     Icon = "🌍" },
+    { Name = "Player",    Icon = "🧍" },
+    { Name = "Whitelist", Icon = "🛡️" },
+    { Name = "Settings",  Icon = "⚙️" }
 }
 
 for i, t in ipairs(tabsData) do
@@ -925,11 +926,16 @@ local _, bPlayerESP = createCard(pVisuals, "Player ESP")
 createToggle(bPlayerESP, "Enable ESP", false)
 createToggle(bPlayerESP, "Box Esp", false)
 createToggle(bPlayerESP, "Box Fill", false)
+createToggle(bPlayerESP, "Health Bar", false)
 createToggle(bPlayerESP, "Distance Esp", false)
 createToggle(bPlayerESP, "Player/Bot Esp", false)
 createToggle(bPlayerESP, "Sleeper Check", false)
 createToggle(bPlayerESP, "Weapon Esp", false)
 createToggle(bPlayerESP, "Skeleton Esp", false)
+createToggle(bPlayerESP, "Snaplines", false)
+createToggle(bPlayerESP, "Head Dot", false)
+createToggle(bPlayerESP, "Off-Screen Arrows", false)
+createSlider(bPlayerESP, "Max Player Distance", 50, 3000, 1500, 25, "m")
 
 local _, bESPColors = createCard(pVisuals, "ESP Customization")
 createColorPicker(bESPColors, "Box Color", Color3.fromRGB(255, 255, 255))
@@ -937,6 +943,18 @@ createColorPicker(bESPColors, "Box Fill Color", Color3.fromRGB(255, 0, 0))
 createSlider(bESPColors, "Box Fill Transparency", 0, 100, 30, 5, "%")
 createColorPicker(bESPColors, "Skeleton Color", Color3.fromRGB(255, 255, 255))
 createColorPicker(bESPColors, "Text Color", Color3.fromRGB(255, 255, 255))
+createColorPicker(bESPColors, "Snapline Color", Color3.fromRGB(255, 255, 255))
+createDropdown(bESPColors, "Snapline Origin", { "Bottom", "Center" }, "Bottom")
+createColorPicker(bESPColors, "Head Dot Color", Color3.fromRGB(255, 50, 50))
+createSlider(bESPColors, "Head Dot Size", 1, 15, 4, 1, "px")
+createColorPicker(bESPColors, "Off-Screen Color", Color3.fromRGB(255, 60, 60))
+createSlider(bESPColors, "Off-Screen Size", 6, 35, 14, 1, "px")
+createSlider(bESPColors, "Off-Screen Radius", 80, 500, 200, 10, "px")
+createSlider(bESPColors, "Off-Screen Max Distance", 50, 2500, 500, 25, "m")
+
+local _, bTargetInfo = createCard(pVisuals, "Target Info HUD")
+createToggle(bTargetInfo, "Target Info HUD", false)
+createSlider(bTargetInfo, "Target Info FOV", 50, 600, 250, 10, "px")
 
 local _, bArmorESP = createCard(pVisuals, "Armor ESP")
 createToggle(bArmorESP, "Armor Esp", false)
@@ -1079,8 +1097,213 @@ local _, bLongNeck = createCard(pPlayer, "Long Neck")
 createToggle(bLongNeck, "Long Neck", false)
 createSlider(bLongNeck, "Long Neck Strength", 1, 20, 5, 0.5, "st")
 
+local _, bLookTracers = createCard(pPlayer, "Player Look Tracers")
+createToggle(bLookTracers, "Look Tracers", false)
+createSlider(bLookTracers, "Look Tracer Length", 2, 25, 10, 1, "st")
+createColorPicker(bLookTracers, "Look Tracer Color", Color3.fromRGB(0, 200, 255))
+
 -- ---------------------------------------------------
--- TAB 5: SETTINGS
+-- TAB 5: WHITELIST
+-- ---------------------------------------------------
+local pWhitelist = Pages["Whitelist"]
+_G.AtomwareWhitelist = _G.AtomwareWhitelist or {}
+
+local _, bWhitelistManage = createCard(pWhitelist, "Manage Whitelist")
+
+local wlDesc = Instance.new("TextLabel")
+wlDesc.BackgroundTransparency = 1
+wlDesc.Text = "Whitelisted players are marked with green ESP, show a [Friend] tag, and will not trigger off-screen threat warning arrows."
+wlDesc.Size = UDim2.new(1, 0, 0, 42)
+wlDesc.TextSize = 11
+wlDesc.TextColor3 = THEME.TextMuted
+wlDesc.Font = FONT
+wlDesc.TextXAlignment = Enum.TextXAlignment.Left
+wlDesc.TextWrapped = true
+wlDesc.Parent = bWhitelistManage
+
+local wlInputRow = Instance.new("Frame")
+wlInputRow.Size = UDim2.new(1, 0, 0, 32)
+wlInputRow.BackgroundTransparency = 1
+wlInputRow.Parent = bWhitelistManage
+
+local wlInput = Instance.new("TextBox")
+wlInput.Size = UDim2.new(1, -90, 1, 0)
+wlInput.Position = UDim2.fromOffset(0, 0)
+wlInput.BackgroundColor3 = THEME.CardAlt
+wlInput.TextColor3 = THEME.Text
+wlInput.PlaceholderColor3 = THEME.TextDim
+wlInput.PlaceholderText = "Username or UserID..."
+wlInput.Text = ""
+wlInput.ClearTextOnFocus = false
+wlInput.TextSize = 11
+wlInput.Font = FONT
+wlInput.Parent = wlInputRow
+corner(wlInput, 6)
+stroke(wlInput, THEME.BorderDim, 1)
+
+local wlAddBtn = Instance.new("TextButton")
+wlAddBtn.Size = UDim2.new(0, 84, 1, 0)
+wlAddBtn.Position = UDim2.new(1, -84, 0, 0)
+wlAddBtn.BackgroundColor3 = THEME.Accent
+wlAddBtn.Text = "Add Friend"
+wlAddBtn.TextColor3 = THEME.Text
+wlAddBtn.TextSize = 11
+wlAddBtn.Font = FONT_BOLD
+wlAddBtn.AutoButtonColor = false
+wlAddBtn.Parent = wlInputRow
+corner(wlAddBtn, 6)
+
+local wlStatusLbl = Instance.new("TextLabel")
+wlStatusLbl.BackgroundTransparency = 1
+wlStatusLbl.Text = "Whitelisted entries: 0"
+wlStatusLbl.Size = UDim2.new(1, 0, 0, 20)
+wlStatusLbl.TextSize = 11
+wlStatusLbl.TextColor3 = THEME.AccentBright
+wlStatusLbl.Font = FONT_BOLD
+wlStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+wlStatusLbl.Parent = bWhitelistManage
+
+local wlClearBtn = Instance.new("TextButton")
+wlClearBtn.Size = UDim2.new(1, 0, 0, 28)
+wlClearBtn.BackgroundColor3 = Color3.fromRGB(55, 20, 25)
+wlClearBtn.Text = "Clear Whitelist"
+wlClearBtn.TextColor3 = THEME.Red
+wlClearBtn.TextSize = 11
+wlClearBtn.Font = FONT_BOLD
+wlClearBtn.AutoButtonColor = false
+wlClearBtn.Parent = bWhitelistManage
+corner(wlClearBtn, 6)
+stroke(wlClearBtn, THEME.Red, 1)
+
+local _, bServerPlayers = createCard(pWhitelist, "Server Players")
+
+local refreshBtn = Instance.new("TextButton")
+refreshBtn.Size = UDim2.new(1, 0, 0, 28)
+refreshBtn.BackgroundColor3 = THEME.CardAlt
+refreshBtn.Text = "🔄 Refresh Players List"
+refreshBtn.TextColor3 = THEME.AccentBright
+refreshBtn.TextSize = 11
+refreshBtn.Font = FONT_BOLD
+refreshBtn.AutoButtonColor = false
+refreshBtn.Parent = bServerPlayers
+corner(refreshBtn, 6)
+stroke(refreshBtn, THEME.BorderDim, 1)
+
+local playerListContainer = Instance.new("Frame")
+playerListContainer.Size = UDim2.new(1, 0, 0, 0)
+playerListContainer.AutomaticSize = Enum.AutomaticSize.Y
+playerListContainer.BackgroundTransparency = 1
+playerListContainer.Parent = bServerPlayers
+
+local plLayout = Instance.new("UIListLayout")
+plLayout.Padding = UDim.new(0, 5)
+plLayout.SortOrder = Enum.SortOrder.LayoutOrder
+plLayout.Parent = playerListContainer
+
+local function updateWhitelistCount()
+    local c = 0
+    for _ in pairs(_G.AtomwareWhitelist) do c = c + 1 end
+    wlStatusLbl.Text = "Whitelisted entries: " .. tostring(c)
+end
+
+local function populateServerPlayers()
+    for _, ch in ipairs(playerListContainer:GetChildren()) do
+        if ch:IsA("Frame") or ch:IsA("TextLabel") then ch:Destroy() end
+    end
+    local Players = game:GetService("Players")
+    local lp = Players.LocalPlayer
+    local plist = Players:GetPlayers()
+    local count = 0
+    for _, p in ipairs(plist) do
+        if p ~= lp then
+            count = count + 1
+            local pRow = Instance.new("Frame")
+            pRow.Size = UDim2.new(1, 0, 0, 32)
+            pRow.BackgroundColor3 = THEME.CardAlt
+            pRow.Parent = playerListContainer
+            corner(pRow, 6)
+            stroke(pRow, THEME.BorderDim, 1)
+
+            local pNameLbl = Instance.new("TextLabel")
+            pNameLbl.BackgroundTransparency = 1
+            pNameLbl.Text = " " .. p.DisplayName .. " (@" .. p.Name .. ")"
+            pNameLbl.Size = UDim2.new(1, -95, 1, 0)
+            pNameLbl.TextSize = 11
+            pNameLbl.TextColor3 = THEME.Text
+            pNameLbl.Font = FONT
+            pNameLbl.TextXAlignment = Enum.TextXAlignment.Left
+            pNameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+            pNameLbl.Parent = pRow
+
+            local isWl = _G.AtomwareWhitelist[p.Name] or _G.AtomwareWhitelist[tostring(p.UserId)] or false
+            local pBtn = Instance.new("TextButton")
+            pBtn.Size = UDim2.new(0, 85, 0, 24)
+            pBtn.Position = UDim2.new(1, -89, 0.5, -12)
+            pBtn.BackgroundColor3 = isWl and Color3.fromRGB(30, 100, 50) or THEME.Card
+            pBtn.Text = isWl and "✓ Whitelisted" or "+ Whitelist"
+            pBtn.TextColor3 = isWl and Color3.fromRGB(80, 255, 140) or THEME.TextMuted
+            pBtn.TextSize = 10
+            pBtn.Font = FONT_BOLD
+            pBtn.AutoButtonColor = false
+            pBtn.Parent = pRow
+            corner(pBtn, 4)
+            stroke(pBtn, isWl and Color3.fromRGB(40, 160, 70) or THEME.BorderDim, 1)
+
+            trackConnection(pBtn.MouseButton1Click:Connect(function()
+                if _G.AtomwareWhitelist[p.Name] or _G.AtomwareWhitelist[tostring(p.UserId)] then
+                    _G.AtomwareWhitelist[p.Name] = nil
+                    _G.AtomwareWhitelist[tostring(p.UserId)] = nil
+                    pBtn.Text = "+ Whitelist"
+                    pBtn.BackgroundColor3 = THEME.Card
+                    pBtn.TextColor3 = THEME.TextMuted
+                    stroke(pBtn, THEME.BorderDim, 1)
+                else
+                    _G.AtomwareWhitelist[p.Name] = true
+                    _G.AtomwareWhitelist[tostring(p.UserId)] = true
+                    pBtn.Text = "✓ Whitelisted"
+                    pBtn.BackgroundColor3 = Color3.fromRGB(30, 100, 50)
+                    pBtn.TextColor3 = Color3.fromRGB(80, 255, 140)
+                    stroke(pBtn, Color3.fromRGB(40, 160, 70), 1)
+                end
+                updateWhitelistCount()
+            end))
+        end
+    end
+    if count == 0 then
+        local emptyLbl = Instance.new("TextLabel")
+        emptyLbl.Name = "EmptyLabel"
+        emptyLbl.Size = UDim2.new(1, 0, 0, 24)
+        emptyLbl.BackgroundTransparency = 1
+        emptyLbl.Text = "No other players found in server."
+        emptyLbl.TextColor3 = THEME.TextDim
+        emptyLbl.TextSize = 11
+        emptyLbl.Font = FONT
+        emptyLbl.Parent = playerListContainer
+    end
+    updateWhitelistCount()
+end
+
+trackConnection(wlAddBtn.MouseButton1Click:Connect(function()
+    local text = wlInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
+    if #text > 0 then
+        _G.AtomwareWhitelist[text] = true
+        wlInput.Text = ""
+        populateServerPlayers()
+    end
+end))
+
+trackConnection(wlClearBtn.MouseButton1Click:Connect(function()
+    for k in pairs(_G.AtomwareWhitelist) do
+        _G.AtomwareWhitelist[k] = nil
+    end
+    populateServerPlayers()
+end))
+
+trackConnection(refreshBtn.MouseButton1Click:Connect(populateServerPlayers))
+populateServerPlayers()
+
+-- ---------------------------------------------------
+-- TAB 6: SETTINGS
 -- ---------------------------------------------------
 local pSettings = Pages["Settings"]
 
