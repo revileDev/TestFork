@@ -267,7 +267,8 @@ local function isPlayerWhitelisted(model, name)
 end
 
 local function isCharacterBodyPart(name)
-    return name == "Head" or name:find("Torso") or name:find("Leg") or name:find("Arm") or name:find("Foot") or name:find("Hand")
+    local n = string.lower(name)
+    return n:find("head") ~= nil or n:find("torso") ~= nil or n:find("leg") ~= nil or n:find("arm") ~= nil or n:find("foot") ~= nil or n:find("hand") ~= nil or n:find("root") ~= nil or n:find("limb") ~= nil
 end
 
 local function getHealthColor(percent)
@@ -328,6 +329,31 @@ local function calculateCorners(model, head, torso)
         end
     end
 
+    if count == 0 then
+        local descendants = model:GetDescendants()
+        for i = 1, #descendants do
+            local part = descendants[i]
+            if part:IsA("BasePart") and isCharacterBodyPart(part.Name) then
+                count = count + 1
+                local cf = part.CFrame
+                local sz = part.Size * 0.5
+                local p = cf.Position
+
+                local rx = math.abs(cf.RightVector.X) * sz.X + math.abs(cf.UpVector.X) * sz.Y + math.abs(cf.LookVector.X) * sz.Z
+                local ry = math.abs(cf.RightVector.Y) * sz.X + math.abs(cf.UpVector.Y) * sz.Y + math.abs(cf.LookVector.Y) * sz.Z
+                local rz = math.abs(cf.RightVector.Z) * sz.X + math.abs(cf.UpVector.Z) * sz.Y + math.abs(cf.LookVector.Z) * sz.Z
+
+                if p.X - rx < minX then minX = p.X - rx end
+                if p.Y - ry < minY then minY = p.Y - ry end
+                if p.Z - rz < minZ then minZ = p.Z - rz end
+
+                if p.X + rx > maxX then maxX = p.X + rx end
+                if p.Y + ry > maxY then maxY = p.Y + ry end
+                if p.Z + rz > maxZ then maxZ = p.Z + rz end
+            end
+        end
+    end
+
     if count == 0 then return calculateCornersSimple(head, torso) end
 
     local center = Vector3.new((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
@@ -337,6 +363,7 @@ local function calculateCorners(model, head, torso)
     local screenMinX, screenMinY = math.huge, math.huge
     local screenMaxX, screenMaxY = -math.huge, -math.huge
     local anyOnScreen = false
+    local visiblePoints = 0
 
     for i = 1, #VERTICES_8 do
         local v = VERTICES_8[i]
@@ -346,17 +373,19 @@ local function calculateCorners(model, head, torso)
             center.Z + halfSize.Z * v.Z
         )
         local screen, inBounds = Camera:WorldToViewportPoint(worldPoint)
-        if screen.Z <= 0.1 then
-            return calculateCornersSimple(head, torso)
+        if screen.Z > 0.1 then
+            visiblePoints = visiblePoints + 1
+            if inBounds then anyOnScreen = true end
+            if screen.X < screenMinX then screenMinX = screen.X end
+            if screen.Y < screenMinY then screenMinY = screen.Y end
+            if screen.X > screenMaxX then screenMaxX = screen.X end
+            if screen.Y > screenMaxY then screenMaxY = screen.Y end
         end
-        if inBounds then anyOnScreen = true end
-        if screen.X < screenMinX then screenMinX = screen.X end
-        if screen.Y < screenMinY then screenMinY = screen.Y end
-        if screen.X > screenMaxX then screenMaxX = screen.X end
-        if screen.Y > screenMaxY then screenMaxY = screen.Y end
     end
 
-    if not anyOnScreen then return nil end
+    if visiblePoints < 4 or not anyOnScreen then
+        return calculateCornersSimple(head, torso)
+    end
 
     local w = math.floor(screenMaxX - screenMinX)
     local h = math.floor(screenMaxY - screenMinY)
@@ -518,31 +547,27 @@ local function registerESP(model)
     local head, torso = getPlayerParts(model)
     if not head or not torso then return end
 
-    local box = newDrawing("Square")
-    box.Thickness = 1
-    box.Filled = false
-    box.Color = Color_Box
-    box.Visible = false
-
-    local outline = newDrawing("Square")
-    outline.Thickness = 1
-    outline.Filled = false
-    outline.Color = Color3.fromRGB(0, 0, 0)
-    outline.Visible = false
-
     local boxFill = newDrawing("Square")
     boxFill.Thickness = 0
     boxFill.Filled = true
     boxFill.Color = Color_BoxFill
     boxFill.Transparency = BoxFill_Transparency
     boxFill.Visible = false
-    boxFill.ZIndex = -2
+    boxFill.ZIndex = 1
 
-    local healthBarOutline = newDrawing("Square")
-    healthBarOutline.Thickness = 1
-    healthBarOutline.Filled = false
-    healthBarOutline.Color = Color3.fromRGB(0, 0, 0)
-    healthBarOutline.Visible = false
+    local outline = newDrawing("Square")
+    outline.Thickness = 1
+    outline.Filled = false
+    outline.Color = Color3.fromRGB(0, 0, 0)
+    outline.Visible = false
+    outline.ZIndex = 2
+
+    local box = newDrawing("Square")
+    box.Thickness = 1
+    box.Filled = false
+    box.Color = Color_Box
+    box.Visible = false
+    box.ZIndex = 3
 
     local healthBarBg = newDrawing("Square")
     healthBarBg.Thickness = 0
@@ -550,17 +575,27 @@ local function registerESP(model)
     healthBarBg.Color = Color3.fromRGB(30, 30, 30)
     healthBarBg.Transparency = 0.5
     healthBarBg.Visible = false
+    healthBarBg.ZIndex = 1
 
     local healthBar = newDrawing("Square")
     healthBar.Thickness = 0
     healthBar.Filled = true
     healthBar.Color = Color3.fromRGB(0, 255, 100)
     healthBar.Visible = false
+    healthBar.ZIndex = 2
+
+    local healthBarOutline = newDrawing("Square")
+    healthBarOutline.Thickness = 1
+    healthBarOutline.Filled = false
+    healthBarOutline.Color = Color3.fromRGB(0, 0, 0)
+    healthBarOutline.Visible = false
+    healthBarOutline.ZIndex = 3
 
     local snapline = newDrawing("Line")
     snapline.Thickness = 1.5
     snapline.Color = Color_Snaplines
     snapline.Visible = false
+    snapline.ZIndex = 2
 
     local headDot = newDrawing("Circle")
     headDot.Radius = HeadDot_Radius
@@ -568,16 +603,19 @@ local function registerESP(model)
     headDot.NumSides = 24
     headDot.Color = Color_HeadDot
     headDot.Visible = false
+    headDot.ZIndex = 4
 
     local lookTracer = newDrawing("Line")
     lookTracer.Thickness = 1.5
     lookTracer.Color = Color_LookTracer
     lookTracer.Visible = false
+    lookTracer.ZIndex = 2
 
     local offscreenArrow = newDrawing("Triangle")
     offscreenArrow.Filled = true
     offscreenArrow.Color = Color_OffscreenArrows
     offscreenArrow.Visible = false
+    offscreenArrow.ZIndex = 5
 
     local offscreenText = newDrawing("Text")
     offscreenText.Size = 12
@@ -586,6 +624,7 @@ local function registerESP(model)
     offscreenText.OutlineColor = Color3.fromRGB(0, 0, 0)
     offscreenText.Color = Color_OffscreenArrows
     offscreenText.Visible = false
+    offscreenText.ZIndex = 6
 
     local txt = newDrawing("Text")
     txt.Size = 14
@@ -593,6 +632,7 @@ local function registerESP(model)
     txt.Outline = true
     txt.OutlineColor = Color3.fromRGB(0, 0, 0)
     txt.Visible = false
+    txt.ZIndex = 4
 
     local weaponTxt = newDrawing("Text")
     weaponTxt.Size = 13
@@ -600,6 +640,7 @@ local function registerESP(model)
     weaponTxt.Outline = true
     weaponTxt.OutlineColor = Color3.fromRGB(0, 0, 0)
     weaponTxt.Visible = false
+    weaponTxt.ZIndex = 4
 
     local skelLines = {}
     for _, pair in ipairs(skeletonBones) do
@@ -607,6 +648,7 @@ local function registerESP(model)
         line.Color = isPlayerModel(model) and Color_Skeleton or Color3.fromRGB(0, 150, 255)
         line.Thickness = 1.5
         line.Visible = false
+        line.ZIndex = 2
         table.insert(skelLines, { line = line, a = pair[1], b = pair[2] })
     end
 

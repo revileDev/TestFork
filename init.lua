@@ -11,10 +11,15 @@ local UserInputService = game:GetService("UserInputService")
 -- If the initializer is run again, unload the previous UI/backend first.
 if _G.AtomwareUnload and (_G.AtomwareUILoaded or _G.AtomwareFeaturesLoaded) then
     pcall(_G.AtomwareUnload)
-    _G.AtomwareUILoaded = nil
-    _G.AtomwareFeaturesLoaded = nil
-    _G.AtomwareEvents = nil
-    _G.OnToggle = nil
+end
+_G.AtomwareUILoaded = nil
+_G.AtomwareFeaturesLoaded = nil
+_G.AtomwareEvents = nil
+_G.OnToggle = nil
+_G.__VFS_MODULES = nil
+if type(getgenv) == "function" and getgenv() then
+    getgenv().__VFS_MODULES = nil
+    getgenv().__VFS_CACHE = nil
 end
 
 -- Platform Detection
@@ -24,74 +29,45 @@ local targetUIFile = IS_MOBILE and "mobile_ui.lua" or "main_ui.lua"
 
 -- =========================================================================
 -- Hybrid Secure Module Loader
--- 1. Checks in-memory Virtual File System (__VFS_MODULES from Atom Protect)
--- 2. Checks virtual require() environment
--- 3. Pulls from Atom Protect production server (https://atomprotect.vercel.app)
--- 4. Falls back to raw mirror if network requires
+-- 1. Direct TestFork GitHub loader with dynamic cache-busting
+-- 2. In-Memory Virtual File System (Fallback)
+-- 3. Virtual require hook
 -- =========================================================================
 local function loadModule(path)
     local cleanName = path:gsub("%.lua$", "")
 
-    -- 1. In-Memory Virtual File System (Atom Protect / Aero Virtual Bundle)
-    if type(__VFS_MODULES) == "table" then
-        local loader = __VFS_MODULES[path] or __VFS_MODULES[cleanName]
-        if loader then
-            local ok, err = pcall(loader)
-            if not ok then
-                warn("[Atomware] Failed to execute in-memory module " .. path .. ":", err)
-                return false
-            end
-            return true
-        end
-    end
-
-    -- 2. Virtual require hook
-    if type(require) == "function" then
-        local ok, res = pcall(require, cleanName)
-        if ok and res ~= nil then
-            return true
-        end
-    end
-
-    -- 2.5 TestFork GitHub Mirror (Direct repository testing)
+    -- 1. TestFork GitHub Repository (Primary direct source with live cache-busting)
     local TESTFORK_URL = "https://raw.githubusercontent.com/revileDev/TestFork/main/"
+    local cacheBuster = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
     local okTest, testSource = pcall(function()
-        return game:HttpGet(TESTFORK_URL .. path .. "?t=" .. tostring(os.time()))
+        return game:HttpGet(TESTFORK_URL .. path .. "?v=" .. cacheBuster)
     end)
     if okTest and testSource and #testSource > 0 and not testSource:find("404: Not Found") and not testSource:find("<!DOCTYPE") then
         local compileOk, chunk, compileErr = pcall(loadstring, testSource)
         if compileOk and chunk then
             local runOk, runErr = pcall(chunk)
             if runOk then return true end
-            warn("[Atomware] Failed to run module from TestFork: " .. path, runErr)
+            warn("[Atomware] Error running module from TestFork (" .. path .. "):", runErr)
+        else
+            warn("[Atomware] Error compiling module from TestFork (" .. path .. "):", compileErr)
         end
     end
 
-    -- 3. Production Backend Endpoint (Atom Protect Gateway)
-    local SERVER_ENDPOINT = "https://atomprotect.vercel.app/api/loader/radium/"
-    local okServer, serverSource = pcall(function()
-        return game:HttpGet(SERVER_ENDPOINT .. path)
-    end)
-    if okServer and serverSource and #serverSource > 0 and not serverSource:find("<!DOCTYPE") and not serverSource:find("404") then
-        local compileOk, chunk, compileErr = pcall(loadstring, serverSource)
-        if compileOk and chunk then
-            local runOk, runErr = pcall(chunk)
-            if runOk then return true end
-            warn("[Atomware] Failed to run module from Atom Protect server: " .. path, runErr)
+    -- 2. In-Memory Virtual File System (Atom Protect / Aero Virtual Bundle Fallback)
+    if type(__VFS_MODULES) == "table" then
+        local loader = __VFS_MODULES[path] or __VFS_MODULES[cleanName]
+        if loader then
+            local ok, err = pcall(loader)
+            if ok then return true end
+            warn("[Atomware] Failed to execute in-memory module " .. path .. ":", err)
         end
     end
 
-    -- 4. Fallback Remote Mirror
-    local FALLBACK_URL = "https://raw.githubusercontent.com/redisaac758-art/RadiumCCpaste/main/"
-    local okFallback, fallbackSource = pcall(function()
-        return game:HttpGet(FALLBACK_URL .. path)
-    end)
-    if okFallback and fallbackSource and #fallbackSource > 0 then
-        local compileOk, chunk, compileErr = pcall(loadstring, fallbackSource)
-        if compileOk and chunk then
-            local runOk, runErr = pcall(chunk)
-            if runOk then return true end
-            warn("[Atomware] Failed to run module from mirror: " .. path, runErr)
+    -- 3. Virtual require hook
+    if type(require) == "function" then
+        local ok, res = pcall(require, cleanName)
+        if ok and res ~= nil then
+            return true
         end
     end
 
