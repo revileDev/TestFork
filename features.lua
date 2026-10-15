@@ -1120,9 +1120,8 @@ _G.OnToggle("Show Distance", function(s) OreESPConfig.ShowDistance = s end)
 _G.OnSlider("Ore Distance Esp", function(v) OreESPConfig.RenderDistance = v end)
 
 --//==================================================
---// DEPLOYABLE & ENTITY OBJECT ESP (Strict ReplicatedStorage.Shared.entities matching)
---// Directly referenced from Trident Survival source (enttiyidentification)
---// Matches CollisionGroup, Material, and Color to eliminate false positives (like trees)
+--// DEPLOYABLE & ENTITY OBJECT ESP (Crates, Workbenches, Furnaces, Beds, Traps)
+--// Strictly blacklists Partbox/trees and accurately recognizes all Trident deployables
 --//==================================================
 
 local DeployableESP_Config = {
@@ -1143,20 +1142,42 @@ local function cleanDisplayName(name)
     return formatted
 end
 
-local function getCategoryForEntity(name)
+local function isBlacklisted(name)
+    if type(name) ~= "string" then return true end
     local lower = name:lower()
-    if lower:find("box") or lower:find("crate") or lower:find("chest") or lower:find("storage") then
-        return "Crates", Color3.fromRGB(80, 200, 255)
-    elseif lower:find("workbench") or lower:find("bench") or lower:find("research") or lower:find("repair") then
-        return "Workbenches", Color3.fromRGB(215, 120, 255)
+    return lower:find("partbox") ~= nil
+        or lower:find("tree") ~= nil
+        or lower:find("wood") ~= nil
+        or lower:find("foliage") ~= nil
+        or lower:find("leaf") ~= nil
+        or lower:find("leaves") ~= nil
+        or lower:find("trunk") ~= nil
+        or lower:find("branch") ~= nil
+        or lower:find("rock") ~= nil
+        or lower:find("bush") ~= nil
+end
+
+local function classifyDeployableName(rawName)
+    if isBlacklisted(rawName) then return nil, nil, nil end
+    local lower = rawName:lower()
+
+    if lower:find("workbench") or lower:find("bench") or lower:find("research") or lower:find("repair") then
+        return "Workbenches", cleanDisplayName(rawName), Color3.fromRGB(215, 120, 255)
+    elseif lower:find("smallbox") then
+        return "Crates", "Small Box", Color3.fromRGB(80, 200, 255)
+    elseif lower:find("largebox") then
+        return "Crates", "Large Box", Color3.fromRGB(80, 200, 255)
+    elseif lower:find("crate") or lower:find("chest") or lower:find("storage") or (lower:find("box") and not lower:find("part")) then
+        return "Crates", cleanDisplayName(rawName), Color3.fromRGB(80, 200, 255)
     elseif lower:find("furnace") or lower:find("campfire") or lower:find("fire") or lower:find("bbq") or lower:find("barbecue") then
-        return "Furnaces", Color3.fromRGB(255, 145, 50)
-    elseif lower:find("bed") or lower:find("sleeping") or lower:find("bag") then
-        return "Beds", Color3.fromRGB(110, 255, 130)
+        return "Furnaces", cleanDisplayName(rawName), Color3.fromRGB(255, 145, 50)
+    elseif lower:find("sleepingbag") or lower:find("bed") or lower:find("bag") then
+        return "Beds", cleanDisplayName(rawName), Color3.fromRGB(110, 255, 130)
     elseif lower:find("turret") or lower:find("trap") or lower:find("mine") or lower:find("spike") then
-        return "Traps", Color3.fromRGB(255, 70, 70)
+        return "Traps", cleanDisplayName(rawName), Color3.fromRGB(255, 70, 70)
     end
-    return "Crates", Color3.fromRGB(255, 255, 255)
+
+    return nil, nil, nil
 end
 
 local function colorsMatch(c1, c2)
@@ -1169,9 +1190,8 @@ local function populateEntityIdentification()
     local entities = shared and shared:FindFirstChild("entities")
     if not entities then return end
 
-    -- Primary: Direct children of ReplicatedStorage.Shared.entities
     for _, v in ipairs(entities:GetChildren()) do
-        if v.Name ~= "Player" and v.Name ~= "NPC" and v.Name ~= "vehicles" then
+        if v.Name ~= "Player" and v.Name ~= "NPC" and v.Name ~= "vehicles" and not isBlacklisted(v.Name) then
             local model = v:FindFirstChild("Model") or (v:IsA("Model") and v)
             if model and model.PrimaryPart then
                 enttiyidentification[v.Name] = {
@@ -1182,25 +1202,12 @@ local function populateEntityIdentification()
             end
         end
     end
-
-    -- Secondary: Any subfolder entities inside ReplicatedStorage.Shared.entities
-    for _, item in ipairs(entities:GetDescendants()) do
-        if item:IsA("Model") and item.PrimaryPart and item.Parent and item.Parent ~= entities and item.Parent.Name ~= "Model" and item.Parent.Name ~= "NPC" and item.Parent.Name ~= "vehicles" and item.Parent.Name ~= "Player" then
-            local rawName = item.Parent.Name
-            if not enttiyidentification[rawName] then
-                enttiyidentification[rawName] = {
-                    CollisionGroup = item.PrimaryPart.CollisionGroup,
-                    Material = item.PrimaryPart.Material,
-                    Color = item.PrimaryPart.Color
-                }
-            end
-        end
-    end
 end
 pcall(populateEntityIdentification)
 
 local function identifyDeployable(model)
     if not model or model.ClassName ~= "Model" then return false, false end
+    if isBlacklisted(model.Name) then return false, false end
     if model.Name == "Player" or (model:FindFirstChild("Head") and (model:FindFirstChild("Torso") or model:FindFirstChild("LowerTorso"))) then
         return false, false
     end
@@ -1208,18 +1215,48 @@ local function identifyDeployable(model)
         return false, false
     end
 
-    local primpart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-    if not primpart then return false, false end
+    local anchorPart = model.PrimaryPart
+        or model:FindFirstChild("Main")
+        or model:FindFirstChild("Hitbox")
+        or model:FindFirstChildWhichIsA("BasePart", true)
+    if not anchorPart then return false, false end
 
-    for name, entity in pairs(enttiyidentification) do
-        if entity.Material == primpart.Material and entity.CollisionGroup == primpart.CollisionGroup and colorsMatch(entity.Color, primpart.Color) then
-            local category, color = getCategoryForEntity(name)
+    -- 1. Direct Name Classification (100% reliable for Trident Survival deployables)
+    local directCategory, directDisplay, directColor = classifyDeployableName(model.Name)
+    if directCategory then
+        return {
+            Name = model.Name,
+            DisplayName = directDisplay,
+            Category = directCategory,
+            Color = directColor,
+        }, anchorPart
+    end
+
+    -- 2. Parent Name Classification (if model is wrapped in folder named after deployable)
+    if model.Parent and model.Parent ~= Workspace and not isBlacklisted(model.Parent.Name) then
+        local pCategory, pDisplay, pColor = classifyDeployableName(model.Parent.Name)
+        if pCategory then
             return {
-                Name = name,
-                DisplayName = cleanDisplayName(name),
-                Category = category,
-                Color = color,
-            }, primpart
+                Name = model.Parent.Name,
+                DisplayName = pDisplay,
+                Category = pCategory,
+                Color = pColor,
+            }, anchorPart
+        end
+    end
+
+    -- 3. Match against ReplicatedStorage entity signatures from Trident source
+    for name, entity in pairs(enttiyidentification) do
+        if not isBlacklisted(name) and entity.Material == anchorPart.Material and entity.CollisionGroup == anchorPart.CollisionGroup and colorsMatch(entity.Color, anchorPart.Color) then
+            local cat, disp, col = classifyDeployableName(name)
+            if cat then
+                return {
+                    Name = name,
+                    DisplayName = disp,
+                    Category = cat,
+                    Color = col,
+                }, anchorPart
+            end
         end
     end
 
@@ -1274,25 +1311,32 @@ local function isCategoryActive(cat)
     return false
 end
 
+local function scanDeployableContainer(parent)
+    if not parent then return end
+    for _, child in ipairs(parent:GetChildren()) do
+        if child:IsA("Model") then
+            registerDeployable(child)
+        elseif child:IsA("Folder") or child.Name == "Const" or child.Name == "Buildings" or child.Name == "Deployables" or child.Name == "Map" then
+            for _, sub in ipairs(child:GetChildren()) do
+                if sub:IsA("Model") then
+                    registerDeployable(sub)
+                elseif sub:IsA("Folder") then
+                    for _, sub2 in ipairs(sub:GetChildren()) do
+                        if sub2:IsA("Model") then registerDeployable(sub2) end
+                    end
+                end
+            end
+        end
+    end
+end
+
 trackTask(task.spawn(function()
     while true do
         if anyDeployableESPEnabled() then
             if not next(enttiyidentification) then pcall(populateEntityIdentification) end
-            for _, m in ipairs(Workspace:GetChildren()) do
-                if m:IsA("Model") then registerDeployable(m) end
-            end
+            scanDeployableContainer(Workspace)
             local const = Workspace:FindFirstChild("Const")
-            if const then
-                for _, m in ipairs(const:GetChildren()) do
-                    if m:IsA("Model") then
-                        registerDeployable(m)
-                    elseif m:IsA("Folder") then
-                        for _, sub in ipairs(m:GetChildren()) do
-                            if sub:IsA("Model") then registerDeployable(sub) end
-                        end
-                    end
-                end
-            end
+            if const then scanDeployableContainer(const) end
         end
         for model, entry in pairs(DeployableESP_Cache) do
             if not model.Parent then
