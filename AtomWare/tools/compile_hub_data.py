@@ -70,6 +70,17 @@ def main():
         "GamesDatabase.ByPlaceId = {}",
         "GamesDatabase.List = {}",
         "",
+        "local function addGame(placeId, name, title, loadstring)",
+        "    local entry = {",
+        "        PlaceId = placeId,",
+        "        Name = name,",
+        "        Title = title,",
+        "        Loadstring = loadstring",
+        "    }",
+        "    GamesDatabase.ByPlaceId[placeId] = entry",
+        "    table.insert(GamesDatabase.List, entry)",
+        "end",
+        "",
     ]
 
     for g in games:
@@ -78,15 +89,7 @@ def main():
         title_esc = escape_lua_string(g["title"])
         load_esc = escape_lua_string(g["loadstring"])
 
-        lines.append(f'local g_{pid} = {{')
-        lines.append(f'    PlaceId = {pid},')
-        lines.append(f'    Name = "{name_esc}",')
-        lines.append(f'    Title = "{title_esc}",')
-        lines.append(f'    Loadstring = "{load_esc}"')
-        lines.append(f'}}')
-        lines.append(f'GamesDatabase.ByPlaceId[{pid}] = g_{pid}')
-        lines.append(f'table.insert(GamesDatabase.List, g_{pid})')
-        lines.append('')
+        lines.append(f'addGame({pid}, "{name_esc}", "{title_esc}", "{load_esc}")')
 
     # Add helper search and query methods
     lines.extend([
