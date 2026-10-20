@@ -427,6 +427,10 @@ addGame(8034886758, "🥊Punch Monsters!🥊", "Game destroyer 6000", "loadstrin
 addGame(18722757961, "🩸[UPDATE2] RagBlood🩸", "Hitbox script for skids", "loadstring(game:HttpGet(\"https://scriptblox.com/raw/UPDATE2-RagBlood-Hitbox-script-for-skids-231868\"))()")
 addGame(82712304391069, "🪓 Carve Wood! [Fall Update]", "auto carve", "loadstring(game:HttpGet(\"https://scriptblox.com/raw/Carve-Wood!-Fall-Update-auto-carve-231349\"))()")
 --// Helper Methods
+function GamesDatabase:GetAll()
+    return self.List
+end
+
 function GamesDatabase:GetByPlaceId(placeId)
     local id = tonumber(placeId)
     if not id then return nil end

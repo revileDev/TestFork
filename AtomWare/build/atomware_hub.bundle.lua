@@ -4,7 +4,7 @@
 ======================================================================
   * Key: THEBESTFIXED
   * Discord: https://discord.gg/AeCYnnQmq5
-  * Compiled At: 2026-10-20 06:57:03 UTC
+  * Compiled At: 2026-10-20 07:08:58 UTC
   * Features:
     - Auto Game Detection (407+ Place IDs)
     - Key Auth Prompt Modal with Discord Clipboard Integration
@@ -448,6 +448,10 @@ do
         addGame(18722757961, "🩸[UPDATE2] RagBlood🩸", "Hitbox script for skids", "loadstring(game:HttpGet(\"https://scriptblox.com/raw/UPDATE2-RagBlood-Hitbox-script-for-skids-231868\"))()")
         addGame(82712304391069, "🪓 Carve Wood! [Fall Update]", "auto carve", "loadstring(game:HttpGet(\"https://scriptblox.com/raw/Carve-Wood!-Fall-Update-auto-carve-231349\"))()")
         --// Helper Methods
+        function GamesDatabase:GetAll()
+            return self.List
+        end
+
         function GamesDatabase:GetByPlaceId(placeId)
             local id = tonumber(placeId)
             if not id then return nil end
@@ -1158,40 +1162,27 @@ do
             screenGui.Parent = parent
             widgetGui = screenGui
 
-            -- Floating Icon Button (Draggable)
+            -- Floating Icon Button (Clean solid circle, draggable)
             local floatBtn = Instance.new("TextButton")
             floatBtn.Name = "FloatingSearchButton"
-            floatBtn.Size = UDim2.new(0, 52, 0, 52)
+            floatBtn.Size = UDim2.new(0, 48, 0, 48)
             floatBtn.Position = UDim2.new(0, 20, 0.45, 0)
-            floatBtn.BackgroundColor3 = Color3.fromRGB(24, 26, 38)
+            floatBtn.BackgroundColor3 = Color3.fromRGB(28, 30, 40)
             floatBtn.Text = "🔍"
-            floatBtn.TextSize = 22
+            floatBtn.TextSize = 20
             floatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             floatBtn.Font = Enum.Font.GothamBold
             floatBtn.AutoButtonColor = false
             floatBtn.Parent = screenGui
 
             local floatCorner = Instance.new("UICorner")
-            floatCorner.CornerRadius = UDim.new(0, 26)
+            floatCorner.CornerRadius = UDim.new(1, 0)
             floatCorner.Parent = floatBtn
 
             local floatStroke = Instance.new("UIStroke")
-            floatStroke.Color = Color3.fromRGB(88, 101, 242)
-            floatStroke.Thickness = 2
+            floatStroke.Color = Color3.fromRGB(55, 60, 78)
+            floatStroke.Thickness = 1.5
             floatStroke.Parent = floatBtn
-
-            -- Subtle pulse glow shadow
-            local floatShadow = Instance.new("ImageLabel")
-            floatShadow.Name = "Shadow"
-            floatShadow.AnchorPoint = Vector2.new(0.5, 0.5)
-            floatShadow.Position = UDim2.new(0.5, 0, 0.5, 0)
-            floatShadow.Size = UDim2.new(1, 20, 1, 20)
-            floatShadow.BackgroundTransparency = 1
-            floatShadow.Image = "rbxassetid://1316045217"
-            floatShadow.ImageColor3 = Color3.fromRGB(88, 101, 242)
-            floatShadow.ImageTransparency = 0.65
-            floatShadow.ZIndex = floatBtn.ZIndex - 1
-            floatShadow.Parent = floatBtn
 
             local wasDragged = makeDraggable(floatBtn)
 
@@ -1561,22 +1552,43 @@ do
                 end
             end
 
+            -- Safe database accessor helpers
+            local function fetchAllGames()
+                if typeof(gamesDb) == "table" then
+                    if typeof(gamesDb.GetAll) == "function" then
+                        local ok, res = pcall(function() return gamesDb:GetAll() end)
+                        if ok and typeof(res) == "table" then return res end
+                    end
+                    if typeof(gamesDb.List) == "table" then
+                        return gamesDb.List
+                    end
+                end
+                return {}
+            end
+
+            local function fetchFilteredGames(query)
+                if typeof(gamesDb) == "table" and typeof(gamesDb.Search) == "function" then
+                    local ok, res = pcall(function() return gamesDb:Search(query) end)
+                    if ok and typeof(res) == "table" then return res end
+                end
+                return fetchAllGames()
+            end
+
             -- Initial load with all games
-            local allGames = gamesDb:GetAll()
-            renderResults(allGames)
+            renderResults(fetchAllGames())
 
             -- Live Search Filter
             searchInput:GetPropertyChangedSignal("Text"):Connect(function()
                 local query = searchInput.Text
                 clearSearchBtn.Visible = (#query > 0)
-                local filtered = gamesDb:Search(query)
+                local filtered = fetchFilteredGames(query)
                 renderResults(filtered)
             end)
 
             clearSearchBtn.MouseButton1Click:Connect(function()
                 searchInput.Text = ""
                 clearSearchBtn.Visible = false
-                renderResults(gamesDb:GetAll())
+                renderResults(fetchAllGames())
             end)
 
             return SearchWidget

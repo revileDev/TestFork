@@ -94,6 +94,10 @@ def main():
     # Add helper search and query methods
     lines.extend([
         "--// Helper Methods",
+        "function GamesDatabase:GetAll()",
+        "    return self.List",
+        "end",
+        "",
         "function GamesDatabase:GetByPlaceId(placeId)",
         "    local id = tonumber(placeId)",
         "    if not id then return nil end",
