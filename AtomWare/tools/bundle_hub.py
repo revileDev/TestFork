@@ -1,6 +1,7 @@
 """
 AtomWare Giant Script Hub - Bundle Compiler
-Combines all modules and database into a single standalone .lua file
+Combines all modules and database into a single standalone .lua file.
+Emits both hub/init.lua (for direct loadstring execution) and hub/build/atomware_hub.bundle.lua.
 """
 
 import os
@@ -13,14 +14,15 @@ if os.path.exists(os.path.join(_parent, "games_database.lua")):
 else:
     HUB_DIR = os.path.join(_parent, "hub")
 
-OUTPUT_FILE = os.path.join(HUB_DIR, "build", "atomware_hub.bundle.lua")
+BUNDLE_OUTPUT = os.path.join(HUB_DIR, "build", "atomware_hub.bundle.lua")
+INIT_OUTPUT = os.path.join(HUB_DIR, "init.lua")
 
 def read_module(path):
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
 def bundle():
-    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+    os.makedirs(os.path.dirname(BUNDLE_OUTPUT), exist_ok=True)
     
     db_code = read_module(os.path.join(HUB_DIR, "games_database.lua"))
     notif_code = read_module(os.path.join(HUB_DIR, "modules", "notification.lua"))
@@ -28,7 +30,12 @@ def bundle():
     auth_code = read_module(os.path.join(HUB_DIR, "modules", "auth_prompt.lua"))
     search_code = read_module(os.path.join(HUB_DIR, "modules", "search_widget.lua"))
     watermark_code = read_module(os.path.join(HUB_DIR, "modules", "watermark.lua"))
-    init_code = read_module(os.path.join(HUB_DIR, "init.lua"))
+    
+    orch_path = os.path.join(HUB_DIR, "modules", "orchestrator.lua")
+    if os.path.exists(orch_path):
+        orch_code = read_module(orch_path)
+    else:
+        orch_code = read_module(os.path.join(HUB_DIR, "init.lua"))
 
     bundle_header = f"""--[[
 ======================================================================
@@ -81,21 +88,26 @@ do
 {indent(watermark_code, "        ")}
     end)()
 
-    -- [MODULE 7: Main Entry Orchestrator]
+    -- [MODULE 7: Core Orchestrator]
     local runAtomwareHub = (function()
-{indent(init_code, "        ")}
+{indent(orch_code, "        ")}
     end)()
 
-    -- Initialize and start AtomWare Hub
+    -- Initialize and start AtomWare Hub immediately
     runAtomwareHub(GamesDatabase, Notification, Telemetry, AuthPrompt, SearchWidget, Watermark)
 end
 """
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+    # Write both build/atomware_hub.bundle.lua and init.lua
+    with open(BUNDLE_OUTPUT, "w", encoding="utf-8") as f:
         f.write(bundle_content)
 
-    file_size_kb = os.path.getsize(OUTPUT_FILE) / 1024
-    print(f"[OK] Successfully built standalone bundle: {OUTPUT_FILE} ({file_size_kb:.2f} KB)")
+    with open(INIT_OUTPUT, "w", encoding="utf-8") as f:
+        f.write(bundle_content)
+
+    file_size_kb = os.path.getsize(INIT_OUTPUT) / 1024
+    print(f"[OK] Successfully built executable entry: {INIT_OUTPUT} ({file_size_kb:.2f} KB)")
+    print(f"[OK] Successfully built bundle copy: {BUNDLE_OUTPUT} ({file_size_kb:.2f} KB)")
 
 def indent(code, prefix):
     return "\n".join(prefix + line if line.strip() else "" for line in code.splitlines())

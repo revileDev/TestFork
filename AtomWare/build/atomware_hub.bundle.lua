@@ -4,7 +4,7 @@
 ======================================================================
   * Key: THEBESTFIXED
   * Discord: https://discord.gg/AeCYnnQmq5
-  * Compiled At: 2026-10-20 06:26:02 UTC
+  * Compiled At: 2026-10-20 06:40:17 UTC
   * Features:
     - Auto Game Detection (407+ Place IDs)
     - Key Auth Prompt Modal with Discord Clipboard Integration
@@ -4991,10 +4991,10 @@ do
         return Watermark
     end)()
 
-    -- [MODULE 7: Main Entry Orchestrator]
+    -- [MODULE 7: Core Orchestrator]
     local runAtomwareHub = (function()
         --[[
-            AtomWare Giant Script Hub (407+ Games) - Main Entry Orchestrator
+            AtomWare Giant Script Hub (407+ Games) - Core Orchestrator Module
             Auto-detects game by PlaceId, verifies auth key, runs loadstring,
             mounts persistent watermark and draggable search/gamehop widget.
         ]]
@@ -5136,6 +5136,6 @@ do
         return runAtomwareHub
     end)()
 
-    -- Initialize and start AtomWare Hub
+    -- Initialize and start AtomWare Hub immediately
     runAtomwareHub(GamesDatabase, Notification, Telemetry, AuthPrompt, SearchWidget, Watermark)
 end

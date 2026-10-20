@@ -4,36 +4,40 @@ AtomWare is a high-performance, cross-platform (PC & Mobile) Roblox script hub s
 
 ---
 
+## 🚀 How to Execute AtomWare
+
+### Primary Entry Point (Direct from `init.lua`):
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/revileDev/TestFork/main/AtomWare/init.lua"))()
+```
+
+### Alternative Bundle Link:
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/revileDev/TestFork/main/AtomWare/build/atomware_hub.bundle.lua"))()
+```
+
+---
+
 ## 📁 Project Structure
 
 ```text
-hub/
+AtomWare/
+├── init.lua                     # Primary executable entry point (Self-contained, 239 KB)
+├── games_database.lua           # 407 compiled games database
+├── README.md                    # Documentation & setup guide
 ├── build/
-│   └── atomware_hub.bundle.lua  # Ready-to-execute single-file standalone bundle (239 KB)
+│   └── atomware_hub.bundle.lua  # Bundle distribution copy
 ├── modules/
+│   ├── orchestrator.lua         # Core orchestrator logic
 │   ├── auth_prompt.lua          # Key modal (Key: THEBESTFIXED) & Discord clipboard
 │   ├── notification.lua         # In-game animated toast notifications
 │   ├── search_widget.lua        # Floating draggable 🔍 search & gamehop engine
 │   ├── telemetry.lua            # Discord webhook audit logger
 │   └── watermark.lua            # Bottom-right live FPS monitor & watermark
-├── games_database.lua           # 407 compiled games database
-├── init.lua                     # Core orchestrator
-└── README.md                    # Documentation
+└── tools/
+    ├── bundle_hub.py            # Bundler script
+    └── compile_hub_data.py      # Database compiler script
 ```
-
----
-
-## 🚀 How to Execute AtomWare
-
-### Option 1: Standalone Single-File Bundle (Recommended)
-You can directly load the bundled script in any executor (Delta, Fluxus, Codex, Arceus, Synapse, Krnl, Wave, etc.):
-
-```lua
--- If hosting on GitHub / Pastebin / Web server:
-loadstring(game:HttpGet("https://raw.githubusercontent.com/YourUsername/AtomWare/main/hub/build/atomware_hub.bundle.lua"))()
-```
-
-Or copy-paste the entire contents of `hub/build/atomware_hub.bundle.lua` directly into your executor's script tab.
 
 ---
 
@@ -50,6 +54,6 @@ If new games or scripts are added to `C:\Users\Revil\Documents\New folder`, run:
 # 1. Recompile game database
 python tools/compile_hub_data.py
 
-# 2. Rebuild the standalone bundle
+# 2. Rebuild the standalone executable init.lua and bundle
 python tools/bundle_hub.py
 ```
