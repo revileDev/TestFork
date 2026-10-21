@@ -1168,9 +1168,20 @@ end
 local AtomwareWindow = {
     tabs = {},
     open = true,
+    uiDragging = false,
     ScreenGui = ScreenGui,
     MainFrame = MainFrame,
 }
+
+function AtomwareWindow:init() return true end
+function AtomwareWindow:NewWindow(spec) return self end
+function AtomwareWindow:SelectTab(name)
+    local displayName = normalizeTabName(name)
+    switchPage(displayName)
+end
+function AtomwareWindow:SwitchPage(name)
+    self:SelectTab(name)
+end
 
 function AtomwareWindow:AddTab(rawName, order)
     local displayName, icon = normalizeTabName(rawName)

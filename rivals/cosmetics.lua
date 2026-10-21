@@ -333,7 +333,13 @@ local function installSignalGuard()
 		return
 	end
 	local okMod, Signal = pcall(function()
-		return require(getService("ReplicatedStorage"):WaitForChild("Modules", 10):WaitForChild("Signal", 10))
+		local rep = getService("ReplicatedStorage")
+		local modFolder = rep:FindFirstChild("Modules")
+		if modFolder then
+			local sigMod = modFolder:FindFirstChild("Signal")
+			if sigMod then return require(sigMod) end
+		end
+		return nil
 	end)
 	if not okMod or type(Signal) ~= "table" or type(Signal.new) ~= "function" then
 		return

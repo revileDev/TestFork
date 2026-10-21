@@ -336,7 +336,13 @@ local function installSignalGuard()
 		return
 	end
 	local okMod, Signal = pcall(function()
-		return require(getService("ReplicatedStorage"):WaitForChild("Modules", 10):WaitForChild("Signal", 10))
+		local rep = getService("ReplicatedStorage")
+		local modFolder = rep:FindFirstChild("Modules")
+		if modFolder then
+			local sigMod = modFolder:FindFirstChild("Signal")
+			if sigMod then return require(sigMod) end
+		end
+		return nil
 	end)
 	if not okMod or type(Signal) ~= "table" or type(Signal.new) ~= "function" then
 		return
@@ -12063,7 +12069,13 @@ Bitstream Vera
 			local lastPreviewHpVal = -1
 			local itemLib: any = nil
 			pcall(function()
-				itemLib = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ItemLibrary"))
+				local modFolder = ReplicatedStorage:FindFirstChild("Modules")
+				if modFolder then
+					local itemMod = modFolder:FindFirstChild("ItemLibrary")
+					if itemMod then
+						itemLib = require(itemMod)
+					end
+				end
 			end)
 
 			local function getAccentColor(): Color3
@@ -24703,21 +24715,9 @@ Bitstream Vera
 		end
 
 		DrawingBridge.library = library
-		local okInit, _initErr = pcall(function()
-			library:init()
-		end)
-		if not okInit then
-			warn("bro is this kewl ass ui gonna load?")
-			drawingActive = false
-			return
-		end
-		if type(library.NewWindow) ~= "function" then
-			warn("ui forgot how windows work")
-			drawingActive = false
-			return
-		end
 		DrawingBridge.menu = library
 		DrawingBridge.library = library
+		print("[Atomware Rivals] Mounting UI tabs and feature cards onto Atomware UI...")
 
 		for _, name in { "legit", "rage", "move", "visuals", "world", "items", "misc", "extras" } do
 			pcall(DKit.tab, name)
@@ -24727,7 +24727,9 @@ Bitstream Vera
 			if builder then
 				local okBuild, _buildErr = pcall(builder, DKit)
 				if not okBuild then
-					warn(key .. " section faceplanted")
+					warn("[Atomware Rivals] " .. key .. " section error: " .. tostring(_buildErr))
+				else
+					print("[Atomware Rivals] Built " .. key .. " section successfully.")
 				end
 			end
 		end
@@ -24772,6 +24774,11 @@ Bitstream Vera
 
 		drawingActive = true
 		open = library.open == true
+		pcall(function()
+			if library.SelectTab then
+				library:SelectTab("Legit")
+			end
+		end)
 
 		pcall(function()
 			local loaded = false

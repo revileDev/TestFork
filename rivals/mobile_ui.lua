@@ -1050,9 +1050,20 @@ end
 local AtomwareMobileWindow = {
     tabs = {},
     open = true,
+    uiDragging = false,
     ScreenGui = ScreenGui,
     MainFrame = MainFrame,
 }
+
+function AtomwareMobileWindow:init() return true end
+function AtomwareMobileWindow:NewWindow(spec) return self end
+function AtomwareMobileWindow:SelectTab(name)
+    local displayName = normalizeTabName(name)
+    switchPage(displayName)
+end
+function AtomwareMobileWindow:SwitchPage(name)
+    self:SelectTab(name)
+end
 
 function AtomwareMobileWindow:AddTab(rawName, order)
     local displayName, icon = normalizeTabName(rawName)
