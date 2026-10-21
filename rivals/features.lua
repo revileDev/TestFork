@@ -6980,8 +6980,11 @@ Bitstream Vera
 			local row = editingProfileRow()
 			if row then
 				row[key] = clamped
-			else
-				writeGlobal(clamped)
+			end
+			writeGlobal(clamped)
+			lastProfileItem = nil
+			if refreshWeaponProfile then
+				pcall(refreshWeaponProfile)
 			end
 		end
 	end
@@ -7742,7 +7745,8 @@ Bitstream Vera
 				return nil
 			end
 			refreshSilentRoster(os.clock())
-			local effectiveFov = computeEffectiveFov(resolvedSilentFov, false, cam)
+			local curSilentFov = (Aim.editProfile ~= "Global" and resolvedSilentFov) or Silent.fov
+			local effectiveFov = computeEffectiveFov(curSilentFov, false, cam)
 			local center = resolveFovOriginScreen(Silent.fovOrigin, cam, silentStickyPart)
 			local centerX = center.X
 			local centerY = center.Y
@@ -8465,7 +8469,8 @@ Bitstream Vera
 				aimFovDrawPos = tweenFovPos(aimFovDrawPos, aimOriginTarget, dt, if aimOnTarget then 16 else 22)
 				silentFovDrawPos = tweenFovPos(silentFovDrawPos, silentOriginTarget, dt, if silentOnTarget then 16 else 22)
 				local effectiveAimRadius = computeEffectiveFov(resolvedAimFov, Aim.dynamicFov, cam)
-				local effectiveSilentRadius = computeEffectiveFov(resolvedSilentFov, false, cam)
+				local curSilentFov = (Aim.editProfile ~= "Global" and resolvedSilentFov) or Silent.fov
+				local effectiveSilentRadius = computeEffectiveFov(curSilentFov, false, cam)
 				aimFovDrawRadius = tweenFovRadius(aimFovDrawRadius, math.max(2, effectiveAimRadius * 2), dt)
 				silentFovDrawRadius = tweenFovRadius(silentFovDrawRadius, math.max(2, effectiveSilentRadius * 2), dt)
 				local aimDraw = aimFovDrawPos or screenCenter
@@ -13965,12 +13970,24 @@ Bitstream Vera
 				end
 			end)
 			local sSpinSp = kit.number(silent, "spin speed", Silent, "spinSpeed", 0, 360, 1)
-			local sFovGet, sFovSet = editNumber("silentFov", function()
-				return Silent.fov
-			end, function(value: number)
-				Silent.fov = value
-			end, 20, 600)
-			local sFov = kit.slider(silent, "fov", 20, 600, 1, sFovGet, sFovSet)
+			local function applySilentFov(value: number)
+				local clamped = math.clamp(value, 20, 600)
+				Silent.fov = clamped
+				resolvedSilentFov = clamped
+				local row = editingProfileRow()
+				if row then
+					row["silentFov"] = clamped
+				end
+				lastProfileItem = nil
+				if refreshWeaponProfile then
+					pcall(refreshWeaponProfile)
+				end
+			end
+			local sFovGet = function()
+				local row = editingProfileRow()
+				return profileNumber(row, "silentFov", Silent.fov, 20, 600)
+			end
+			local sFov = kit.slider(silent, "fov", 20, 600, 1, sFovGet, applySilentFov)
 			local sFovThick = kit.number(silent, "fov thickness", Silent, "fovThickness", 0.5, 12, 0.5, { suffix = "px" })
 			local sHits = kit.masks(silent, "hitboxes", HITBOX_ITEMS, function()
 				return Silent.hitboxes
@@ -20045,15 +20062,34 @@ Bitstream Vera
 			ClientFx.customModelReplaceLeftHand = false
 			ClientFx.customModelReplaceRightHand = false
 
+			local BUILTIN_MODELS: { [string]: string } = {
+				["Noob"] = "138151705692565",
+				["Dummy"] = "5161593571",
+				["Classic R6"] = "138151705692565",
+				["Mini Dummy"] = "5161593571",
+			}
+
 			local function scanPlayerModels()
 				table.clear(modelNames)
 				table.clear(modelIds)
+				for name, id in BUILTIN_MODELS do
+					modelIds[name] = id
+					table.insert(modelNames, name)
+				end
 				if hasFsApi("makefolder") then
 					if not fsIsfolder(CONFIG_FOLDER) then
 						pcall(fsMakefolder, CONFIG_FOLDER)
 					end
 					if not fsIsfolder(MODEL_DIR) then
 						pcall(fsMakefolder, MODEL_DIR)
+					end
+					if hasFsApi("writefile") and hasFsApi("isfile") then
+						for name, id in BUILTIN_MODELS do
+							local mFile = MODEL_DIR .. "/" .. name .. ".txt"
+							if not fsIsfile(mFile) then
+								pcall(fsWritefile, mFile, id)
+							end
+						end
 					end
 				end
 				if hasFsApi("listfiles") and hasFsApi("readfile") then
@@ -20114,7 +20150,7 @@ Bitstream Vera
 				scanPlayerModels()
 				paintModelList()
 				local label = tostring(ClientFx.playerModelName)
-				local id = modelIds[label]
+				local id = modelIds[label] or BUILTIN_MODELS[label]
 				if not id then
 					return
 				end
@@ -23696,6 +23732,12 @@ Bitstream Vera
 		local LUA_DIR = "luas"
 		local luaPaths: { [string]: string } = {}
 		local luaNames: { string } = {}
+		local BUILTIN_LUAS: { [string]: string } = {
+			["InfiniteYield"] = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()',
+			["DexExplorer"] = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/infyiff/backup/main/dex.lua"))()',
+			["SimpleSpy"] = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/exxtremestuffs/SimpleSpy/master/SimpleSpySource.lua"))()',
+			["Keyboard"] = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/advcomwt/GG/main/keyboard.lua"))()',
+		}
 
 		local function luaNotify(message: string)
 			local lib: any = DrawingBridge.library
@@ -23724,15 +23766,28 @@ Bitstream Vera
 		local function refreshLuaNames()
 			table.clear(luaPaths)
 			table.clear(luaNames)
-			if not ensureLuaDir() then
-				return
-			end
-			for _, path in fsListfiles(LUA_DIR) do
-				local base = string.match(tostring(path), "([^/\\]+)$") or tostring(path)
-				local stem = string.match(base, "^(.+)%.lua$") or string.match(base, "^(.+)%.txt$")
-				if stem and not luaPaths[stem] then
-					luaPaths[stem] = LUA_DIR .. "/" .. base
+			for stem, src in BUILTIN_LUAS do
+				if not luaPaths[stem] then
+					luaPaths[stem] = "builtin:" .. stem
 					table.insert(luaNames, stem)
+				end
+			end
+			if hasFsApi("writefile") and hasFsApi("isfile") and ensureLuaDir() then
+				for stem, src in BUILTIN_LUAS do
+					local fPath = LUA_DIR .. "/" .. stem .. ".lua"
+					if not fsIsfile(fPath) then
+						pcall(fsWritefile, fPath, src)
+					end
+				end
+			end
+			if ensureLuaDir() then
+				for _, path in fsListfiles(LUA_DIR) do
+					local base = string.match(tostring(path), "([^/\\]+)$") or tostring(path)
+					local stem = string.match(base, "^(.+)%.lua$") or string.match(base, "^(.+)%.txt$")
+					if stem and not luaPaths[stem] then
+						luaPaths[stem] = LUA_DIR .. "/" .. base
+						table.insert(luaNames, stem)
+					end
 				end
 			end
 			table.sort(luaNames, function(a: string, b: string): boolean
@@ -23763,12 +23818,18 @@ Bitstream Vera
 		local picked = ""
 
 		local function readPicked(): (string?, string?)
-			if picked == "" or not luaPaths[picked] then
+			if picked == "" then
+				return nil, "no script selected"
+			end
+			if BUILTIN_LUAS[picked] then
+				return BUILTIN_LUAS[picked], nil
+			end
+			if not luaPaths[picked] then
 				return nil, "no script selected"
 			end
 			local ok, src = pcall(fsReadfile, luaPaths[picked])
 			if not ok or type(src) ~= "string" then
-				return nil, "missing · " .. picked
+				return nil, "missing " .. picked
 			end
 			return src, nil
 		end
@@ -23778,6 +23839,38 @@ Bitstream Vera
 			tab:AddSubTabs({ "lua", "servers" })
 			local scripts = tab:AddSection("luas", 1)
 			scripts.subTab = "lua"
+
+			local perfBox = tab:AddSection("performance", 2)
+			perfBox.subTab = "lua"
+
+			local fpsUnlockerOn = false
+			local fpsCapValue = 240
+			local function applyFpsCap()
+				local setFps = execApi("setfpscap") or execApi("set_fps_cap")
+				if typeof(setFps) == "function" then
+					pcall(setFps, if fpsUnlockerOn then fpsCapValue else 60)
+				end
+			end
+
+			local fpsCapSlider: any
+			kit.flag(perfBox, "fps unlocker", function()
+				return fpsUnlockerOn
+			end, function(v: boolean)
+				fpsUnlockerOn = v
+				applyFpsCap()
+				if fpsCapSlider then
+					fpsCapSlider.enabled = fpsUnlockerOn
+				end
+			end)
+
+			fpsCapSlider = kit.slider(perfBox, "fps cap", 30, 360, 5, function()
+				return fpsCapValue
+			end, function(v: number)
+				fpsCapValue = math.clamp(math.floor(v), 30, 360)
+				if fpsUnlockerOn then
+					applyFpsCap()
+				end
+			end, { suffix = " fps" })
 			refreshLuaNames()
 			picked = luaNames[1] or ""
 			local listCtl: any = nil
