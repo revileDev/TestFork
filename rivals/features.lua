@@ -740,6 +740,9 @@ local function createDrawingKit(bridge: any): any
 			return nil
 		end
 		local lower = string.lower(name)
+		if lower == "always" then
+			return "ALW"
+		end
 		if lower == "none" or lower == "unknown" then
 			return nil
 		end
@@ -749,6 +752,9 @@ local function createDrawingKit(bridge: any): any
 	function kit.keyHeld(name: any): boolean
 		if type(name) ~= "string" then
 			return false
+		end
+		if name == "Always" or name == "ALWAYS" then
+			return true
 		end
 		local key = kit.keyFromName(name)
 		if not key then
@@ -818,7 +824,11 @@ local function createDrawingKit(bridge: any): any
 	function kit.bind(section: any, text: string, get: () -> string, set: (string) -> (), opts: any?): any
 		local options: any = opts or {}
 		local function toBind(): any
-			local key = kit.keyFromName(get())
+			local cur = get()
+			if cur == "Always" or cur == "ALWAYS" then
+				return "Always"
+			end
+			local key = kit.keyFromName(cur)
 			if key then
 				return key
 			end
@@ -834,6 +844,8 @@ local function createDrawingKit(bridge: any): any
 			keycallback = function(key: any)
 				if typeof(key) == "EnumItem" then
 					set((key :: EnumItem).Name)
+				elseif key == "Always" or key == "ALWAYS" then
+					set("Always")
 				else
 					set("None")
 				end
@@ -5950,6 +5962,7 @@ Bitstream Vera
 	do
 	local Aim = {
 		enabled = false,
+		alwaysOn = false,
 		key = Enum.UserInputType.MouseButton2,
 		keyName = "MouseButton2",
 		drawFov = false,
@@ -5998,6 +6011,7 @@ Bitstream Vera
 
 	local Silent = {
 		enabled = false,
+		alwaysOn = true,
 		keyName = "None",
 		hitPart = "Head",
 		accuracy = 100,
@@ -6061,6 +6075,7 @@ Bitstream Vera
 
 	local Flick = {
 		enabled = false,
+		alwaysOn = false,
 		keyName = "MouseButton2",
 		fov = 160,
 		speed = 1,
@@ -6145,6 +6160,8 @@ Bitstream Vera
 		targetHud = false,
 		targetHudX = 0.5,
 		targetHudY = 0.72,
+		targetHudScale = 1,
+		alwaysOn = false,
 	}
 	DrawingBridge.Rage = Rage
 
@@ -6267,6 +6284,7 @@ Bitstream Vera
 		return {
 			aim = {
 				enabled = Aim.enabled,
+				alwaysOn = Aim.alwaysOn,
 				keyName = Aim.keyName,
 				drawFov = Aim.drawFov,
 				dynamicFov = Aim.dynamicFov,
@@ -6294,6 +6312,7 @@ Bitstream Vera
 			},
 			silent = {
 				enabled = Silent.enabled,
+				alwaysOn = Silent.alwaysOn,
 				keyName = Silent.keyName,
 				hitPart = (function()
 					for _, item in HITBOX_ITEMS do
@@ -6339,6 +6358,7 @@ Bitstream Vera
 			},
 			flick = {
 				enabled = Flick.enabled,
+				alwaysOn = Flick.alwaysOn,
 				keyName = Flick.keyName,
 				fov = Flick.fov,
 				speed = Flick.speed,
@@ -6402,6 +6422,8 @@ Bitstream Vera
 				targetHud = Rage.targetHud,
 				targetHudX = Rage.targetHudX,
 				targetHudY = Rage.targetHudY,
+				targetHudScale = Rage.targetHudScale,
+				alwaysOn = Rage.alwaysOn,
 			},
 			movement = {
 				speed = Movement.speed,
@@ -6442,6 +6464,7 @@ Bitstream Vera
 		if type(data.aim) == "table" then
 			local a = data.aim
 			if type(a.enabled) == "boolean" then Aim.enabled = a.enabled end
+			if type(a.alwaysOn) == "boolean" then Aim.alwaysOn = a.alwaysOn end
 			if type(a.keyName) == "string" then Aim.keyName = a.keyName end
 			if type(a.drawFov) == "boolean" then Aim.drawFov = a.drawFov end
 			if type(a.dynamicFov) == "boolean" then Aim.dynamicFov = a.dynamicFov end
@@ -6512,6 +6535,7 @@ Bitstream Vera
 		if type(data.silent) == "table" then
 			local s = data.silent
 			if type(s.enabled) == "boolean" then Silent.enabled = s.enabled end
+			if type(s.alwaysOn) == "boolean" then Silent.alwaysOn = s.alwaysOn end
 			if type(s.keyName) == "string" then Silent.keyName = s.keyName end
 			if type(s.hitPart) == "string" then Silent.hitPart = s.hitPart end
 			if type(s.accuracy) == "number" then Silent.accuracy = math.clamp(s.accuracy, 10, 100) end
@@ -6569,6 +6593,7 @@ Bitstream Vera
 		if type(data.flick) == "table" then
 			local f = data.flick
 			Flick.enabled = false
+			if type(f.alwaysOn) == "boolean" then Flick.alwaysOn = f.alwaysOn end
 			if type(f.keyName) == "string" then Flick.keyName = f.keyName end
 			if type(f.fov) == "number" then Flick.fov = f.fov end
 			if type(f.speed) == "number" then
@@ -6774,6 +6799,8 @@ Bitstream Vera
 			if type(r.targetHud) == "boolean" then Rage.targetHud = r.targetHud end
 			if type(r.targetHudX) == "number" then Rage.targetHudX = math.clamp(r.targetHudX, 0, 1) end
 			if type(r.targetHudY) == "number" then Rage.targetHudY = math.clamp(r.targetHudY, 0, 1) end
+			if type(r.targetHudScale) == "number" then Rage.targetHudScale = math.clamp(r.targetHudScale, 0.4, 3) end
+			if type(r.alwaysOn) == "boolean" then Rage.alwaysOn = r.alwaysOn end
 		end
 		if type(data.movement) == "table" then
 			local m = data.movement
@@ -8476,7 +8503,8 @@ Bitstream Vera
 				end
 			end
 
-			if inGame and Aim.enabled and aimHeld and type(moveMouse) == "function" then
+			local aimActive = inGame and Aim.enabled and (Aim.alwaysOn or Aim.keyName == "None" or Aim.keyName == "Always" or aimHeld)
+			if aimActive then
 				local part = resolveStickyAimTarget()
 				if part and os.clock() >= aimReadyAt then
 					local now = os.clock()
@@ -8548,7 +8576,17 @@ Bitstream Vera
 									jy += (math.random() - 0.5) * human * 5
 								end
 							end
-							pcall(moveMouse, mx + jx, my + jy)
+							if type(moveMouse) == "function" then
+								pcall(moveMouse, mx + jx, my + jy)
+							else
+								-- Smooth mobile camera interpolation when mousemoverel is unavailable
+								pcall(function()
+									local curCF = cam.CFrame
+									local targetCF = CFrame.lookAt(curCF.Position, worldPos)
+									local lerpFactor = if smooth <= 0.05 then 0.85 else math.clamp(1 - math.exp(-math.max(dt, 1 / 240) * (6 + snap * 22)), 0.04, 0.6)
+									cam.CFrame = curCF:Lerp(targetCF, lerpFactor)
+								end)
+							end
 						else
 							local decay = math.clamp(0.35 + (1 - math.clamp(resolvedSmooth, 0, 40) / 40) * 0.4, 0.35, 0.9)
 							aimVelX *= (1 - decay)
@@ -8556,7 +8594,7 @@ Bitstream Vera
 						end
 					end
 				end
-			elseif not aimHeld then
+			elseif not aimActive then
 				aimStickyPart = nil
 				aimVelX = 0
 				aimVelY = 0
@@ -8938,7 +8976,8 @@ Bitstream Vera
 					setLmb(targetPart ~= nil)
 				end
 
-				if Flick.enabled and flickHeld and type(moveMouse) == "function" then
+				local flickActive = Flick.enabled and (Flick.alwaysOn or Flick.keyName == "None" or Flick.keyName == "Always" or flickHeld)
+				if flickActive then
 					local part = bestTarget(Flick.fov, Flick.hitboxes, Flick.flags, Flick.flags.visible == true)
 					if part then
 						local sp = cam:WorldToViewportPoint(part.Position)
@@ -8946,11 +8985,18 @@ Bitstream Vera
 						local dx = sp.X - center.X * 0.5
 						local dy = sp.Y - center.Y * 0.5
 						local speed = math.clamp(Flick.speed, 0.1, 10)
-						if speed <= 0.15 then
-							pcall(moveMouse, dx, dy)
+						if type(moveMouse) == "function" then
+							if speed <= 0.15 then
+								pcall(moveMouse, dx, dy)
+							else
+								local step = math.clamp((dt * 4.5) / speed, 0.02, 1)
+								pcall(moveMouse, dx * step, dy * step)
+							end
 						else
-							local step = math.clamp((dt * 4.5) / speed, 0.02, 1)
-							pcall(moveMouse, dx * step, dy * step)
+							pcall(function()
+								local step = math.clamp((dt * 4.5) / speed, 0.05, 0.9)
+								cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, part.Position), step)
+							end)
 						end
 						if Flick.shoot and math.abs(dx) < 10 and math.abs(dy) < 10 then
 							local now = os.clock()
@@ -12130,6 +12176,11 @@ Bitstream Vera
 				panel.Active = true
 				panel.Parent = screen
 
+				local uiScale = Instance.new("UIScale")
+				uiScale.Name = "Scale"
+				uiScale.Scale = tonumber(Rage.targetHudScale) or 1
+				uiScale.Parent = panel
+
 				local pCorner = Instance.new("UICorner")
 				pCorner.CornerRadius = UDim.new(0, 10)
 				pCorner.Parent = panel
@@ -12329,8 +12380,11 @@ Bitstream Vera
 					local vp = hudViewport()
 					local cur = UserInputService:GetMouseLocation()
 					local delta = cur - dragStart
-					local nextX = math.clamp(startPos.X + delta.X, 4, math.max(4, vp.X - panelW - 4))
-					local nextY = math.clamp(startPos.Y + delta.Y, 4, math.max(4, vp.Y - panelH - 4))
+					local sc = tonumber(Rage.targetHudScale) or 1
+					local effW = panelW * sc
+					local effH = panelH * sc
+					local nextX = math.clamp(startPos.X + delta.X, 4, math.max(4, vp.X - effW - 4))
+					local nextY = math.clamp(startPos.Y + delta.Y, 4, math.max(4, vp.Y - effH - 4))
 					objs.panel.Position = UDim2.new(0, nextX, 0, nextY)
 					Rage.targetHudX = (nextX + panelW * 0.5) / math.max(vp.X, 1)
 					Rage.targetHudY = nextY / math.max(vp.Y, 1)
@@ -12347,6 +12401,7 @@ Bitstream Vera
 				objs = {
 					screen = screen,
 					panel = panel,
+					uiScale = uiScale,
 					topAccent = topAccent,
 					avStroke = avStroke,
 					headshot = headshot,
@@ -12372,6 +12427,12 @@ Bitstream Vera
 			local lastAccentColor: Color3? = nil
 			local function applyTheme()
 				if not objs then return end
+				if objs.uiScale then
+					local sc = tonumber(Rage.targetHudScale) or 1
+					if objs.uiScale.Scale ~= sc then
+						objs.uiScale.Scale = sc
+					end
+				end
 				local accent = getAccentColor()
 				if accent == lastAccentColor then return end
 				lastAccentColor = accent
@@ -13030,6 +13091,16 @@ Bitstream Vera
 					if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.C) then
 						move -= Vector3.yAxis
 					end
+					if hum and hum.MoveDirection.Magnitude > 0.05 then
+						move += hum.MoveDirection
+						local flatLook = Vector3.new(look.X, 0, look.Z)
+						if flatLook.Magnitude > 0.01 and math.abs(look.Y) > 0.15 then
+							local fwdDot = hum.MoveDirection:Dot(flatLook.Unit)
+							if fwdDot > 0.2 then
+								move += Vector3.new(0, look.Y * fwdDot, 0)
+							end
+						end
+					end
 					local speed = math.clamp(Movement.flySpeed, 5, 500)
 					if move.Magnitude > 0 then
 						flyBv.Velocity = move.Unit * speed
@@ -13412,6 +13483,7 @@ Bitstream Vera
 				end
 				rageRefresh()
 			end)
+			kit.flag(rage, "always active", Rage, "alwaysOn")
 			local rageKey = kit.bind(rage, "keybind", function()
 				return Rage.keyName
 			end, function(name: string)
@@ -13673,6 +13745,7 @@ Bitstream Vera
 			table.insert(DrawingBridge.syncers, vizRefresh)
 			vizRefresh()
 			kit.flag(visualizerBox, "target hud", Rage, "targetHud")
+			kit.number(visualizerBox, "hud size", Rage, "targetHudScale", 0.5, 2, 0.05, { suffix = "x" })
 
 			local exploits = rageTab:AddSection("exploits", 2)
 			local gunSpeed: any
@@ -13727,6 +13800,7 @@ Bitstream Vera
 					DrawingBridge.requestSync()
 				end
 			end)
+			kit.flag(aim, "always active", Aim, "alwaysOn")
 			local aimKey = kit.bind(aim, "aim key", function()
 				return Aim.keyName
 			end, function(name: string)
@@ -13857,6 +13931,7 @@ Bitstream Vera
 					silentRefresh()
 				end
 			end)
+			kit.flag(silent, "always active", Silent, "alwaysOn")
 			local silentKey = kit.bind(silent, "keybind", function()
 				return Silent.keyName
 			end, function(name: string)

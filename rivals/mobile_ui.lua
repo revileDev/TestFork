@@ -1203,11 +1203,98 @@ local function wrapMobileSection(card, body, title)
         corner(badge, 4)
         stroke(badge, THEME.BorderDim, 1)
 
+        local waitingForInput = false
+        local listenConn = nil
+        local timerThread = nil
+
+        local function cleanupListening()
+            if listenConn then
+                listenConn:Disconnect()
+                listenConn = nil
+            end
+            if timerThread then
+                task.cancel(timerThread)
+                timerThread = nil
+            end
+            waitingForInput = false
+        end
+
+        local function updateBadgeVisual()
+            local display = tostring(bindName or "None")
+            if display == "Always" or display == "ALWAYS" then
+                badge.Text = "[Always]"
+                badge.TextColor3 = THEME.AccentBright
+            elseif display == "None" or display == "NONE" or display == "" then
+                badge.Text = "[None]"
+                badge.TextColor3 = THEME.TextMuted
+            else
+                badge.Text = "[" .. display .. "]"
+                badge.TextColor3 = THEME.AccentBright
+            end
+        end
+        updateBadgeVisual()
+
+        badge.MouseButton1Click:Connect(function()
+            if waitingForInput then
+                cleanupListening()
+                if bindName == "Always" then
+                    bindName = "None"
+                else
+                    bindName = "Always"
+                end
+                updateBadgeVisual()
+                local cbVal = (bindName == "Always") and "Always" or "None"
+                if keycallback then
+                    pcall(keycallback, cbVal)
+                end
+                return
+            end
+
+            waitingForInput = true
+            badge.Text = "[...]"
+            badge.TextColor3 = THEME.TextLight
+
+            listenConn = UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    local kc = input.KeyCode
+                    cleanupListening()
+                    if kc == Enum.KeyCode.Escape or kc == Enum.KeyCode.Backspace then
+                        bindName = "None"
+                        updateBadgeVisual()
+                        if keycallback then pcall(keycallback, "None") end
+                    else
+                        bindName = kc.Name
+                        updateBadgeVisual()
+                        if keycallback then pcall(keycallback, kc) end
+                    end
+                elseif input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    cleanupListening()
+                    if bindName == "Always" then
+                        bindName = "None"
+                    else
+                        bindName = "Always"
+                    end
+                    updateBadgeVisual()
+                    local cbVal = (bindName == "Always") and "Always" or "None"
+                    if keycallback then
+                        pcall(keycallback, cbVal)
+                    end
+                end
+            end)
+
+            timerThread = task.delay(3.5, function()
+                if waitingForInput then
+                    cleanupListening()
+                    updateBadgeVisual()
+                end
+            end)
+        end)
+
         local bindObj = { enabled = true }
         function bindObj:SetBind(newBind)
             bind = newBind
             bindName = typeof(bind) == "EnumItem" and bind.Name or tostring(bind)
-            badge.Text = "[" .. bindName .. "]"
+            updateBadgeVisual()
         end
 
         table.insert(section.options, { row = row, obj = bindObj })
