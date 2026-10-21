@@ -87,12 +87,21 @@ end
 _G.AtomwareUnload = function()
     local player = Players.LocalPlayer
     local playerGui = player and player:FindFirstChild("PlayerGui")
+    local cg = game:GetService("CoreGui")
     local gui = playerGui and (playerGui:FindFirstChild("AtomwareRivalsUI") or playerGui:FindFirstChild("AtomwareMobileRivalsUI"))
     if _G.AtomwareConfig then
         _G.AtomwareConfig:Unload(gui)
     elseif gui then
         gui:Destroy()
     end
+    pcall(function()
+        local cw = (playerGui and playerGui:FindFirstChild("Atomware_ChatroomWidget")) or (cg and cg:FindFirstChild("Atomware_ChatroomWidget"))
+        if cw then cw:Destroy() end
+        local sw = (playerGui and playerGui:FindFirstChild("Atomware_SearchWidget")) or (cg and cg:FindFirstChild("Atomware_SearchWidget"))
+        if sw then sw:Destroy() end
+    end)
+    _G.AtomwareChatroomLoaded = nil
+    _G.AtomwareSearchLoaded = nil
     _G.AtomwareUILoaded = nil
     _G.AtomwareFeaturesLoaded = nil
     _G.AtomwareWindow = nil
@@ -146,3 +155,14 @@ if _G.AtomwareConfig and _G.AtomwareConfig.Notify then
     _G.AtomwareConfig:Notify("Atomware Rivals Loaded (" .. (IS_MOBILE and "Mobile" or "PC") .. ")", 4)
 end
 print("[Atomware Rivals] Fully Initialized on " .. (IS_MOBILE and "Mobile Touch" or "Desktop PC") .. "!")
+
+-- 8. Load Atomware Chatroom Widget & Search Engine Widget
+task.spawn(function()
+    pcall(function()
+        loadModule("chatroom_widget.lua")
+    end)
+    pcall(function()
+        loadModule("games_database.lua")
+        loadModule("search_widget.lua")
+    end)
+end)
