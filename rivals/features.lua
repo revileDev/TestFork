@@ -20076,6 +20076,8 @@ Bitstream Vera
 					modelIds[name] = id
 					table.insert(modelNames, name)
 				end
+				DrawingBridge.modelNames = modelNames
+				DrawingBridge.modelIds = modelIds
 				if hasFsApi("makefolder") then
 					if not fsIsfolder(CONFIG_FOLDER) then
 						pcall(fsMakefolder, CONFIG_FOLDER)
@@ -20169,6 +20171,9 @@ Bitstream Vera
 				end
 				customRefresh()
 			end
+			DrawingBridge.loadPlayerModel = loadPlayerModel
+			DrawingBridge.scanPlayerModels = scanPlayerModels
+			DrawingBridge.customRefresh = customRefresh
 			kit.buttons(customModelBox, {
 				{ text = "load", callback = loadPlayerModel },
 				{
@@ -20231,7 +20236,7 @@ Bitstream Vera
 
 			customRefresh = function()
 				local on = ClientFx.customModel == true
-				modelList.enabled = on
+				modelList.enabled = true
 				cmCharSpin.enabled = on
 				cmCharSpinSpd.enabled = on and ClientFx.characterSpin == true
 				cmScale.enabled = on
@@ -23843,6 +23848,61 @@ Bitstream Vera
 			local perfBox = tab:AddSection("performance", 2)
 			perfBox.subTab = "lua"
 
+			local extrasModelBox = tab:AddSection("player model", 2)
+			extrasModelBox.subTab = "lua"
+
+			local extrasModels = DrawingBridge.modelNames or { "Classic R6", "Dummy", "Mini Dummy", "Noob" }
+			local extrasModelList: any
+			local function refreshExtrasModelList()
+				if not extrasModelList then return end
+				pcall(function()
+					extrasModelList:ClearValues()
+					local names = DrawingBridge.modelNames or extrasModels
+					for _, name in names do
+						extrasModelList:AddValue(name)
+					end
+					extrasModelList:Select(tostring(ClientFx.playerModelName or "Noob"), true)
+				end)
+			end
+
+			kit.flag(extrasModelBox, "player model", ClientFx, "customModel", nil, function()
+				if ClientFx.customModel ~= true then
+					ClientFx.customModelReplaceChar = false
+				end
+				if DrawingBridge.customRefresh then DrawingBridge.customRefresh() end
+			end)
+
+			extrasModelList = kit.choice(extrasModelBox, "saved", extrasModels, function()
+				return tostring(ClientFx.playerModelName or "Noob")
+			end, function(value: string)
+				ClientFx.playerModelName = value
+			end)
+
+			kit.buttons(extrasModelBox, {
+				{
+					text = "load",
+					callback = function()
+						if DrawingBridge.loadPlayerModel then
+							DrawingBridge.loadPlayerModel()
+						end
+					end
+				},
+				{
+					text = "refresh",
+					callback = function()
+						if DrawingBridge.scanPlayerModels then DrawingBridge.scanPlayerModels() end
+						refreshExtrasModelList()
+					end
+				}
+			})
+
+			kit.slider(extrasModelBox, "scale", 0.05, 5, 0.05, function()
+				return (ClientFx :: any)["customCharScale"] or 1
+			end, function(v: number)
+				(ClientFx :: any)["customCharScale"] = v
+				if DrawingBridge.customRefresh then DrawingBridge.customRefresh() end
+			end)
+
 			local fpsUnlockerOn = false
 			local fpsCapValue = 240
 			local function applyFpsCap()
@@ -23853,13 +23913,16 @@ Bitstream Vera
 			end
 
 			local fpsCapSlider: any
-			kit.flag(perfBox, "fps unlocker", function()
+			kit.toggle(perfBox, "fps unlocker", function()
 				return fpsUnlockerOn
 			end, function(v: boolean)
 				fpsUnlockerOn = v
 				applyFpsCap()
 				if fpsCapSlider then
 					fpsCapSlider.enabled = fpsUnlockerOn
+					pcall(function()
+						perfBox:UpdateOptions()
+					end)
 				end
 			end)
 
