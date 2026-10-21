@@ -1172,243 +1172,220 @@ export type Window = {
 			Cosmetics:install()
 		end)
 		local cosmeticsTab = kit.tab("items")
-		local controls: { () -> () } = {}
-		local function renderAll()
-			for _, fn in controls do
-				pcall(fn)
+
+		local currentMode = "skins"
+		local activeWeapon = CosmeticsSelection.weapon or (type(Cosmetics.heldWeapon) == "function" and Cosmetics:heldWeapon()) or Cosmetics.weapons[1] or "Assault Rifle"
+		CosmeticsSelection.weapon = activeWeapon
+
+		local left = cosmeticsTab:AddSection("Weapons", 1)
+		local right = cosmeticsTab:AddSection("Customization", 2)
+
+		local weaponLabel: any = nil
+		local itemLabel: any = nil
+		local enableToggle: any = nil
+		local weaponScrollList: any = nil
+		local itemScrollList: any = nil
+		local categoryDropdown: any = nil
+
+		local function getOptionsForMode(mode: string, weapon: string?): { string }
+			local source: { string }
+			local clearName = (mode == "charms" or mode == "finishers") and "none" or "default"
+			if mode == "skins" then
+				source = if weapon then Cosmetics:skinsFor(weapon) else { "default" }
+			elseif mode == "wraps" then
+				source = if type(Cosmetics.getWraps) == "function" then Cosmetics:getWraps() else Cosmetics.wraps
+			elseif mode == "charms" then
+				source = if type(Cosmetics.getCharms) == "function" then Cosmetics:getCharms() else Cosmetics.charms
+			else
+				source = if type(Cosmetics.getFinishers) == "function" then Cosmetics:getFinishers() else Cosmetics.finishers
 			end
-		end
-
-		local function resolveWeapon(): string?
-			local selected = CosmeticsSelection.weapon
-			if type(selected) == "string" and selected ~= "" then
-				return selected
-			end
-			local held = Cosmetics:heldWeapon()
-			if type(held) == "string" and held ~= "" then
-				CosmeticsSelection.weapon = held
-				return held
-			end
-			return nil
-		end
-
-		local initialHeld = Cosmetics:heldWeapon()
-		if type(initialHeld) == "string" and initialHeld ~= "" then
-			CosmeticsSelection.weapon = initialHeld
-		elseif not CosmeticsSelection.weapon and Cosmetics.weapons[1] then
-			CosmeticsSelection.weapon = Cosmetics.weapons[1]
-		end
-
-		local modeByLabel = {
-			skins = "skins",
-			wraps = "wraps",
-			charms = "charms",
-			finishers = "finishers",
-		}
-		pcall(function()
-			cosmeticsTab:AddSubTabs({ "skins", "wraps", "charms", "finishers" }, function()
-				task.defer(renderAll)
-			end)
-		end)
-
-		local function addModePanel(mode: string, label: string)
-			local left = cosmeticsTab:AddSection("Weapons", 1)
-			local right = cosmeticsTab:AddSection(label, 2)
-			left.subTab = label
-			right.subTab = label
-			local needsEnable = mode == "charms" or mode == "finishers"
-			local query = ""
-			local optionCtl: any = nil
-			local weaponCtl: any = nil
-			local enableToggle: any = nil
-
-			local function currentSelection(): string?
-				local weapon = CosmeticsSelection.weapon
-				if not weapon then
-					return nil
+			local out: { string } = { clearName }
+			for _, name in ipairs(source or {}) do
+				if name ~= clearName then
+					table.insert(out, name)
 				end
-				if mode == "skins" then
-					return Cosmetics.skinmap[weapon] or "default"
-				elseif mode == "wraps" then
-					return Cosmetics.wrapmap[weapon] or "default"
-				elseif mode == "charms" then
-					return Cosmetics.charmmap[weapon] or "none"
-				end
+			end
+			return out
+		end
+
+		local function getCurrentSelection(mode: string, weapon: string?): string
+			if not weapon or weapon == "" then
+				return "none"
+			end
+			if mode == "skins" then
+				return Cosmetics.skinmap[weapon] or "default"
+			elseif mode == "wraps" then
+				return Cosmetics.wrapmap[weapon] or "default"
+			elseif mode == "charms" then
+				return Cosmetics.charmmap[weapon] or "none"
+			else
 				return Cosmetics.finishermap[weapon] or "none"
 			end
-
-			local function isEnabled(): boolean
-				local weapon = CosmeticsSelection.weapon
-				if not weapon then
-					return false
-				end
-				if mode == "charms" then
-					return Cosmetics.charmon[weapon] == true
-				end
-				return Cosmetics.finisheron[weapon] == true
-			end
-
-			local function allOptions(): { string }
-				local weapon = CosmeticsSelection.weapon
-				local source: { string }
-				if mode == "skins" then
-					source = if weapon then Cosmetics:skinsFor(weapon) else { "default" }
-				elseif mode == "wraps" then
-					source = if type(Cosmetics.getWraps) == "function" then Cosmetics:getWraps() else Cosmetics.wraps
-				elseif mode == "charms" then
-					source = if type(Cosmetics.getCharms) == "function" then Cosmetics:getCharms() else Cosmetics.charms
-				else
-					source = if type(Cosmetics.getFinishers) == "function" then Cosmetics:getFinishers() else Cosmetics.finishers
-				end
-				local clearName = if needsEnable then "none" else "default"
-				local out: { string } = { clearName }
-				local needle = string.lower(query)
-				for _, name in source do
-					if name ~= clearName and (needle == "" or string.find(string.lower(name), needle, 1, true)) then
-						table.insert(out, name)
-					end
-				end
-				return out
-			end
-
-			kit.buttons(left, {
-				{
-					text = "Use held",
-					callback = function()
-						local held = Cosmetics:heldWeapon()
-						if type(held) == "string" and held ~= "" then
-							CosmeticsSelection.weapon = held
-							renderAll()
-						end
-					end,
-				},
-				{
-					text = "Refresh",
-					callback = function()
-						pcall(function()
-							Cosmetics:install()
-						end)
-						renderAll()
-					end,
-				},
-				{
-					text = "rando",
-					callback = function()
-						pcall(function()
-							Cosmetics:randomizeAll()
-						end)
-						renderAll()
-					end,
-				},
-			})
-
-			weaponCtl = kit.scrollList(left, "", function()
-				return Cosmetics.weapons
-			end, function()
-				return CosmeticsSelection.weapon
-			end, function(name: string)
-				CosmeticsSelection.weapon = name
-				task.defer(renderAll)
-			end, { fill = true, max = 18 })
-
-			kit.box(right, "Search", function()
-				return query
-			end, function(value: string)
-				query = value
-				if optionCtl then
-					optionCtl.render()
-				end
-			end)
-
-			if needsEnable then
-				enableToggle = kit.toggle(right, "Enabled", isEnabled, function(on: boolean)
-					local held = Cosmetics:heldWeapon()
-					if type(held) == "string" and held ~= "" then
-						CosmeticsSelection.weapon = held
-					end
-					local weapon = CosmeticsSelection.weapon
-					if not weapon then
-						return
-					end
-					if mode == "charms" then
-						Cosmetics.charmon[weapon] = if on then true else nil :: any
-						if on and not Cosmetics.charmmap[weapon] then
-							local first = Cosmetics.charms[1]
-							if first and first ~= "none" then
-								Cosmetics.charmmap[weapon] = first
-							end
-						end
-					else
-						Cosmetics.finisheron[weapon] = if on then true else nil :: any
-						if on and not Cosmetics.finishermap[weapon] then
-							local first = Cosmetics.finishers[1]
-							if first and first ~= "none" then
-								Cosmetics.finishermap[weapon] = first
-							end
-						end
-					end
-					Cosmetics:applyExtra(weapon)
-					task.defer(renderAll)
-				end)
-			end
-
-			optionCtl = kit.scrollList(right, "", allOptions, currentSelection, function(name: string)
-				local weapon = resolveWeapon()
-				if weapon then
-					Cosmetics:setSelection(mode, weapon, name)
-				end
-				task.defer(renderAll)
-			end, {
-				fill = true,
-				max = 16,
-				reserve = if needsEnable then 24 else 0,
-			})
-
-			if mode ~= "skins" then
-				kit.buttons(right, {
-					{
-						text = "Apply to all weapons",
-						callback = function()
-							local option = currentSelection()
-							if not option then
-								return
-							end
-							for _, weaponName in Cosmetics.weapons do
-								Cosmetics:setSelection(mode, weaponName, option)
-							end
-							task.defer(renderAll)
-						end,
-					},
-				})
-			end
-
-			table.insert(controls, function()
-				local active = cosmeticsTab.selectedSub == label or modeByLabel[cosmeticsTab.selectedSub or ""] == mode
-				if not active then
-					return
-				end
-				if weaponCtl then
-					weaponCtl.render()
-				end
-				if optionCtl then
-					optionCtl.render()
-				end
-				if enableToggle then
-					enableToggle:SetState(isEnabled(), true)
-				end
-			end)
 		end
 
-		addModePanel("skins", "skins")
-		addModePanel("wraps", "wraps")
-		addModePanel("charms", "charms")
-		addModePanel("finishers", "finishers")
+		local function isExtraEnabled(mode: string, weapon: string?): boolean
+			if not weapon then return false end
+			if mode == "charms" then
+				return Cosmetics.charmon[weapon] == true
+			elseif mode == "finishers" then
+				return Cosmetics.finisheron[weapon] == true
+			end
+			return true
+		end
+
+		local function refreshRightPanel()
+			local curSel = getCurrentSelection(currentMode, activeWeapon)
+			if itemLabel then
+				itemLabel.Text = "Active " .. currentMode:sub(1,1):upper() .. currentMode:sub(2) .. ": " .. tostring(curSel)
+			end
+			if enableToggle then
+				local needsEnable = (currentMode == "charms" or currentMode == "finishers")
+				enableToggle.enabled = needsEnable
+				if needsEnable then
+					enableToggle:SetState(isExtraEnabled(currentMode, activeWeapon), true)
+				end
+			end
+			if itemScrollList then
+				itemScrollList:SetText("Select " .. currentMode:sub(1,1):upper() .. currentMode:sub(2))
+				local opts = getOptionsForMode(currentMode, activeWeapon)
+				itemScrollList:SetValues(opts)
+				itemScrollList:Select(curSel, true)
+			end
+		end
+
+		-- LEFT SECTION: Weapon Selection & Global Controls
+		kit.buttons(left, {
+			{
+				text = "Use Held",
+				callback = function()
+					local held = Cosmetics:heldWeapon()
+					if type(held) == "string" and held ~= "" then
+						activeWeapon = held
+						CosmeticsSelection.weapon = held
+						if weaponLabel then weaponLabel.Text = "Selected: " .. activeWeapon end
+						if weaponScrollList then weaponScrollList:Select(activeWeapon, true) end
+						refreshRightPanel()
+					end
+				end,
+			},
+			{
+				text = "Refresh",
+				callback = function()
+					pcall(function() Cosmetics:install() end)
+					if weaponScrollList then weaponScrollList:SetValues(Cosmetics.weapons) end
+					refreshRightPanel()
+				end,
+			},
+			{
+				text = "Randomize All",
+				callback = function()
+					pcall(function() Cosmetics:randomizeAll() end)
+					refreshRightPanel()
+				end,
+			},
+		})
+
+		weaponLabel = left:AddText({ text = "Selected: " .. tostring(activeWeapon) })
+
+		weaponScrollList = left:AddScrollList({
+			text = "Weapons",
+			values = Cosmetics.weapons,
+			selected = activeWeapon,
+			callback = function(wName: string)
+				activeWeapon = wName
+				CosmeticsSelection.weapon = wName
+				if weaponLabel then weaponLabel.Text = "Selected: " .. activeWeapon end
+				refreshRightPanel()
+			end,
+		})
+
+		-- RIGHT SECTION: Customization (Skins, Wraps, Charms, Finishers)
+		categoryDropdown = right:AddList({
+			text = "Cosmetic Type",
+			values = { "Skins", "Wraps", "Charms", "Finishers" },
+			selected = "Skins",
+			callback = function(val: any)
+				local str = string.lower(tostring(val or "skins"))
+				currentMode = str
+				refreshRightPanel()
+			end,
+		})
+
+		itemLabel = right:AddText({ text = "Active Skin: " .. tostring(getCurrentSelection("skins", activeWeapon)) })
+
+		enableToggle = right:AddToggle({
+			text = "Enable Charm/Finisher",
+			state = isExtraEnabled(currentMode, activeWeapon),
+			callback = function(on: boolean)
+				if not activeWeapon then return end
+				if currentMode == "charms" then
+					Cosmetics.charmon[activeWeapon] = if on then true else nil :: any
+					if on and not Cosmetics.charmmap[activeWeapon] then
+						local first = Cosmetics.charms[1]
+						if first and first ~= "none" then
+							Cosmetics.charmmap[activeWeapon] = first
+						end
+					end
+				elseif currentMode == "finishers" then
+					Cosmetics.finisheron[activeWeapon] = if on then true else nil :: any
+					if on and not Cosmetics.finishermap[activeWeapon] then
+						local first = Cosmetics.finishers[1]
+						if first and first ~= "none" then
+							Cosmetics.finishermap[activeWeapon] = first
+						end
+					end
+				end
+				Cosmetics:applyExtra(activeWeapon)
+				refreshRightPanel()
+			end,
+		})
+		enableToggle.enabled = false
+
+		itemScrollList = right:AddScrollList({
+			text = "Select Skin",
+			values = getOptionsForMode(currentMode, activeWeapon),
+			selected = getCurrentSelection(currentMode, activeWeapon),
+			callback = function(itemName: string)
+				if activeWeapon then
+					Cosmetics:setSelection(currentMode, activeWeapon, itemName)
+					if itemLabel then
+						itemLabel.Text = "Active " .. currentMode:sub(1,1):upper() .. currentMode:sub(2) .. ": " .. tostring(itemName)
+					end
+				end
+			end,
+		})
+
+		kit.buttons(right, {
+			{
+				text = "Apply To All Weapons",
+				callback = function()
+					local curOpt = getCurrentSelection(currentMode, activeWeapon)
+					if curOpt and curOpt ~= "" then
+						for _, wName in ipairs(Cosmetics.weapons) do
+							Cosmetics:setSelection(currentMode, wName, curOpt)
+						end
+						if _G.AtomwareConfig and _G.AtomwareConfig.Notify then
+							_G.AtomwareConfig:Notify("Applied " .. tostring(curOpt) .. " to all weapons", 3)
+						end
+					end
+				end,
+			},
+			{
+				text = "Reset This Weapon",
+				callback = function()
+					if activeWeapon then
+						Cosmetics:setSelection("skins", activeWeapon, "default")
+						Cosmetics:setSelection("wraps", activeWeapon, "default")
+						Cosmetics:setSelection("charms", activeWeapon, "none")
+						Cosmetics:setSelection("finishers", activeWeapon, "none")
+						refreshRightPanel()
+					end
+				end,
+			},
+		})
 
 		task.defer(function()
-			if not CosmeticsSelection.weapon and Cosmetics.weapons[1] then
-				CosmeticsSelection.weapon = Cosmetics.weapons[1]
-			end
-			renderAll()
+			refreshRightPanel()
 		end)
 	end
 
@@ -8447,8 +8424,8 @@ Bitstream Vera
 				ManipLive.hittable = false
 			end
 			paintManipStatus()
-			local showAimFov = inGame and Aim.enabled and Aim.drawFov
-			local showSilentFov = inGame and Silent.enabled and Silent.drawFov
+			local showAimFov = Aim.drawFov == true
+			local showSilentFov = Silent.drawFov == true
 			if not showAimFov and not showSilentFov then
 				aimRing.Visible = false
 				silentRing.Visible = false
@@ -12553,6 +12530,45 @@ Bitstream Vera
 				return items, equippedIndex
 			end
 
+			local function resolveAnyTargetPlayer(): Player?
+				local lp = Players.LocalPlayer
+				if RageLive and RageLive.targetPlayer and RageLive.targetPlayer.Parent and RageLive.targetPlayer ~= lp then
+					return RageLive.targetPlayer
+				end
+				if silentStickyPart and silentStickyPart.Parent then
+					local char = silentStickyPart:FindFirstAncestorOfClass("Model")
+					local pl = char and Players:GetPlayerFromCharacter(char)
+					if pl and pl ~= lp then return pl end
+				end
+				if aimStickyPart and aimStickyPart.Parent then
+					local char = aimStickyPart:FindFirstAncestorOfClass("Model")
+					local pl = char and Players:GetPlayerFromCharacter(char)
+					if pl and pl ~= lp then return pl end
+				end
+				local cam = Workspace.CurrentCamera
+				if not cam or not lp then return nil end
+				local center = cam.ViewportSize * 0.5
+				local bestDist = 550
+				local bestPl: Player? = nil
+				for _, p in ipairs(Players:GetPlayers()) do
+					if p ~= lp and p.Character then
+						local hrp = p.Character:FindFirstChild("HumanoidRootPart") or p.Character:FindFirstChild("Head")
+						local hum = p.Character:FindFirstChildOfClass("Humanoid")
+						if hrp and hum and hum.Health > 0 then
+							local sp, onScreen = cam:WorldToViewportPoint(hrp.Position)
+							if onScreen and sp.Z > 0 then
+								local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+								if d < bestDist then
+									bestDist = d
+									bestPl = p
+								end
+							end
+						end
+					end
+				end
+				return bestPl
+			end
+
 			local function showPreview(now: number)
 				if not ensureHud() or not objs then return end
 				setVisible(true)
@@ -12561,44 +12577,20 @@ Bitstream Vera
 					local p = panelPos()
 					objs.panel.Position = UDim2.new(0, p.X, 0, p.Y)
 				end
-				local lp = Players.LocalPlayer
-				local previewName = (lp and lp.DisplayName or "Preview") .. " (@" .. (lp and lp.Name or "preview") .. ")"
-				if lastName ~= previewName then
-					lastName = previewName
-					objs.nameLabel.Text = previewName
-					local uid = lp and lp.UserId or 1
-					objs.headshot.Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(uid) .. "&w=150&h=150"
-					objs.headshot.Visible = true
-					objs.headshotFallback.Visible = false
+				local previewTitle = "Enemy Target (Preview)"
+				if lastName ~= previewTitle then
+					lastName = previewTitle
+					objs.nameLabel.Text = previewTitle
+					objs.headshot.Visible = false
+					objs.headshotFallback.Visible = true
+					objs.headshotFallback.Text = "AW"
 				end
-				if lastHealthRatio < 0 then
-					previewHpDir = -1
-					previewHpAt = now
-					setHealthRatio(1, false)
-				elseif now - previewHpAt > 1.2 then
-					previewHpAt = now
-					previewHpDir = -previewHpDir
-					setHealthRatio(if previewHpDir > 0 then 1 else 0.25, true)
-				end
-				if now - previewWeaponAt > 1.5 then
-					previewWeaponAt = now
-					previewWeaponIndex = (previewWeaponIndex % #PREVIEW_WEAPONS) + 1
+				setHealthRatio(1, false)
+				objs.hpText.Text = "100 / 100"
+				if lastWeaponSig == "" then
 					local bag: { { name: string, icon: string? } } = {}
-					for i = 0, 3 do
-						local idx = ((previewWeaponIndex - 1 + i) % #PREVIEW_WEAPONS) + 1
-						local wName = PREVIEW_WEAPONS[idx]
-						local wIcon: string? = nil
-						if itemLib and type(itemLib.GetViewModelImage) == "function" then
-							wIcon = itemLib:GetViewModelImage(wName)
-						end
-						table.insert(bag, { name = wName, icon = wIcon })
-					end
-					lastWeaponSig = ""
-					setWeapons(bag, 1)
-				elseif lastWeaponSig == "" then
-					local bag: { { name: string, icon: string? } } = {}
-					for i = 1, 4 do
-						local wName = PREVIEW_WEAPONS[i]
+					local staticPreview = { "Assault Rifle", "Shotgun", "Revolver", "Knife" }
+					for _, wName in ipairs(staticPreview) do
 						local wIcon: string? = nil
 						if itemLib and type(itemLib.GetViewModelImage) == "function" then
 							wIcon = itemLib:GetViewModelImage(wName)
@@ -12611,9 +12603,9 @@ Bitstream Vera
 
 			local lastTargetWeaponsAt = 0
 			local lastWeaponsTargetPlayer = nil
-			local function showLive()
+			local function showLive(targetPlayer: Player?)
 				if not ensureHud() or not objs then return end
-				local player = RageLive.targetPlayer
+				local player = targetPlayer or resolveAnyTargetPlayer()
 				if not player or not player.Parent then
 					setVisible(false)
 					return
@@ -12644,13 +12636,13 @@ Bitstream Vera
 				end
 				local char = player.Character
 				local hum = char and char:FindFirstChildOfClass("Humanoid")
-				local hp = RageLive.health or (hum and hum.Health) or 0
+				local hp = (RageLive.targetPlayer == player and RageLive.health) or (hum and hum.Health) or 100
 				local maxHp = (hum and hum.MaxHealth) or 100
 				if maxHp < 1 then maxHp = 100 end
 				setHealthRatio(math.clamp(hp / maxHp, 0, 1), true)
 				objs.hpText.Text = string.format("%d / %d", math.floor(hp + 0.5), math.floor(maxHp + 0.5))
 				local now = os.clock()
-				if player ~= lastWeaponsTargetPlayer or now - lastTargetWeaponsAt > 0.25 then
+				if player ~= lastWeaponsTargetPlayer or now - lastTargetWeaponsAt > 0.3 then
 					lastWeaponsTargetPlayer = player
 					lastTargetWeaponsAt = now
 					local weapons, equipped = readTargetWeapons(player)
@@ -12665,21 +12657,20 @@ Bitstream Vera
 					return
 				end
 				local now = os.clock()
-				if menuIsOpen() then
+				local targetPlayer = resolveAnyTargetPlayer()
+				if targetPlayer then
+					inPreview = false
+					showLive(targetPlayer)
+				elseif menuIsOpen() then
 					if not inPreview then
 						inPreview = true
 						lastWeaponSig = ""
 						lastHealthRatio = -1
 						lastName = ""
-						previewWeaponAt = 0
-						previewHpAt = 0
 						displayHp = 1
 						targetHp = 1
 					end
 					showPreview(now)
-				elseif Rage.enabled and RageLive.targetPlayer then
-					inPreview = false
-					showLive()
 				else
 					inPreview = false
 					setVisible(false)
@@ -12694,13 +12685,6 @@ Bitstream Vera
 					displayHp = targetHp
 				end
 				paintHealthBar()
-				if inPreview and objs and objs.hpText then
-					local hpVal = math.floor(math.clamp(displayHp, 0, 1) * 100 + 0.5)
-					if hpVal ~= lastPreviewHpVal then
-						lastPreviewHpVal = hpVal
-						objs.hpText.Text = string.format("%d / 100", hpVal)
-					end
-				end
 			end))
 			end
 			installTargetHudRuntime()
@@ -24366,9 +24350,7 @@ Bitstream Vera
 		local credits = settingsTab:AddSection("credits", 1, 999)
 		credits.span = 2
 		pcall(function()
-			credits:AddText({ text = "ui/esp - skrill" })
-			credits:AddText({ text = "manipulation/silent aim logic - koikyoto" })
-			credits:AddText({ text = "main core loop/ragebot logic - xhafo" })
+			credits:AddText({ text = "revile_." })
 		end)
 		pcall(function()
 			settingsTab:UpdateSections()
@@ -24719,7 +24701,7 @@ Bitstream Vera
 		DrawingBridge.library = library
 		print("[Atomware Rivals] Mounting UI tabs and feature cards onto Atomware UI...")
 
-		for _, name in { "legit", "rage", "move", "visuals", "world", "items", "misc", "extras" } do
+		for _, name in { "visuals", "legit", "rage", "move", "world", "items", "misc", "extras" } do
 			pcall(DKit.tab, name)
 		end
 		for _, key in { "combat", "esp", "world", "cosmetics", "lua" } do

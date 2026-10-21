@@ -329,10 +329,22 @@ ContentArea.Position = UDim2.fromOffset(164, 48)
 ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = MainFrame
 
+local TAB_ORDER = {
+    ["Visuals"]   = 1,
+    ["Legit"]     = 2,
+    ["Rage"]      = 3,
+    ["Movement"]  = 4,
+    ["World"]     = 5,
+    ["Cosmetics"] = 6,
+    ["Misc"]      = 7,
+    ["Extras"]    = 8,
+    ["Settings"]  = 9,
+}
+
 local Pages = {}
 local PageColumns = {}
 local TabButtons = {}
-local CurrentPageName = "Legit"
+local CurrentPageName = "Visuals"
 
 local function switchPage(name)
     CurrentPageName = name
@@ -1238,6 +1250,7 @@ function AtomwareWindow:AddTab(rawName, order)
     local btn = Instance.new("TextButton")
     btn.Name = displayName .. "Tab"
     btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.LayoutOrder = TAB_ORDER[displayName] or 99
     btn.BackgroundColor3 = (displayName == CurrentPageName) and THEME.AccentDark or THEME.Card
     btn.Text = "  " .. icon .. "  " .. displayName
     btn.TextColor3 = (displayName == CurrentPageName) and THEME.AccentBright or THEME.TextMuted
@@ -1283,7 +1296,7 @@ function AtomwareWindow:AddTab(rawName, order)
 end
 
 function AtomwareWindow:UpdateTabs()
-    -- Tabs update dynamically
+    switchPage("Visuals")
 end
 
 function AtomwareWindow:SetOpen(visible)

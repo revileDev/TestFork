@@ -376,6 +376,7 @@ padding(TabBar, 6, 6, 8, 8)
 local TabListLayout = Instance.new("UIListLayout")
 TabListLayout.FillDirection = Enum.FillDirection.Horizontal
 TabListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 TabListLayout.Padding = UDim.new(0, 6)
 TabListLayout.Parent = TabBar
 
@@ -387,10 +388,22 @@ ContentArea.Position = UDim2.fromOffset(0, 86)
 ContentArea.Size = UDim2.new(1, 0, 1, -86)
 ContentArea.Parent = MainFrame
 
+local TAB_ORDER = {
+    ["Visuals"]   = 1,
+    ["Legit"]     = 2,
+    ["Rage"]      = 3,
+    ["Movement"]  = 4,
+    ["World"]     = 5,
+    ["Cosmetics"] = 6,
+    ["Misc"]      = 7,
+    ["Extras"]    = 8,
+    ["Settings"]  = 9,
+}
+
 local Pages = {}
 local PageColumns = {}
 local TabButtons = {}
-local CurrentPageName = "Legit"
+local CurrentPageName = "Visuals"
 local responsiveLayouts = {}
 
 local function updateResponsiveLayouts()
@@ -1466,6 +1479,7 @@ function AtomwareMobileWindow:AddTab(rawName, order)
     local btn = Instance.new("TextButton")
     btn.Name = displayName .. "Tab"
     btn.Size = UDim2.fromOffset(88, 28)
+    btn.LayoutOrder = TAB_ORDER[displayName] or 99
     btn.BackgroundColor3 = (displayName == CurrentPageName) and THEME.AccentDark or THEME.Card
     btn.Text = icon .. " " .. displayName
     btn.TextColor3 = (displayName == CurrentPageName) and THEME.AccentBright or THEME.TextMuted
@@ -1508,7 +1522,7 @@ function AtomwareMobileWindow:AddTab(rawName, order)
 end
 
 function AtomwareMobileWindow:UpdateTabs()
-    switchPage("Legit")
+    switchPage("Visuals")
 end
 
 function AtomwareMobileWindow:SetOpen(visible)
