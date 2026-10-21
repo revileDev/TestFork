@@ -150,6 +150,8 @@ ScreenGui.Parent = getGuiParent()
 
 if _G.AtomwareConfig then _G.AtomwareConfig:AttachUI(ScreenGui, "Desktop PC") end
 
+local activeDropdownCloser = nil
+
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.fromOffset(720, 520)
@@ -543,12 +545,17 @@ local function wrapSection(card, body, title)
         local toggleObj = { enabled = true }
 
         local function setState(val, skipCallback)
-            state = (val == true)
+            local newVal = (val == true)
+            if state == newVal and skipCallback then return end
+            state = newVal
             lbl.TextColor3 = state and THEME.Text or THEME.TextMuted
-            tween(btn, TweenInfo.new(0.14), { BackgroundColor3 = state and THEME.Accent or THEME.CardAlt })
-            tween(knob, TweenInfo.new(0.14), { Position = state and UDim2.new(1, -15, 0.5, -6) or UDim2.fromOffset(3, 3) })
-            if not skipCallback and callback then
-                pcall(callback, state)
+            if skipCallback then
+                btn.BackgroundColor3 = state and THEME.Accent or THEME.CardAlt
+                knob.Position = state and UDim2.new(1, -15, 0.5, -6) or UDim2.fromOffset(3, 3)
+            else
+                tween(btn, TweenInfo.new(0.12), { BackgroundColor3 = state and THEME.Accent or THEME.CardAlt })
+                tween(knob, TweenInfo.new(0.12), { Position = state and UDim2.new(1, -15, 0.5, -6) or UDim2.fromOffset(3, 3) })
+                if callback then pcall(callback, state) end
             end
         end
 
@@ -576,6 +583,7 @@ local function wrapSection(card, body, title)
 
             local chipObj = {}
             function chipObj:SetColor(newColor, skipCb)
+                if col == newColor and skipCb then return end
                 col = newColor
                 chip.BackgroundColor3 = col
                 if not skipCb and cb then pcall(cb, col) end
@@ -662,7 +670,9 @@ local function wrapSection(card, body, title)
         local sliderObj = { enabled = true }
 
         local function setValue(newVal, skipCallback)
-            val = math.clamp(math.floor(newVal / inc + 0.5) * inc, min, max)
+            local computedVal = math.clamp(math.floor(newVal / inc + 0.5) * inc, min, max)
+            if val == computedVal and skipCallback then return end
+            val = computedVal
             local pct = (val - min) / (max - min)
             fill.Size = UDim2.new(pct, 0, 1, 0)
             valLbl.Text = tostring(val) .. suffix
@@ -714,6 +724,7 @@ local function wrapSection(card, body, title)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 44)
         row.BackgroundTransparency = 1
+        row.ClipsDescendants = true
         row.Parent = body
 
         local lbl = Instance.new("TextLabel")
@@ -750,12 +761,11 @@ local function wrapSection(card, body, title)
         arrow.Parent = btn
 
         local dropFrame = Instance.new("Frame")
-        dropFrame.Size = UDim2.new(1, 0, 0, math.min(#values * 22 + 4, 140))
-        dropFrame.Position = UDim2.new(0, 0, 1, 3)
+        dropFrame.Size = UDim2.new(1, 0, 0, 100)
+        dropFrame.Position = UDim2.fromOffset(0, 44)
         dropFrame.BackgroundColor3 = THEME.Header
         dropFrame.Visible = false
-        dropFrame.ZIndex = 90
-        dropFrame.Parent = btn
+        dropFrame.Parent = row
         corner(dropFrame, 5)
         stroke(dropFrame, THEME.Accent, 1)
 
@@ -766,7 +776,6 @@ local function wrapSection(card, body, title)
         scroll.ScrollBarThickness = 2
         scroll.ScrollBarImageColor3 = THEME.Accent
         scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        scroll.ZIndex = 91
         scroll.Parent = dropFrame
 
         local listLayout = Instance.new("UIListLayout")
@@ -785,11 +794,39 @@ local function wrapSection(card, body, title)
             end
         end
 
-        local function rebuildOptions()
-            for _, child in ipairs(scroll:GetChildren()) do
-                if child:IsA("TextButton") then child:Destroy() end
+        local function closeDropdown()
+            if not open then return end
+            open = false
+            dropFrame.Visible = false
+            row.Size = UDim2.new(1, 0, 0, 44)
+            arrow.Text = "▼"
+            if activeDropdownCloser == closeDropdown then
+                activeDropdownCloser = nil
             end
-            dropFrame.Size = UDim2.new(1, 0, 0, math.min(#values * 22 + 4, 140))
+        end
+
+        local function rebuildOptions()
+            if not open then return end
+            for _, child in ipairs(scroll:GetChildren()) do
+                if child:IsA("TextButton") or child:IsA("TextLabel") then child:Destroy() end
+            end
+            local count = #values
+            local dropHeight = math.clamp(count * 22 + 4, 28, 130)
+            dropFrame.Size = UDim2.new(1, 0, 0, dropHeight)
+            row.Size = UDim2.new(1, 0, 0, 44 + dropHeight + 4)
+
+            if count == 0 then
+                local emptyLbl = Instance.new("TextLabel")
+                emptyLbl.Size = UDim2.new(1, 0, 0, 20)
+                emptyLbl.BackgroundTransparency = 1
+                emptyLbl.Text = "No items available"
+                emptyLbl.TextColor3 = THEME.TextDim
+                emptyLbl.TextSize = 10
+                emptyLbl.Font = FONT
+                emptyLbl.Parent = scroll
+                return
+            end
+
             for _, opt in ipairs(values) do
                 local optBtn = Instance.new("TextButton")
                 optBtn.Size = UDim2.new(1, 0, 0, 20)
@@ -799,11 +836,11 @@ local function wrapSection(card, body, title)
                 optBtn.TextSize = 10
                 optBtn.Font = FONT
                 optBtn.TextXAlignment = Enum.TextXAlignment.Left
-                optBtn.ZIndex = 92
+                optBtn.AutoButtonColor = false
                 optBtn.Parent = scroll
                 corner(optBtn, 3)
 
-                trackConnection(optBtn.MouseButton1Click:Connect(function()
+                optBtn.MouseButton1Click:Connect(function()
                     if multi then
                         selected = type(selected) == "table" and selected or {}
                         local f = table.find(selected, opt)
@@ -814,44 +851,50 @@ local function wrapSection(card, body, title)
                     else
                         selected = opt
                         refreshText()
-                        open = false
-                        dropFrame.Visible = false
-                        arrow.Text = "▼"
+                        closeDropdown()
                         if callback then pcall(callback, selected) end
                     end
-                end))
+                end)
             end
         end
-        rebuildOptions()
 
         trackConnection(btn.MouseButton1Click:Connect(function()
-            open = not open
-            dropFrame.Visible = open
-            arrow.Text = open and "▲" or "▼"
+            if open then
+                closeDropdown()
+            else
+                if activeDropdownCloser and activeDropdownCloser ~= closeDropdown then
+                    activeDropdownCloser()
+                end
+                open = true
+                activeDropdownCloser = closeDropdown
+                arrow.Text = "▲"
+                dropFrame.Visible = true
+                rebuildOptions()
+            end
         end))
 
         function listObj:Select(val, skipCallback)
             selected = val
             refreshText()
-            rebuildOptions()
+            if open then rebuildOptions() end
             if not skipCallback and callback then pcall(callback, selected) end
         end
 
         function listObj:ClearValues()
             values = {}
             listObj.values = values
-            rebuildOptions()
+            if open then rebuildOptions() end
         end
 
         function listObj:AddValue(val)
             table.insert(values, val)
-            rebuildOptions()
+            if open then rebuildOptions() end
         end
 
         function listObj:SetValues(newVals)
             values = newVals or {}
             listObj.values = values
-            rebuildOptions()
+            if open then rebuildOptions() end
         end
 
         function listObj:SetText(newTxt)
@@ -969,6 +1012,7 @@ local function wrapSection(card, body, title)
 
         local colorObj = { enabled = true }
         function colorObj:SetColor(newColor, skipCb)
+            if color == newColor and skipCb then return end
             color = newColor
             chip.BackgroundColor3 = color
             if not skipCb and callback then pcall(callback, color) end
