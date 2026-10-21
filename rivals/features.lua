@@ -6003,7 +6003,7 @@ Bitstream Vera
 		accuracy = 100,
 		fov = 300,
 		fovOrigin = "Center",
-		drawFov = true,
+		drawFov = false,
 		dynamicFov = false,
 		targetAimTarget = false,
 		visibleCheck = false,
@@ -8424,8 +8424,8 @@ Bitstream Vera
 				ManipLive.hittable = false
 			end
 			paintManipStatus()
-			local showAimFov = Aim.drawFov == true
-			local showSilentFov = Silent.drawFov == true
+			local showAimFov = Aim.enabled == true and Aim.drawFov == true
+			local showSilentFov = Silent.enabled == true and Silent.drawFov == true
 			if not showAimFov and not showSilentFov then
 				aimRing.Visible = false
 				silentRing.Visible = false

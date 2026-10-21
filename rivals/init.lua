@@ -101,7 +101,6 @@ _G.AtomwareUnload = function()
         if sw then sw:Destroy() end
     end)
     _G.AtomwareChatroomLoaded = nil
-    _G.AtomwareSearchLoaded = nil
     _G.AtomwareUILoaded = nil
     _G.AtomwareFeaturesLoaded = nil
     _G.AtomwareWindow = nil
@@ -156,13 +155,9 @@ if _G.AtomwareConfig and _G.AtomwareConfig.Notify then
 end
 print("[Atomware Rivals] Fully Initialized on " .. (IS_MOBILE and "Mobile Touch" or "Desktop PC") .. "!")
 
--- 8. Load Atomware Chatroom Widget & Search Engine Widget
+-- 8. Load Atomware Chatroom Widget
 task.spawn(function()
     pcall(function()
         loadModule("chatroom_widget.lua")
-    end)
-    pcall(function()
-        loadModule("games_database.lua")
-        loadModule("search_widget.lua")
     end)
 end)
