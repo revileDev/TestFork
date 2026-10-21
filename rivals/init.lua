@@ -1,0 +1,148 @@
+--[[
+    Atomware Rivals - init.lua
+    Universal Master Initializer for Atomware Rivals
+    Connected to TestFork Repository (https://github.com/revileDev/TestFork)
+    Automatically detects platform (Mobile Touch vs Desktop PC) and loads dedicated UI + Features Backend.
+]]
+
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+
+-- If the initializer is run again, unload the previous UI/backend first.
+if _G.AtomwareUnload and (_G.AtomwareUILoaded or _G.AtomwareFeaturesLoaded) then
+    pcall(_G.AtomwareUnload)
+end
+_G.AtomwareUILoaded = nil
+_G.AtomwareFeaturesLoaded = nil
+_G.AtomwareWindow = nil
+_G.AtomwareEvents = nil
+_G.OnToggle = nil
+_G.OnSlider = nil
+_G.OnDropdown = nil
+_G.OnColorPicker = nil
+_G.OnKeybind = nil
+
+-- Platform Detection
+local IS_MOBILE = UserInputService.TouchEnabled
+local targetUIFile = IS_MOBILE and "mobile_ui.lua" or "main_ui.lua"
+
+-- =========================================================================
+-- Hybrid Secure Module Loader
+-- 1. Direct TestFork GitHub loader with dynamic cache-busting
+-- 2. In-Memory Virtual File System (Fallback)
+-- 3. Virtual require hook
+-- =========================================================================
+local function loadModule(path)
+    local cleanName = path:gsub("%.lua$", "")
+
+    -- 1. TestFork GitHub Repository (Primary direct source with live cache-busting)
+    local TESTFORK_URL = "https://raw.githubusercontent.com/revileDev/TestFork/main/rivals/"
+    local cacheBuster = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
+    local okTest, testSource = pcall(function()
+        return game:HttpGet(TESTFORK_URL .. path .. "?v=" .. cacheBuster)
+    end)
+    if okTest and testSource and #testSource > 0 and not testSource:find("404: Not Found") and not testSource:find("<!DOCTYPE") then
+        local compileOk, chunk, compileErr = pcall(loadstring, testSource)
+        if compileOk and chunk then
+            local runOk, runErr = pcall(chunk)
+            if runOk then return true end
+            warn("[Atomware Rivals] Error running module from TestFork (" .. path .. "):", runErr)
+        else
+            warn("[Atomware Rivals] Error compiling module from TestFork (" .. path .. "):", compileErr)
+        end
+    end
+
+    -- 2. In-Memory Virtual File System (Fallback)
+    if type(__VFS_MODULES) == "table" then
+        local loader = __VFS_MODULES[path] or __VFS_MODULES[cleanName]
+        if loader then
+            local ok, err = pcall(loader)
+            if ok then return true end
+            warn("[Atomware Rivals] Failed to execute in-memory module " .. path .. ":", err)
+        end
+    end
+
+    -- 3. Virtual require hook
+    if type(require) == "function" then
+        local ok, res = pcall(require, cleanName)
+        if ok and res ~= nil then
+            return true
+        end
+    end
+
+    warn("[Atomware Rivals] Could not load module: " .. path)
+    return false
+end
+
+-- 1. Load Cleanup Manager & Shared Configuration
+if not loadModule("cleanup.lua") then
+    warn("[Atomware Rivals] cleanup manager could not be loaded; startup aborted.")
+    return
+end
+if not loadModule("config.lua") then
+    warn("[Atomware Rivals] shared configuration could not be loaded; startup aborted.")
+    return
+end
+
+_G.AtomwareUnload = function()
+    local player = Players.LocalPlayer
+    local playerGui = player and player:FindFirstChild("PlayerGui")
+    local gui = playerGui and (playerGui:FindFirstChild("AtomwareRivalsUI") or playerGui:FindFirstChild("AtomwareMobileRivalsUI"))
+    if _G.AtomwareConfig then
+        _G.AtomwareConfig:Unload(gui)
+    elseif gui then
+        gui:Destroy()
+    end
+    _G.AtomwareUILoaded = nil
+    _G.AtomwareFeaturesLoaded = nil
+    _G.AtomwareWindow = nil
+    _G.AtomwareEvents = nil
+    _G.OnToggle = nil
+end
+
+-- 2. Load Cosmetics Subsystem
+if not loadModule("cosmetics.lua") then
+    warn("[Atomware Rivals] cosmetics subsystem could not be loaded; continuing.")
+end
+
+-- 3. Load Platform UI (mobile_ui.lua vs main_ui.lua)
+if not loadModule(targetUIFile) then
+    if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
+    return
+end
+
+-- 4. Wait for UI hooks to initialize (timeout after 15 s)
+local uiWaitCount = 0
+repeat
+    task.wait()
+    uiWaitCount = uiWaitCount + 1
+    if uiWaitCount > 900 then
+        warn("[Atomware Rivals] UI failed to initialise after 15s — aborting.")
+        if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
+        return
+    end
+until _G.AtomwareUILoaded and _G.AtomwareWindow
+
+-- 5. Load Features Backend Engine
+if not loadModule("features.lua") then
+    warn("[Atomware Rivals] features backend could not be loaded; cleaning up startup.")
+    if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
+    return
+end
+
+-- 6. Verify everything is online (timeout after 15 s)
+local verifyCount = 0
+repeat
+    task.wait()
+    verifyCount = verifyCount + 1
+    if verifyCount > 900 then
+        warn("[Atomware Rivals] Features failed to mark loaded after 15s — check features.lua for errors.")
+        break
+    end
+until _G.AtomwareUILoaded and _G.AtomwareFeaturesLoaded
+
+-- 7. Confirmation Toast & Print
+if _G.AtomwareConfig and _G.AtomwareConfig.Notify then
+    _G.AtomwareConfig:Notify("Atomware Rivals Loaded (" .. (IS_MOBILE and "Mobile" or "PC") .. ")", 4)
+end
+print("[Atomware Rivals] Fully Initialized on " .. (IS_MOBILE and "Mobile Touch" or "Desktop PC") .. "!")
