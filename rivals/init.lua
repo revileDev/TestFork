@@ -329,6 +329,20 @@ _G.AtomwareIsLiteMode = isLiteMode
 local function loadModule(path)
     local cleanName = path:gsub("%.lua$", "")
 
+    -- 0. Local Filesystem (Direct executor file fallback)
+    if type(readfile) == "function" then
+        local okFs, src = pcall(readfile, path)
+        if not okFs then okFs, src = pcall(readfile, "rivals/" .. path) end
+        if okFs and type(src) == "string" and #src > 0 then
+            local compileOk, chunk = pcall(loadstring, src)
+            if compileOk and chunk then
+                local runOk, runErr = pcall(chunk)
+                if runOk then return true end
+                warn("[Atomware Rivals] Error executing local module " .. path .. ":", runErr)
+            end
+        end
+    end
+
     -- 1. TestFork GitHub Repository (Primary direct source with live cache-busting)
     local TESTFORK_URL = "https://raw.githubusercontent.com/revileDev/TestFork/main/rivals/"
     local cacheBuster = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
@@ -378,6 +392,13 @@ if not loadModule("config.lua") then
     return
 end
 
+-- 1.5 Load & Initialize Rivals Anticheat Emulator (Runs automatically in both Full and Lite mode)
+task.spawn(function()
+    pcall(function()
+        loadModule("emu.lua")
+    end)
+end)
+
 _G.AtomwareUnload = function()
     local player = Players.LocalPlayer
     local playerGui = player and player:FindFirstChild("PlayerGui")
@@ -393,6 +414,13 @@ _G.AtomwareUnload = function()
         if cw then cw:Destroy() end
         local sw = (playerGui and playerGui:FindFirstChild("Atomware_SearchWidget")) or (cg and cg:FindFirstChild("Atomware_SearchWidget"))
         if sw then sw:Destroy() end
+    end)
+    if _G.AtomwareEmulator and type(_G.AtomwareEmulator.stop) == "function" then
+        pcall(_G.AtomwareEmulator.stop)
+    end
+    pcall(function()
+        local emuGui = (playerGui and playerGui:FindFirstChild("Atomware_EmulatorDebugUI")) or (cg and cg:FindFirstChild("Atomware_EmulatorDebugUI"))
+        if emuGui then emuGui:Destroy() end
     end)
     _G.AtomwareChatroomLoaded = nil
     _G.AtomwareUILoaded = nil
