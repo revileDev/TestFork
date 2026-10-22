@@ -514,8 +514,33 @@ end
 --// LITEMODE HEADLESS / MOCK SECTION SYSTEM
 --//==================================================
 
+local function createMockButton()
+    local btn = { enabled = true, count = 1, buttons = {} }
+    function btn:AddButton(opts)
+        return createMockButton()
+    end
+    return btn
+end
+
+local function createMockScrollList(opts)
+    local list = {
+        values = opts and opts.values or {},
+        selected = opts and opts.selected or "",
+        enabled = true,
+    }
+    function list:AddValue(val)
+        table.insert(list.values, val)
+    end
+    function list:SetValues(newVals)
+        list.values = newVals or {}
+    end
+    function list:SetText(txt) end
+    return list
+end
+
 local function createMockSection(name)
-    local mockSec = { text = name, options = {} }
+    local mockSec = { text = name, options = {}, subTab = "main" }
+
     function mockSec:AddToggle(opts)
         local state = opts and opts.state or false
         return {
@@ -528,6 +553,7 @@ local function createMockSection(name)
             AddKeyPicker = function(self) return { SetKey = function() end } end,
         }
     end
+
     function mockSec:AddSlider(opts)
         local val = opts and opts.default or 0
         return {
@@ -538,6 +564,7 @@ local function createMockSection(name)
             end,
         }
     end
+
     function mockSec:AddDropdown(opts)
         local sel = opts and opts.default or nil
         return {
@@ -548,31 +575,76 @@ local function createMockSection(name)
             end,
         }
     end
+
     function mockSec:AddList(opts)
+        return createMockScrollList(opts)
+    end
+
+    function mockSec:AddScrollList(opts)
+        return createMockScrollList(opts)
+    end
+
+    function mockSec:AddBox(opts)
         return {
-            values = opts and opts.values or {},
-            selected = nil,
-            AddValue = function() end,
-            SetValues = function() end,
-            SetText = function() end,
+            text = opts and opts.default or "",
+            SetInput = function() end,
         }
     end
-    function mockSec:AddBox(opts)
-        return { text = opts and opts.default or "" }
-    end
+
     function mockSec:AddBind(opts)
         return {
             bind = opts and opts.bind or "None",
             SetBind = function() end,
         }
     end
+
     function mockSec:AddColor(opts)
         return {
             color = opts and opts.default or Color3.new(1, 1, 1),
             SetColor = function() end,
         }
     end
+
+    function mockSec:AddButton(opts)
+        return createMockButton()
+    end
+
+    function mockSec:AddText(opts)
+        return { SetText = function() end }
+    end
+
+    function mockSec:AddSeparator()
+        return {}
+    end
+
     function mockSec:UpdateOptions() end
+
+    setmetatable(mockSec, {
+        __index = function(t, k)
+            return function(...)
+                return {
+                    values = {},
+                    selected = nil,
+                    state = false,
+                    value = 0,
+                    text = "",
+                    enabled = true,
+                    count = 1,
+                    AddButton = function() return createMockButton() end,
+                    AddValue = function() end,
+                    SetValues = function() end,
+                    SetText = function() end,
+                    SetState = function() end,
+                    SetValue = function() end,
+                    SetColor = function() end,
+                    SetBind = function() end,
+                    SetInput = function() end,
+                    Select = function() end,
+                    UpdateOptions = function() end,
+                }
+            end
+        end
+    })
     return mockSec
 end
 
@@ -585,6 +657,19 @@ local mockTabObj = {
     AddSubTabs = function() end,
     UpdateSections = function() end,
 }
+
+setmetatable(mockTabObj, {
+    __index = function(t, k)
+        if k == "AddSection" then
+            return function(self, text, side, order)
+                return createMockSection(text)
+            end
+        end
+        return function(...)
+            return mockTabObj
+        end
+    end
+})
 
 --//==================================================
 --// CONTAINED CARD BUILDER
