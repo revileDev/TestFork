@@ -1478,6 +1478,17 @@ export type Window = {
 		chamsOccluded: EspColor,
 		chamsOccluded2: EspColor,
 		chamsTransparency: number,
+		elimChams: boolean?,
+		elimChamsColor: EspColor?,
+		elimChamsDuration: number?,
+		elimChamsMaterial: string?,
+		killFlash: boolean?,
+		killFlashColor: EspColor?,
+		killFlashDuration: number?,
+		damageIndicators: boolean?,
+		indicatorColor: EspColor?,
+		indicatorStroke: EspColor?,
+		indicatorDuration: number?,
 		onshot: boolean,
 		onshotShowVisible: boolean,
 		onshotShowOccluded: boolean,
@@ -1554,6 +1565,17 @@ export type Window = {
 		chamsOccluded = Color3.fromRGB(255, 80, 80),
 		chamsOccluded2 = Color3.fromRGB(150, 30, 40),
 		chamsTransparency = 0.35,
+		elimChams = false,
+		elimChamsColor = Color3.fromRGB(255, 60, 60),
+		elimChamsDuration = 1.2,
+		elimChamsMaterial = "Ghost",
+		killFlash = false,
+		killFlashColor = Color3.fromRGB(90, 170, 255),
+		killFlashDuration = 0.6,
+		damageIndicators = false,
+		indicatorColor = Color3.fromRGB(255, 230, 80),
+		indicatorStroke = Color3.fromRGB(15, 15, 15),
+		indicatorDuration = 0.8,
 		onshot = false,
 		onshotShowVisible = true,
 		onshotShowOccluded = true,
@@ -1703,6 +1725,15 @@ export type Window = {
 			chamsOccluded = colorToTable(Esp.chamsOccluded),
 			chamsOccluded2 = colorToTable(Esp.chamsOccluded2),
 			chamsTransparency = Esp.chamsTransparency,
+			elimChams = Esp.elimChams,
+			elimChamsColor = colorToTable(Esp.elimChamsColor),
+			elimChamsDuration = Esp.elimChamsDuration,
+			killFlash = Esp.killFlash,
+			killFlashColor = colorToTable(Esp.killFlashColor),
+			killFlashDuration = Esp.killFlashDuration,
+			damageIndicators = Esp.damageIndicators,
+			indicatorColor = colorToTable(Esp.indicatorColor),
+			indicatorDuration = Esp.indicatorDuration,
 			onshot = Esp.onshot,
 			onshotShowVisible = Esp.onshotShowVisible,
 			onshotShowOccluded = Esp.onshotShowOccluded,
@@ -1817,6 +1848,15 @@ export type Window = {
 		Esp.chamsOccluded = tableToColor(data.chamsOccluded, Esp.chamsOccluded)
 		Esp.chamsOccluded2 = tableToColor(data.chamsOccluded2, Esp.chamsOccluded)
 		if type(data.chamsTransparency) == "number" then Esp.chamsTransparency = math.clamp(data.chamsTransparency, 0, 0.95) end
+		if type(data.elimChams) == "boolean" then Esp.elimChams = data.elimChams end
+		Esp.elimChamsColor = tableToColor(data.elimChamsColor, Esp.elimChamsColor)
+		if type(data.elimChamsDuration) == "number" then Esp.elimChamsDuration = data.elimChamsDuration end
+		if type(data.killFlash) == "boolean" then Esp.killFlash = data.killFlash end
+		Esp.killFlashColor = tableToColor(data.killFlashColor, Esp.killFlashColor)
+		if type(data.killFlashDuration) == "number" then Esp.killFlashDuration = data.killFlashDuration end
+		if type(data.damageIndicators) == "boolean" then Esp.damageIndicators = data.damageIndicators end
+		Esp.indicatorColor = tableToColor(data.indicatorColor, Esp.indicatorColor)
+		if type(data.indicatorDuration) == "number" then Esp.indicatorDuration = data.indicatorDuration end
 		if type(data.onshot) == "boolean" then Esp.onshot = data.onshot end
 		if type(data.onshotShowVisible) == "boolean" then Esp.onshotShowVisible = data.onshotShowVisible end
 		if type(data.onshotShowOccluded) == "boolean" then Esp.onshotShowOccluded = data.onshotShowOccluded end
@@ -1902,6 +1942,12 @@ export type Window = {
 			{ key = "chamsOccluded2" },
 		})
 		local chamsAlpha = kit.number(features, "Chams transparency", state, "chamsTransparency", 0, 0.95, 0.05)
+		local elimChams = kit.flag(features, "Elimination chams", state, "elimChams", { { key = "elimChamsColor" } })
+		local elimDur = kit.number(features, "Elimination duration", state, "elimChamsDuration", 0.2, 5.0, 0.1, { suffix = "s" })
+		local killFlash = kit.flag(features, "Kill flash", state, "killFlash", { { key = "killFlashColor" } })
+		local killFlashDur = kit.number(features, "Kill flash duration", state, "killFlashDuration", 0.1, 3.0, 0.05, { suffix = "s" })
+		local dmgInd = kit.flag(features, "Damage indicators", state, "damageIndicators", { { key = "indicatorColor" } })
+		local dmgIndDur = kit.number(features, "Indicator duration", state, "indicatorDuration", 0.2, 3.0, 0.1, { suffix = "s" })
 		local onshot = kit.flag(features, "Onshot", state, "onshot", nil, function()
 			refreshFeatures()
 		end)
@@ -1969,6 +2015,12 @@ export type Window = {
 				{ chamsVis, on and state.chams },
 				{ chamsOcc, on and state.chams },
 				{ chamsAlpha, on and state.chams },
+				{ elimChams, on and state.chams },
+				{ elimDur, on and state.chams and state.elimChams },
+				{ killFlash, on },
+				{ killFlashDur, on and state.killFlash },
+				{ dmgInd, on },
+				{ dmgIndDur, on and state.damageIndicators },
 				{ onshot, on },
 				{ onshotVis, on and state.onshot },
 				{ onshotOcc, on and state.onshot },
@@ -23932,6 +23984,149 @@ Bitstream Vera
 	installClientFxRuntime()
 	end
 	installWorldRuntime()
+	end
+
+	-- Damage Indicators Runtime
+	local function create3DDamageIndicator(part: BasePart?, damage: number)
+		local Esp = DrawingBridge.Esp
+		if not Esp or not Esp.damageIndicators or not part or not part.Parent then return end
+		local anchor = Instance.new("Part")
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.Transparency = 1
+		anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+		anchor.Position = part.Position
+		anchor.Parent = Workspace
+
+		local bbg = Instance.new("BillboardGui")
+		bbg.AlwaysOnTop = true
+		bbg.Size = UDim2.new(0, 180, 0, 45)
+		local randX = (math.random(-12, 12) / 10)
+		local startOffset = Vector3.new(randX, 1.8 + (math.random(-4, 4) / 10), 0)
+		bbg.StudsOffset = startOffset
+		bbg.Adornee = anchor
+		bbg.Parent = resolveParent(nil) or Workspace
+
+		local label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.new(1, 0, 1, 0)
+		label.Font = Enum.Font.GothamBold
+		label.Text = tostring(math.floor(damage + 0.5))
+		label.TextColor3 = Esp.indicatorColor or Color3.fromRGB(255, 230, 80)
+		label.TextSize = 24
+		label.Rotation = math.random(-25, 25)
+		label.Parent = bbg
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 1.8
+		stroke.Color = Esp.indicatorStroke or Color3.fromRGB(15, 15, 15)
+		stroke.LineJoinMode = Enum.LineJoinMode.Round
+		stroke.Parent = label
+
+		local scale = Instance.new("UIScale")
+		scale.Scale = 0
+		scale.Parent = label
+
+		task.spawn(function()
+			local TweenService = game:GetService("TweenService")
+			TweenService:Create(scale, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+			TweenService:Create(bbg, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { StudsOffset = startOffset + Vector3.new(0, 1.4, 0) }):Play()
+			task.wait(Esp.indicatorDuration or 0.8)
+			local fadeOut = TweenService:Create(label, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1 })
+			TweenService:Create(stroke, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Transparency = 1 }):Play()
+			TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Scale = 0 }):Play()
+			fadeOut:Play()
+			fadeOut.Completed:Wait()
+			pcall(function() bbg:Destroy(); anchor:Destroy() end)
+		end)
+	end
+	DrawingBridge.CreateDamageIndicator = create3DDamageIndicator
+
+	-- Elimination Chams & Kill Flash Runtime
+	do
+		local playerHpTrack: { [Player]: number } = {}
+		local flashGui: ScreenGui? = nil
+		local flashFrame: Frame? = nil
+
+		local function ensureKillFlashGui()
+			if flashGui and flashGui.Parent then return flashFrame end
+			local parent = resolveParent(nil)
+			if not parent then return nil end
+			flashGui = Instance.new("ScreenGui")
+			flashGui.Name = "__sonata_kill_flash"
+			flashGui.DisplayOrder = 9999
+			flashGui.ResetOnSpawn = false
+			flashFrame = Instance.new("Frame")
+			flashFrame.Name = "Flash"
+			flashFrame.Size = UDim2.new(1, 0, 1, 0)
+			flashFrame.BackgroundTransparency = 1
+			flashFrame.BorderSizePixel = 0
+			flashFrame.Parent = flashGui
+			flashGui.Parent = parent
+			return flashFrame
+		end
+
+		local function triggerElimination(targetPlayer: Player, char: Model)
+			local Esp = DrawingBridge.Esp
+			if not Esp then return end
+			-- Kill Flash
+			if Esp.killFlash then
+				local frame = ensureKillFlashGui()
+				if frame then
+					frame.BackgroundColor3 = Esp.killFlashColor or Color3.fromRGB(90, 170, 255)
+					frame.BackgroundTransparency = 0.35
+					task.spawn(function()
+						local TweenService = game:GetService("TweenService")
+						local tw = TweenService:Create(frame, TweenInfo.new(Esp.killFlashDuration or 0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 })
+						tw:Play()
+					end)
+				end
+			end
+			-- Elimination Chams
+			if Esp.elimChams and char and char.Parent then
+				pcall(function()
+					local hl = Instance.new("Highlight")
+					hl.Name = "__elim_cham"
+					hl.Adornee = char
+					hl.FillColor = Esp.elimChamsColor or Color3.fromRGB(255, 60, 60)
+					hl.FillTransparency = 0.2
+					hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+					hl.OutlineTransparency = 0
+					hl.Parent = char
+					task.spawn(function()
+						local TweenService = game:GetService("TweenService")
+						local dur = Esp.elimChamsDuration or 1.2
+						local tw = TweenService:Create(hl, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { FillTransparency = 1, OutlineTransparency = 1 })
+						tw:Play()
+						tw.Completed:Wait()
+						pcall(function() hl:Destroy() end)
+					end)
+				end)
+			end
+		end
+
+		RunService.Heartbeat:Connect(function()
+			local lp = Players.LocalPlayer
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= lp then
+					local char = p.Character
+					local hum = char and char:FindFirstChildOfClass("Humanoid")
+					local root = char and char:FindFirstChild("HumanoidRootPart")
+					if hum and root then
+						local curHp = hum.Health
+						local prevHp = playerHpTrack[p]
+					if prevHp and prevHp > curHp then
+						local dmg = prevHp - curHp
+						create3DDamageIndicator(root, dmg)
+						if curHp <= 0 and prevHp > 0 then
+							triggerElimination(p, char)
+						end
+					end
+					playerHpTrack[p] = curHp
+					end
+				end
+			end
+		end)
 	end
 
 	local rebuildConfigList: (() -> ())? = nil
