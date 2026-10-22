@@ -13124,27 +13124,221 @@ Bitstream Vera
 			end
 
 			local function getActiveFovSettings(cam: Camera): (Vector2, number)
-				local center = cam.ViewportSize * 0.5
-				local fovOrigin = center
-				local fovRadius = 250
+				local screenCenter = cam.ViewportSize * 0.5
 
-				-- Priority 1: Silent Aim (drawFov or enabled)
-				if Silent.drawFov or Silent.enabled then
+				-- Priority 1: Check visually active rendered rings first
+				if silentRing and silentRing.Visible and silentRing.AbsoluteSize.X > 5 then
+					local pos = silentRing.AbsolutePosition + silentRing.AbsoluteSize * 0.5
+					local radius = silentRing.AbsoluteSize.X * 0.5
+					return pos, radius
+				end
+				if aimRing and aimRing.Visible and aimRing.AbsoluteSize.X > 5 then
+					local pos = aimRing.AbsolutePosition + aimRing.AbsoluteSize * 0.5
+					local radius = aimRing.AbsoluteSize.X * 0.5
+					return pos, radius
+				end
+
+				-- Priority 2: Configured active FOV drawing
+				if Silent.drawFov or (Silent.enabled and Silent.drawFov) then
 					local curSilentFov = (Aim.editProfile ~= "Global" and resolvedSilentFov) or Silent.fov or 250
-					fovRadius = computeEffectiveFov(curSilentFov, false, cam)
-					fovOrigin = resolveFovOriginScreen(Silent.fovOrigin, cam, silentStickyPart) or center
+					local fovRadius = computeEffectiveFov(curSilentFov, false, cam)
+					local fovOrigin = resolveFovOriginScreen(Silent.fovOrigin, cam, silentStickyPart) or screenCenter
 					return fovOrigin, math.max(10, fovRadius)
 				end
 
-				-- Priority 2: Aim (drawFov or enabled)
-				if Aim.drawFov or Aim.enabled then
+				if Aim.drawFov or (Aim.enabled and Aim.drawFov) then
 					local curAimFov = resolvedAimFov or Aim.fov or 150
-					fovRadius = computeEffectiveFov(curAimFov, Aim.dynamicFov, cam)
-					fovOrigin = resolveFovOriginScreen(Aim.fovOrigin, cam, aimStickyPart) or center
+					local fovRadius = computeEffectiveFov(curAimFov, Aim.dynamicFov, cam)
+					local fovOrigin = resolveFovOriginScreen(Aim.fovOrigin, cam, aimStickyPart) or screenCenter
 					return fovOrigin, math.max(10, fovRadius)
 				end
 
-				return fovOrigin, fovRadius
+				-- Priority 3: Active aimbot feature enabled without drawing
+				if Silent.enabled then
+					local curSilentFov = (Aim.editProfile ~= "Global" and resolvedSilentFov) or Silent.fov or 250
+					local fovRadius = computeEffectiveFov(curSilentFov, false, cam)
+					local fovOrigin = resolveFovOriginScreen(Silent.fovOrigin, cam, silentStickyPart) or screenCenter
+					return fovOrigin, math.max(10, fovRadius)
+				end
+
+				if Aim.enabled then
+					local curAimFov = resolvedAimFov or Aim.fov or 150
+					local fovRadius = computeEffectiveFov(curAimFov, Aim.dynamicFov, cam)
+					local fovOrigin = resolveFovOriginScreen(Aim.fovOrigin, cam, aimStickyPart) or screenCenter
+					return fovOrigin, math.max(10, fovRadius)
+				end
+
+				return screenCenter, 250
+			end
+
+			local function resolveCandidateCharacter(player: Player): (Model?, Humanoid?)
+				if not player or not player.Parent or player == Players.LocalPlayer then
+					return nil, nil
+				end
+
+				-- 1. In a duel: use livingEnemy
+				local duel, team = matchEnemies()
+				if duel then
+					local c, h = livingEnemy(player, duel, team)
+					if c and c.Parent then
+						return c, h
+					end
+				end
+
+				-- 2. Combat controllers FighterController
+				pcall(function()
+					local fighter = select(1, combatControllers())
+					if fighter and fighter.Objects then
+						for _, obj in fighter.Objects do
+							if obj and obj.Player == player and obj.Entity and obj.Entity.RootPart then
+								local root = obj.Entity.RootPart
+								local char = root.Parent
+								if char and char:IsA("Model") and char.Parent then
+									local hum = obj.Entity.Humanoid or char:FindFirstChildOfClass("Humanoid")
+									return char, hum
+								end
+							end
+						end
+					end
+				end)
+
+				-- 3. Standard livingCharacter
+				local c2, h2 = livingCharacter(player)
+				if c2 and c2.Parent then
+					return c2, h2
+				end
+
+				-- 4. Direct player.Character fallback
+				local char = player.Character
+				if char and char.Parent then
+					local hum = char:FindFirstChildOfClass("Humanoid")
+					return char, hum
+				end
+
+				return nil, nil
+			end
+
+			local function isCandidateAlive(player: Player, char: Model?, hum: Humanoid?): boolean
+				if RageLive and RageLive.targetPlayer == player and RageLive.health and RageLive.health > 0 then
+					return true
+				end
+				if hum and hum.Health and hum.Health > 0 then
+					return true
+				end
+				if char and char.Parent then
+					local head = char:FindFirstChild("Head") or char:FindFirstChild("HitboxHead")
+					local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+					if head or root then
+						if hum and hum.Health and hum.Health <= 0 then
+							return false
+						end
+						return true
+					end
+				end
+				return false
+			end
+
+			local function isCandidateEnemy(player: Player): boolean
+				local lp = Players.LocalPlayer
+				if not lp or player == lp then
+					return false
+				end
+
+				local duel, localTeam = matchEnemies()
+				if duel then
+					local dueler = duel.GetDueler and duel:GetDueler(player)
+					if dueler then
+						if dueler._is_ally == true then
+							return false
+						end
+						local theirTeam = dueler:Get("TeamID")
+						if theirTeam ~= nil and localTeam ~= nil and theirTeam == localTeam then
+							return false
+						end
+						return true
+					end
+				end
+
+				if silentEnemyOf and silentEnemyOf[player] ~= nil then
+					return silentEnemyOf[player] == true
+				end
+
+				if type(isCombatEnemy) == "function" then
+					local ok, isEnemy = pcall(isCombatEnemy, player)
+					if ok and isEnemy ~= nil then
+						return isEnemy == true
+					end
+				end
+
+				local lpTeam = lp.Team
+				local pTeam = player.Team
+				if lpTeam ~= nil and pTeam ~= nil and lpTeam == pTeam then
+					local teamsSvc = game:FindService("Teams")
+					if teamsSvc and #teamsSvc:GetTeams() > 1 then
+						return false
+					end
+				end
+
+				return true
+			end
+
+			local function getCharFovDistSq(char: Model?, fovCenter: Vector2, cam: Camera): (number?, Vector2?)
+				if not char or not char.Parent then return nil, nil end
+				local bestSq: number? = nil
+				local bestPos: Vector2? = nil
+				local partNames = { "Head", "HitboxHead", "UpperTorso", "HumanoidRootPart", "Torso", "LowerTorso" }
+				for _, name in ipairs(partNames) do
+					local part = char:FindFirstChild(name)
+					if part and part:IsA("BasePart") then
+						local sp, onScreen = cam:WorldToViewportPoint(part.Position)
+						if onScreen and sp.Z > 0 then
+							local sPos = Vector2.new(sp.X, sp.Y)
+							local dx = sPos.X - fovCenter.X
+							local dy = sPos.Y - fovCenter.Y
+							local sq = dx * dx + dy * dy
+							if bestSq == nil or sq < bestSq then
+								bestSq = sq
+								bestPos = sPos
+							end
+						end
+					end
+				end
+				if bestSq ~= nil then
+					return bestSq, bestPos
+				end
+
+				for _, child in ipairs(char:GetChildren()) do
+					if child:IsA("BasePart") then
+						local sp, onScreen = cam:WorldToViewportPoint(child.Position)
+						if onScreen and sp.Z > 0 then
+							local sPos = Vector2.new(sp.X, sp.Y)
+							local dx = sPos.X - fovCenter.X
+							local dy = sPos.Y - fovCenter.Y
+							local sq = dx * dx + dy * dy
+							if bestSq == nil or sq < bestSq then
+								bestSq = sq
+								bestPos = sPos
+							end
+						end
+					end
+				end
+
+				local okPivot, pivotCf = pcall(function() return char:GetPivot() end)
+				if okPivot and pivotCf then
+					local sp, onScreen = cam:WorldToViewportPoint(pivotCf.Position)
+					if onScreen and sp.Z > 0 then
+						local sPos = Vector2.new(sp.X, sp.Y)
+						local dx = sPos.X - fovCenter.X
+						local dy = sPos.Y - fovCenter.Y
+						local sq = dx * dx + dy * dy
+						if bestSq == nil or sq < bestSq then
+							bestSq = sq
+							bestPos = sPos
+						end
+					end
+				end
+
+				return bestSq, bestPos
 			end
 
 			local function findTargetPlayerInFov(): Player?
@@ -13156,27 +13350,7 @@ Bitstream Vera
 				local fovCenter, fovRadius = getActiveFovSettings(cam)
 				local radiusSq = fovRadius * fovRadius
 
-				local function getCharScreenPos(char: Model?): (Vector2?, boolean)
-					if not char then return nil, false end
-					local head = char:FindFirstChild("Head") or char:FindFirstChild("HitboxHead")
-					local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
-					local part = head or root
-					if part and part:IsA("BasePart") then
-						local sp, onScreen = cam:WorldToViewportPoint(part.Position)
-						if onScreen and sp.Z > 0 then
-							return Vector2.new(sp.X, sp.Y), true
-						end
-					end
-					if root and root ~= part and root:IsA("BasePart") then
-						local sp, onScreen = cam:WorldToViewportPoint(root.Position)
-						if onScreen and sp.Z > 0 then
-							return Vector2.new(sp.X, sp.Y), true
-						end
-					end
-					return nil, false
-				end
-
-				-- 1. Check current locked/sticky target first if alive and inside FOV
+				-- 1. Check sticky candidates first
 				local stickyCandidates = {}
 				if silentStickyPart and silentStickyPart.Parent then
 					local c = silentStickyPart:FindFirstAncestorOfClass("Model")
@@ -13193,14 +13367,11 @@ Bitstream Vera
 				end
 
 				for _, cand in ipairs(stickyCandidates) do
-					local c = cand.Character
-					local hum = c and c:FindFirstChildOfClass("Humanoid")
-					if hum and hum.Health > 0 then
-						local sPos, onScreen = getCharScreenPos(c)
-						if onScreen and sPos then
-							local dx = sPos.X - fovCenter.X
-							local dy = sPos.Y - fovCenter.Y
-							if (dx * dx + dy * dy) <= radiusSq then
+					if isCandidateEnemy(cand) then
+						local c, hum = resolveCandidateCharacter(cand)
+						if isCandidateAlive(cand, c, hum) then
+							local distSq, _ = getCharFovDistSq(c, fovCenter, cam)
+							if distSq and distSq <= radiusSq then
 								return cand
 							end
 						end
@@ -13211,7 +13382,6 @@ Bitstream Vera
 				pcall(function()
 					refreshSilentRoster(os.clock())
 				end)
-				local rosterReady = next(silentEnemyOf) ~= nil
 
 				local bestPl: Player? = nil
 				local bestDistSq = radiusSq
@@ -13220,28 +13390,18 @@ Bitstream Vera
 					if p == lp or not p.Parent then
 						continue
 					end
-					local isEnemy = if rosterReady then silentEnemyOf[p] == true else (p.Team == nil or lp.Team == nil or p.Team ~= lp.Team)
-					if not isEnemy then
+					if not isCandidateEnemy(p) then
 						continue
 					end
-					local char = p.Character
-					if not char then
-						continue
-					end
-					local hum = char:FindFirstChildOfClass("Humanoid")
-					if not hum or hum.Health <= 0 then
+					local char, hum = resolveCandidateCharacter(p)
+					if not isCandidateAlive(p, char, hum) then
 						continue
 					end
 
-					local sPos, onScreen = getCharScreenPos(char)
-					if onScreen and sPos then
-						local dx = sPos.X - fovCenter.X
-						local dy = sPos.Y - fovCenter.Y
-						local dSq = dx * dx + dy * dy
-						if dSq <= bestDistSq then
-							bestDistSq = dSq
-							bestPl = p
-						end
+					local distSq, _ = getCharFovDistSq(char, fovCenter, cam)
+					if distSq and distSq <= bestDistSq then
+						bestDistSq = distSq
+						bestPl = p
 					end
 				end
 
@@ -13315,8 +13475,11 @@ Bitstream Vera
 						objs.headshotFallback.Text = string.upper(string.sub(display, 1, 1))
 					end
 				end
-				local char = player.Character
-				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				local char, hum = resolveCandidateCharacter(player)
+				if not char then
+					char = player.Character
+					hum = char and char:FindFirstChildOfClass("Humanoid")
+				end
 				local hp = (RageLive.targetPlayer == player and RageLive.health) or (hum and hum.Health) or 100
 				local maxHp = (hum and hum.MaxHealth) or 100
 				if maxHp < 1 then maxHp = 100 end
@@ -13333,10 +13496,10 @@ Bitstream Vera
 				if objs.lookingBadge then
 					local lp = Players.LocalPlayer
 					local myChar = lp and lp.Character
-					local myHead = myChar and myChar:FindFirstChild("Head")
-					local enemyHead = char and char:FindFirstChild("Head")
+					local myHead = myChar and (myChar:FindFirstChild("Head") or myChar:FindFirstChild("HitboxHead") or myChar:FindFirstChild("HumanoidRootPart"))
+					local enemyHead = char and (char:FindFirstChild("Head") or char:FindFirstChild("HitboxHead") or char:FindFirstChild("HumanoidRootPart"))
 					local lookingAtMe = false
-					if myHead and enemyHead and enemyHead:IsA("BasePart") then
+					if myHead and enemyHead and enemyHead:IsA("BasePart") and myHead:IsA("BasePart") then
 						local toMe = (myHead.Position - enemyHead.Position)
 						local dist = toMe.Magnitude
 						if dist > 0.1 then
