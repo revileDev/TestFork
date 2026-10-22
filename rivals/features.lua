@@ -13123,44 +13123,132 @@ Bitstream Vera
 				return items, equippedIndex
 			end
 
-			local function resolveAnyTargetPlayer(): Player?
-				local lp = Players.LocalPlayer
-				if RageLive and RageLive.targetPlayer and RageLive.targetPlayer.Parent and RageLive.targetPlayer ~= lp then
-					return RageLive.targetPlayer
+			local function getActiveFovSettings(cam: Camera): (Vector2, number)
+				local center = cam.ViewportSize * 0.5
+				local fovOrigin = center
+				local fovRadius = 250
+
+				-- Priority 1: Silent Aim (drawFov or enabled)
+				if Silent.drawFov or Silent.enabled then
+					local curSilentFov = (Aim.editProfile ~= "Global" and resolvedSilentFov) or Silent.fov or 250
+					fovRadius = computeEffectiveFov(curSilentFov, false, cam)
+					fovOrigin = resolveFovOriginScreen(Silent.fovOrigin, cam, silentStickyPart) or center
+					return fovOrigin, math.max(10, fovRadius)
 				end
+
+				-- Priority 2: Aim (drawFov or enabled)
+				if Aim.drawFov or Aim.enabled then
+					local curAimFov = resolvedAimFov or Aim.fov or 150
+					fovRadius = computeEffectiveFov(curAimFov, Aim.dynamicFov, cam)
+					fovOrigin = resolveFovOriginScreen(Aim.fovOrigin, cam, aimStickyPart) or center
+					return fovOrigin, math.max(10, fovRadius)
+				end
+
+				return fovOrigin, fovRadius
+			end
+
+			local function findTargetPlayerInFov(): Player?
+				local lp = Players.LocalPlayer
+				if not lp then return nil end
+				local cam = Workspace.CurrentCamera
+				if not cam then return nil end
+
+				local fovCenter, fovRadius = getActiveFovSettings(cam)
+				local radiusSq = fovRadius * fovRadius
+
+				local function getCharScreenPos(char: Model?): (Vector2?, boolean)
+					if not char then return nil, false end
+					local head = char:FindFirstChild("Head") or char:FindFirstChild("HitboxHead")
+					local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+					local part = head or root
+					if part and part:IsA("BasePart") then
+						local sp, onScreen = cam:WorldToViewportPoint(part.Position)
+						if onScreen and sp.Z > 0 then
+							return Vector2.new(sp.X, sp.Y), true
+						end
+					end
+					if root and root ~= part and root:IsA("BasePart") then
+						local sp, onScreen = cam:WorldToViewportPoint(root.Position)
+						if onScreen and sp.Z > 0 then
+							return Vector2.new(sp.X, sp.Y), true
+						end
+					end
+					return nil, false
+				end
+
+				-- 1. Check current locked/sticky target first if alive and inside FOV
+				local stickyCandidates = {}
 				if silentStickyPart and silentStickyPart.Parent then
-					local char = silentStickyPart:FindFirstAncestorOfClass("Model")
-					local pl = char and Players:GetPlayerFromCharacter(char)
-					if pl and pl ~= lp then return pl end
+					local c = silentStickyPart:FindFirstAncestorOfClass("Model")
+					local p = c and Players:GetPlayerFromCharacter(c)
+					if p and p ~= lp then table.insert(stickyCandidates, p) end
 				end
 				if aimStickyPart and aimStickyPart.Parent then
-					local char = aimStickyPart:FindFirstAncestorOfClass("Model")
-					local pl = char and Players:GetPlayerFromCharacter(char)
-					if pl and pl ~= lp then return pl end
+					local c = aimStickyPart:FindFirstAncestorOfClass("Model")
+					local p = c and Players:GetPlayerFromCharacter(c)
+					if p and p ~= lp then table.insert(stickyCandidates, p) end
 				end
-				local cam = Workspace.CurrentCamera
-				if not cam or not lp then return nil end
-				local center = cam.ViewportSize * 0.5
-				local bestDist = 550
-				local bestPl: Player? = nil
-				for _, p in ipairs(Players:GetPlayers()) do
-					if p ~= lp and p.Character then
-						local hrp = p.Character:FindFirstChild("HumanoidRootPart") or p.Character:FindFirstChild("Head")
-						local hum = p.Character:FindFirstChildOfClass("Humanoid")
-						if hrp and hum and hum.Health > 0 then
-							local sp, onScreen = cam:WorldToViewportPoint(hrp.Position)
-							if onScreen and sp.Z > 0 then
-								local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-								if d < bestDist then
-									bestDist = d
-									bestPl = p
-								end
+				if RageLive and RageLive.targetPlayer and RageLive.targetPlayer.Parent and RageLive.targetPlayer ~= lp then
+					table.insert(stickyCandidates, RageLive.targetPlayer)
+				end
+
+				for _, cand in ipairs(stickyCandidates) do
+					local c = cand.Character
+					local hum = c and c:FindFirstChildOfClass("Humanoid")
+					if hum and hum.Health > 0 then
+						local sPos, onScreen = getCharScreenPos(c)
+						if onScreen and sPos then
+							local dx = sPos.X - fovCenter.X
+							local dy = sPos.Y - fovCenter.Y
+							if (dx * dx + dy * dy) <= radiusSq then
+								return cand
 							end
 						end
 					end
 				end
+
+				-- 2. Scan all players to find closest enemy inside FOV
+				pcall(function()
+					refreshSilentRoster(os.clock())
+				end)
+				local rosterReady = next(silentEnemyOf) ~= nil
+
+				local bestPl: Player? = nil
+				local bestDistSq = radiusSq
+
+				for _, p in ipairs(Players:GetPlayers()) do
+					if p == lp or not p.Parent then
+						continue
+					end
+					local isEnemy = if rosterReady then silentEnemyOf[p] == true else (p.Team == nil or lp.Team == nil or p.Team ~= lp.Team)
+					if not isEnemy then
+						continue
+					end
+					local char = p.Character
+					if not char then
+						continue
+					end
+					local hum = char:FindFirstChildOfClass("Humanoid")
+					if not hum or hum.Health <= 0 then
+						continue
+					end
+
+					local sPos, onScreen = getCharScreenPos(char)
+					if onScreen and sPos then
+						local dx = sPos.X - fovCenter.X
+						local dy = sPos.Y - fovCenter.Y
+						local dSq = dx * dx + dy * dy
+						if dSq <= bestDistSq then
+							bestDistSq = dSq
+							bestPl = p
+						end
+					end
+				end
+
 				return bestPl
 			end
+
+			local resolveAnyTargetPlayer = findTargetPlayerInFov
 
 			local function showPreview(now: number)
 				if not ensureHud() or not objs then return end
@@ -13198,7 +13286,7 @@ Bitstream Vera
 			local lastWeaponsTargetPlayer = nil
 			local function showLive(targetPlayer: Player?)
 				if not ensureHud() or not objs then return end
-				local player = targetPlayer or resolveAnyTargetPlayer()
+				local player = targetPlayer or findTargetPlayerInFov()
 				if not player or not player.Parent then
 					setVisible(false)
 					return
@@ -13266,63 +13354,10 @@ Bitstream Vera
 					inPreview = false
 					return
 				end
-				local now = os.clock()
-				local targetPlayer = resolveAnyTargetPlayer()
-				-- FOV circle filter: if a FOV circle is active, only show HUD when target is inside it
-				if targetPlayer then
-					local cam = Workspace.CurrentCamera
-					local applyFovFilter = false
-					local fovRadius = 0
-					local fovOriginScreen: Vector2? = nil
-					if cam then
-						local center = cam.ViewportSize * 0.5
-						if Silent.enabled and Silent.drawFov then
-							local curFov = Silent.fov
-							local effectiveR = computeEffectiveFov(curFov, false, cam)
-							fovRadius = effectiveR
-							fovOriginScreen = center
-							applyFovFilter = true
-						elseif Aim.enabled and Aim.drawFov then
-							local effR = computeEffectiveFov(resolvedAimFov, Aim.dynamicFov, cam)
-							fovRadius = effR
-							fovOriginScreen = center
-							applyFovFilter = true
-						end
-						if applyFovFilter and fovOriginScreen then
-							local char = targetPlayer.Character
-							local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head"))
-							if hrp and hrp:IsA("BasePart") then
-								local sp = cam:WorldToViewportPoint(hrp.Position)
-								if sp.Z > 0 then
-									local dx = sp.X - fovOriginScreen.X
-									local dy = sp.Y - fovOriginScreen.Y
-									if dx*dx + dy*dy > fovRadius * fovRadius then
-										-- outside FOV, suppress HUD
-										inPreview = false
-										setVisible(false)
-										lastWeaponSig = ""
-										lastHealthRatio = -1
-										lastName = ""
-										return
-									end
-								end
-							end
-						end
-					end
-				end
+				local targetPlayer = findTargetPlayerInFov()
 				if targetPlayer then
 					inPreview = false
 					showLive(targetPlayer)
-				elseif menuIsOpen() then
-					if not inPreview then
-						inPreview = true
-						lastWeaponSig = ""
-						lastHealthRatio = -1
-						lastName = ""
-						displayHp = 1
-						targetHp = 1
-					end
-					showPreview(now)
 				else
 					inPreview = false
 					setVisible(false)
