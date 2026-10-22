@@ -13139,14 +13139,14 @@ Bitstream Vera
 				end
 
 				-- Priority 2: Configured active FOV drawing
-				if Silent.drawFov or (Silent.enabled and Silent.drawFov) then
+				if Silent.enabled and Silent.drawFov then
 					local curSilentFov = (Aim.editProfile ~= "Global" and resolvedSilentFov) or Silent.fov or 250
 					local fovRadius = computeEffectiveFov(curSilentFov, false, cam)
 					local fovOrigin = resolveFovOriginScreen(Silent.fovOrigin, cam, silentStickyPart) or screenCenter
 					return fovOrigin, math.max(10, fovRadius)
 				end
 
-				if Aim.drawFov or (Aim.enabled and Aim.drawFov) then
+				if Aim.enabled and Aim.drawFov then
 					local curAimFov = resolvedAimFov or Aim.fov or 150
 					local fovRadius = computeEffectiveFov(curAimFov, Aim.dynamicFov, cam)
 					local fovOrigin = resolveFovOriginScreen(Aim.fovOrigin, cam, aimStickyPart) or screenCenter
@@ -13291,7 +13291,7 @@ Bitstream Vera
 					local part = char:FindFirstChild(name)
 					if part and part:IsA("BasePart") then
 						local sp, onScreen = cam:WorldToViewportPoint(part.Position)
-						if onScreen and sp.Z > 0 then
+						if sp.Z > 0 then
 							local sPos = Vector2.new(sp.X, sp.Y)
 							local dx = sPos.X - fovCenter.X
 							local dy = sPos.Y - fovCenter.Y
@@ -13310,7 +13310,7 @@ Bitstream Vera
 				for _, child in ipairs(char:GetChildren()) do
 					if child:IsA("BasePart") then
 						local sp, onScreen = cam:WorldToViewportPoint(child.Position)
-						if onScreen and sp.Z > 0 then
+						if sp.Z > 0 then
 							local sPos = Vector2.new(sp.X, sp.Y)
 							local dx = sPos.X - fovCenter.X
 							local dy = sPos.Y - fovCenter.Y
@@ -13326,7 +13326,7 @@ Bitstream Vera
 				local okPivot, pivotCf = pcall(function() return char:GetPivot() end)
 				if okPivot and pivotCf then
 					local sp, onScreen = cam:WorldToViewportPoint(pivotCf.Position)
-					if onScreen and sp.Z > 0 then
+					if sp.Z > 0 then
 						local sPos = Vector2.new(sp.X, sp.Y)
 						local dx = sPos.X - fovCenter.X
 						local dy = sPos.Y - fovCenter.Y
