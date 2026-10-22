@@ -2229,8 +2229,7 @@ export type Window = {
 			})
 		end
 		table.insert(ears, RunService.RenderStepped:Connect(function()
-			local count = #hitMarks
-			if count == 0 then
+			if not HitFx.enabled or #hitMarks == 0 then
 				return
 			end
 			if DrawingBridge.library and DrawingBridge.library.uiDragging then
@@ -3984,6 +3983,7 @@ Bitstream Vera
 			end)
 		end
 
+		local entryPool: { any } = {}
 		local function destroyEntry(player: Player)
 			local entry = entries[player]
 			if not entry then
@@ -3992,6 +3992,11 @@ Bitstream Vera
 			entries[player] = nil
 			duelerOf[player] = nil
 			teamOf[player] = nil
+			pcall(hideEntry, entry)
+			if #entryPool < 24 then
+				table.insert(entryPool, entry)
+				return
+			end
 			for key, obj in entry do
 				if key == "on" then
 					continue
@@ -4321,9 +4326,39 @@ Bitstream Vera
 			LeftUpperLeg = true, RightUpperLeg = true, LeftLowerLeg = true, RightLowerLeg = true,
 		}
 
+		local boneCache: { [Instance]: { [string]: { pos: Vector3, cf: CFrame } } } = {}
+		local lastBoneFrame = 0
+		local function getCachedBone(part: BasePart?): (Vector3?, CFrame?)
+			if not part then return nil, nil end
+			local now = os.clock()
+			if now ~= lastBoneFrame then
+				lastBoneFrame = now
+				table.clear(boneCache)
+			end
+			local parent = part.Parent
+			if not parent then
+				return part.Position, part.CFrame
+			end
+			local modelCache = boneCache[parent]
+			if not modelCache then
+				modelCache = {}
+				boneCache[parent] = modelCache
+			end
+			local cached = modelCache[part.Name]
+			if not cached then
+				cached = { pos = part.Position, cf = part.CFrame }
+				modelCache[part.Name] = cached
+			end
+			return cached.pos, cached.cf
+		end
+
 		local function bounds(character: Model, camera: Camera, head: Instance?): (number?, number?, number?, number?)
 			local root = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
 			if root and root:IsA("BasePart") then
+				local isLite = _G.AtomwareIsLiteMode == true or (DrawingBridge.library and DrawingBridge.library.isLiteMode == true)
+				if isLite and (root.Position - camera.CFrame.Position).Magnitude > 420 then
+					return nil, nil, nil, nil
+				end
 				local screen = camera:WorldToViewportPoint(root.Position)
 				if screen.Z <= 0 then
 					return nil, nil, nil, nil
@@ -4335,7 +4370,8 @@ Bitstream Vera
 
 			local function expandPart(part: BasePart?)
 				if not part then return end
-				local cf = part.CFrame
+				local _pos, cf = getCachedBone(part)
+				if not cf then return end
 				local half = part.Size * 0.5
 				local right = cf.RightVector * half.X
 				local up = cf.UpVector * half.Y
@@ -4427,6 +4463,11 @@ Bitstream Vera
 			local entry = entries[player]
 			if entry then
 				return entry
+			end
+			local pooled = table.remove(entryPool)
+			if pooled then
+				entries[player] = pooled
+				return pooled
 			end
 			local outline = newsquare(2)
 			local box = newsquare(3)
@@ -4850,6 +4891,30 @@ Bitstream Vera
 			return out
 		end
 
+		local chamsBoxPool: { BoxHandleAdornment } = {}
+		local function recycleChamsBox(box: BoxHandleAdornment)
+			box.Visible = false
+			box.Adornee = nil
+			if #chamsBoxPool < 64 then
+				table.insert(chamsBoxPool, box)
+			else
+				pcall(box.Destroy, box)
+			end
+		end
+
+		local function acquireChamsBox(folder: Folder, part: BasePart): BoxHandleAdornment
+			local box = table.remove(chamsBoxPool)
+			if not box or not box.Parent then
+				box = Instance.new("BoxHandleAdornment")
+				box.AlwaysOnTop = true
+				box.ZIndex = 5
+			end
+			box.Adornee = part
+			box.Parent = folder
+			box.Visible = false
+			return box
+		end
+
 		local function destroyChams(player: Player)
 			local entry = chamsOf[player]
 			if not entry then
@@ -4857,7 +4922,7 @@ Bitstream Vera
 			end
 			chamsOf[player] = nil
 			for _, box in entry.boxes do
-				pcall(box.Destroy, box)
+				recycleChamsBox(box)
 			end
 		end
 
@@ -4889,7 +4954,7 @@ Bitstream Vera
 			local changed = false
 			for part, box in entry.boxes do
 				if part.Parent ~= entry.character then
-					pcall(box.Destroy, box)
+					recycleChamsBox(box)
 					entry.boxes[part] = nil
 					entry.weights[part] = nil
 					changed = true
@@ -4902,12 +4967,7 @@ Bitstream Vera
 					parts[#parts + 1] = part
 					local box = entry.boxes[part]
 					if not box then
-						box = Instance.new("BoxHandleAdornment")
-						box.AlwaysOnTop = true
-						box.ZIndex = 5
-						box.Visible = false
-						box.Adornee = part
-						box.Parent = folder
+						box = acquireChamsBox(folder, part)
 						entry.boxes[part] = box
 						changed = true
 					end
@@ -5171,12 +5231,6 @@ Bitstream Vera
 		local chamsActive = false
 		local chamsSeen: { [Player]: boolean } = {}
 		table.insert(ears, RunService.Heartbeat:Connect(function()
-			local now = os.clock()
-			if now - chamsLastTick < CHAMS_TICK then
-				return
-			end
-			chamsLastTick = now
-
 			if not (Esp.master and Esp.chams) then
 				if chamsActive then
 					clearChams()
@@ -5185,6 +5239,12 @@ Bitstream Vera
 				end
 				return
 			end
+
+			local now = os.clock()
+			if now - chamsLastTick < CHAMS_TICK then
+				return
+			end
+			chamsLastTick = now
 
 			local camera = Workspace.CurrentCamera
 			if not camera then
@@ -5350,12 +5410,10 @@ Bitstream Vera
 		end))
 
 		table.insert(ears, RunService.RenderStepped:Connect(function()
-			local count = #onshots
-			if count == 0 then
-				return
-			end
-			if not onshotLive() then
-				clearOnshots()
+			if not onshotLive() or #onshots == 0 then
+				if #onshots > 0 then
+					clearOnshots()
+				end
 				return
 			end
 			if DrawingBridge.library and DrawingBridge.library.uiDragging then
@@ -5498,8 +5556,15 @@ Bitstream Vera
 				if not character or not humanoid then
 					hideEntry(entries[player])
 				else
-				local head = character:FindFirstChild("Head") or character:FindFirstChild("HitboxHead")
-				local x, y, w, h = bounds(character, camera, head)
+					local root = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso")
+					local isLite = _G.AtomwareIsLiteMode == true or (DrawingBridge.library and DrawingBridge.library.isLiteMode == true)
+					local maxDist = if isLite then 420 else 1200
+					local dist = if root and root:IsA("BasePart") then (root.Position - camera.CFrame.Position).Magnitude else 0
+					if dist > maxDist then
+						hideEntry(entries[player])
+					else
+						local head = character:FindFirstChild("Head") or character:FindFirstChild("HitboxHead")
+						local x, y, w, h = bounds(character, camera, head)
 				if not x or not y or not w or not h then
 					if showArrows then
 						local entry = entryFor(player)
@@ -5784,6 +5849,7 @@ Bitstream Vera
 					entry.arrow.Visible = false
 					if entry.arrowL then entry.arrowL.Visible = false end
 					if entry.arrowR then entry.arrowR.Visible = false end
+				end
 				end
 				end
 				end
@@ -8102,6 +8168,24 @@ Bitstream Vera
 				local character = player.Character
 				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 				if not humanoid or humanoid.Health <= 0 or blockedByFlags(character, Silent.flags, isVisReq) then
+					continue
+				end
+				local root = (character :: Model):FindFirstChild("HumanoidRootPart") or (character :: Model):FindFirstChild("Torso")
+				if not root or not root:IsA("BasePart") then
+					continue
+				end
+				local isLite = _G.AtomwareIsLiteMode == true or (DrawingBridge.library and DrawingBridge.library.isLiteMode == true)
+				local rootDist = (cam.CFrame.Position - root.Position).Magnitude
+				if isLite and rootDist > 450 then
+					continue
+				end
+				local rScreen, rOnScreen = cam:WorldToViewportPoint(root.Position)
+				if not rOnScreen or rScreen.Z <= 0 then
+					continue
+				end
+				local rDx = rScreen.X - centerX
+				local rDy = rScreen.Y - centerY
+				if (rDx * rDx + rDy * rDy) > (radius * 1.6) * (radius * 1.6) then
 					continue
 				end
 				for _, item in HITBOX_ITEMS do
@@ -17852,6 +17936,13 @@ Bitstream Vera
 		end
 
 		table.insert(ears, RunService.Heartbeat:Connect(function()
+			if not WorldSky.weather then
+				if weatherPart then
+					destroyWeather()
+					lastWeatherSig = ""
+				end
+				return
+			end
 			if DrawingBridge.library and DrawingBridge.library.uiDragging then
 				return
 			end
@@ -18664,13 +18755,14 @@ Bitstream Vera
 	end
 
 	table.insert(ears, RunService.Heartbeat:Connect(function()
+		if not anyWorldMapActive() then
+			return
+		end
 		local inMatch = worldMatchActive()
 		if inMatch and not wasInMatch then
 			wasInMatch = true
 			decalsStrippedOnce = false
-			if anyWorldMapActive() then
-				requestWorldMapApply()
-			end
+			requestWorldMapApply()
 		elseif not inMatch and wasInMatch then
 			wasInMatch = false
 			decalsStrippedOnce = false
@@ -18739,6 +18831,30 @@ Bitstream Vera
 		if mapChildConn then
 			table.insert(ears, mapChildConn)
 		end
+	end
+
+	-- Proactive Garbage Collection (GC) Manager
+	do
+		local lastGcTick = os.clock()
+		local lastFullGc = os.clock()
+		local inMatchPrev = false
+		table.insert(ears, RunService.Heartbeat:Connect(function()
+			local now = os.clock()
+			-- Lightweight step GC every 12 seconds to prevent heap accumulation without frame drop
+			if now - lastGcTick >= 12 then
+				lastGcTick = now
+				pcall(collectgarbage, "step", 250)
+			end
+			-- Full GC sweep between match rounds or during menu idle
+			local inMatch = isInGameMatch()
+			if inMatchPrev and not inMatch then
+				if now - lastFullGc >= 15 then
+					lastFullGc = now
+					pcall(collectgarbage, "collect")
+				end
+			end
+			inMatchPrev = inMatch
+		end))
 	end
 
 	local function installHudRuntime()
@@ -19846,6 +19962,11 @@ Bitstream Vera
 				return Qol.autoLoadout
 			end, { loadoutPrimary, loadoutSecondary, loadoutMelee, loadoutUtility })
 
+			local targetHudBox = miscTab:AddSection("target hud", 2)
+			targetHudBox.subTab = "main"
+			kit.flag(targetHudBox, "target hud", Rage, "targetHud")
+			kit.number(targetHudBox, "hud size", Rage, "targetHudScale", 0.5, 2, 0.05, { suffix = "x" })
+
 			local ClientFx = DrawingBridge.ClientFx
 			if type(ClientFx) ~= "table" then
 				ClientFx = DrawingBridge.ClientFx
@@ -20896,12 +21017,18 @@ Bitstream Vera
 		local lastAmbiencePulse = 0
 		local lastAmbienceSig = ""
 		table.insert(ears, RunService.Heartbeat:Connect(function()
+			if not ClientFx.ambience then
+				if ambienceSound and ambienceSound.IsPlaying then
+					lastAmbienceSig = ""
+					ambienceSound:Stop()
+				end
+				return
+			end
 			local now = os.clock()
 			if now - lastAmbiencePulse < 0.75 then
 				return
 			end
 			lastAmbiencePulse = now
-			if ClientFx.ambience then
 				local sig = table.concat({
 					"1",
 					tostring(ClientFx.ambienceTrack),
@@ -20913,10 +21040,6 @@ Bitstream Vera
 					lastAmbienceSig = sig
 					syncAmbience()
 				end
-			elseif ambienceSound and ambienceSound.IsPlaying then
-				lastAmbienceSig = ""
-				ambienceSound:Stop()
-			end
 		end))
 
 		local function resolveCatalogSoundId(bucket: any, name: any): string?
@@ -21351,8 +21474,7 @@ Bitstream Vera
 			})
 		end
 		table.insert(ears, RunService.RenderStepped:Connect(function()
-			local n = #liveTracers
-			if n == 0 then
+			if not ClientFx.tracers or #liveTracers == 0 then
 				return
 			end
 			local now = os.clock()

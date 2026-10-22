@@ -318,6 +318,8 @@ if IS_MOBILE then
     end
 end
 
+_G.AtomwareIsLiteMode = isLiteMode
+
 -- =========================================================================
 -- Hybrid Secure Module Loader
 -- 1. Direct TestFork GitHub loader with dynamic cache-busting
@@ -450,9 +452,11 @@ if _G.AtomwareConfig and _G.AtomwareConfig.Notify then
 end
 print("[Atomware Rivals] Fully Initialized on " .. modeTag .. "!")
 
--- 8. Load Atomware Chatroom Widget
-task.spawn(function()
-    pcall(function()
-        loadModule("chatroom_widget.lua")
+-- 8. Load Atomware Chatroom Widget (Omitted in Lite Mode to save memory and background threads)
+if not isLiteMode then
+    task.spawn(function()
+        pcall(function()
+            loadModule("chatroom_widget.lua")
+        end)
     end)
-end)
+end
