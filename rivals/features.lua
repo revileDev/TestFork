@@ -7470,6 +7470,203 @@ Bitstream Vera
 		end
 	end
 
+	local aimRing: Frame? = nil
+	local silentRing: Frame? = nil
+	local aimStickyPart: BasePart? = nil
+	local silentStickyPart: BasePart? = nil
+	local resolvedAimFov: number = 150
+	local resolvedSilentFov: number = 250
+
+	local unzoomedCamFov = 80
+	local function computeEffectiveFov(baseFov: number, isDynamic: boolean, cam: Camera?): number
+		if not isDynamic or not cam then
+			return baseFov
+		end
+		local camFov = math.clamp(cam.FieldOfView, 1, 130)
+		if camFov >= 68 then
+			unzoomedCamFov = camFov
+		end
+		local baseAngle = unzoomedCamFov or 80
+		local baseRad = math.rad(baseAngle * 0.5)
+		local currentRad = math.rad(camFov * 0.5)
+		local scale = math.tan(baseRad) / math.tan(currentRad)
+		return baseFov * scale
+	end
+
+	local cachedMuzzle: Instance? = nil
+	local lastMuzzleScan = 0
+	local function findMuzzleInstance(): Instance?
+		local now = os.clock()
+		if now - lastMuzzleScan < 0.25 and cachedMuzzle and cachedMuzzle.Parent then
+			return cachedMuzzle
+		end
+		lastMuzzleScan = now
+		cachedMuzzle = nil
+		local function scan(root: Instance?): Instance?
+			if not root then
+				return nil
+			end
+			local direct = root:FindFirstChild("_muzzle", true)
+			if direct then
+				return direct
+			end
+			return nil
+		end
+		local cam = Workspace.CurrentCamera
+		if cam then
+			for _, child in cam:GetChildren() do
+				local found = scan(child)
+				if found then
+					cachedMuzzle = found
+					return found
+				end
+			end
+		end
+		local vms = Workspace:FindFirstChild("ViewModels")
+		if vms then
+			local found = scan(vms)
+			if found then
+				cachedMuzzle = found
+				return found
+			end
+		end
+		return nil
+	end
+
+	local function muzzleWorldPos(): Vector3?
+		local m = findMuzzleInstance()
+		if not m then
+			return nil
+		end
+		if m:IsA("Attachment") then
+			return m.WorldPosition
+		end
+		if m:IsA("BasePart") then
+			return m.Position
+		end
+		local parent = m.Parent
+		if parent and parent:IsA("BasePart") then
+			return parent.Position
+		end
+		return nil
+	end
+
+	local function worldToScreen(cam: Camera, world: Vector3): Vector2?
+		local sp, onScreen = cam:WorldToViewportPoint(world)
+		if sp.Z <= 0 then
+			return nil
+		end
+		if not onScreen and (sp.X < -200 or sp.X > cam.ViewportSize.X + 200 or sp.Y < -200 or sp.Y > cam.ViewportSize.Y + 200) then
+			return nil
+		end
+		return Vector2.new(sp.X, sp.Y)
+	end
+
+	local function resolveFovOriginScreen(mode: string, cam: Camera, lockPart: BasePart?): Vector2
+		local center = cam.ViewportSize * 0.5
+		local origin = normalizeFovOrigin(mode)
+		if origin == "Muzzle" then
+			local wp = muzzleWorldPos()
+			if wp then
+				local screen = worldToScreen(cam, wp)
+				if screen then
+					return screen
+				end
+			end
+			return center
+		elseif origin == "Target" then
+			if lockPart and lockPart.Parent then
+				local screen = worldToScreen(cam, lockPart.Position)
+				if screen then
+					return screen
+				end
+			end
+			return center
+		end
+		return center
+	end
+
+	local function isCombatEnemy(player: Player): boolean
+		local lp = Players.LocalPlayer
+		if not lp or player == lp then
+			return false
+		end
+		local okDuel, duelResult = pcall(function()
+			local _f, _d, spectate = combatControllers()
+			local duel = spectate and spectate.CurrentDuelSubject
+			if not duel then
+				local _, duelCtrl = combatControllers()
+			if duelCtrl and type(duelCtrl.GetDuel) == "function" then
+				duel = duelCtrl:GetDuel(lp)
+			end
+			end
+			if duel and duel.Duelers then
+				local localDueler = duel.GetDueler and duel:GetDueler(lp)
+				local localTeam = localDueler and localDueler:Get("TeamID") or nil
+				for _, dueler in duel.Duelers do
+					if dueler.Player == player then
+						if dueler._is_ally == true then
+							return false
+						end
+						local team = dueler:Get("TeamID")
+						if team ~= nil and localTeam ~= nil then
+							return team ~= localTeam
+						end
+						return true
+					end
+				end
+			end
+			return nil
+		end)
+		if okDuel and duelResult ~= nil then
+			return duelResult
+		end
+		local pTeam = player:GetAttribute("TeamID")
+		local lTeam = lp:GetAttribute("TeamID")
+		if pTeam and lTeam then
+			return pTeam ~= lTeam
+		end
+		local lpTeam = lp.Team
+		local pTeamObj = player.Team
+		if lpTeam ~= nil and pTeamObj ~= nil and lpTeam == pTeamObj then
+			local teamsSvc = game:FindService("Teams")
+			if teamsSvc and #teamsSvc:GetTeams() > 1 then
+				return false
+			end
+		end
+		return true
+	end
+
+	local function readPlayerHealth(player: Player?): number?
+		if not player then
+			return nil
+		end
+		local char = player.Character
+		if not char then
+			return nil
+		end
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum and hum:IsA("Humanoid") then
+			return math.max(0, math.floor(hum.Health + 0.5))
+		end
+		return nil
+	end
+
+	local function playerFromPart(part: BasePart?): Player?
+		if not part or not part.Parent then return nil end
+		local current: Instance? = part
+		while current and current ~= Workspace do
+			if current:IsA("Model") then
+				local p = Players:GetPlayerFromCharacter(current) or Players:FindFirstChild(current.Name)
+				if p and p:IsA("Player") then
+					return p
+				end
+			end
+			current = current.Parent
+		end
+		return nil
+	end
+
 	do
 		local function installLegitRuntime()
 		local fovGui = element("ScreenGui", {
@@ -7539,8 +7736,10 @@ Bitstream Vera
 			strokeGrad.Color = seq
 		end
 
-		local aimRing, aimStroke, aimFillGrad, aimStrokeGrad = makeFovRing("AimFov", Aim.fovColor1, Aim.fovColor2)
-		local silentRing, silentStroke, silentFillGrad, silentStrokeGrad = makeFovRing("SilentFov", Silent.fovColor1, Silent.fovColor2)
+		local aimStroke, aimFillGrad, aimStrokeGrad
+		local silentStroke, silentFillGrad, silentStrokeGrad
+		aimRing, aimStroke, aimFillGrad, aimStrokeGrad = makeFovRing("AimFov", Aim.fovColor1, Aim.fovColor2)
+		silentRing, silentStroke, silentFillGrad, silentStrokeGrad = makeFovRing("SilentFov", Silent.fovColor1, Silent.fovColor2)
 		aimStroke.Name = "Stroke"
 		silentStroke.Name = "Stroke"
 
@@ -7557,7 +7756,7 @@ Bitstream Vera
 		end
 
 		local aimHeld = false
-		local aimStickyPart: BasePart? = nil
+		aimStickyPart = nil
 		local aimReadyAt = 0
 		local aimVelX = 0
 		local aimVelY = 0
@@ -7715,8 +7914,8 @@ Bitstream Vera
 		local _activeWeaponProfile = "Global"
 		local activeWeaponAt = 0
 		local aimItemLib: any = nil
-		local resolvedAimFov = Aim.fov
-		local resolvedSilentFov = Silent.fov
+		resolvedAimFov = Aim.fov
+		resolvedSilentFov = Silent.fov
 		local resolvedSmooth = Aim.smooth
 		local resolvedDeadzone = Aim.deadzone
 		local resolvedHumanize = Aim.humanize
@@ -8115,7 +8314,7 @@ Bitstream Vera
 			return nil
 		end
 
-		local silentStickyPart: BasePart? = nil
+		silentStickyPart = nil
 		local SILENT_STICKY_BIAS = 0.85
 
 		local silentEnemyOf: { [Player]: boolean } = {}
@@ -12633,7 +12832,7 @@ Bitstream Vera
 
 			local function getGuiParent(): Instance?
 				local ok, res = pcall(function()
-					return (gethui and gethui()) or game:GetService("CoreGui") or (Players.LocalPlayer and Players.LocalPlayer:FindFirstChildOfClass("PlayerGui"))
+					return resolveParent(nil)
 				end)
 				return if ok then res else nil
 			end
@@ -13139,14 +13338,14 @@ Bitstream Vera
 				end
 
 				-- Priority 2: Configured active FOV drawing
-				if Silent.enabled and Silent.drawFov then
+				if Silent.drawFov or (Silent.enabled and Silent.drawFov) then
 					local curSilentFov = (Aim.editProfile ~= "Global" and resolvedSilentFov) or Silent.fov or 250
 					local fovRadius = computeEffectiveFov(curSilentFov, false, cam)
 					local fovOrigin = resolveFovOriginScreen(Silent.fovOrigin, cam, silentStickyPart) or screenCenter
 					return fovOrigin, math.max(10, fovRadius)
 				end
 
-				if Aim.enabled and Aim.drawFov then
+				if Aim.drawFov or (Aim.enabled and Aim.drawFov) then
 					local curAimFov = resolvedAimFov or Aim.fov or 150
 					local fovRadius = computeEffectiveFov(curAimFov, Aim.dynamicFov, cam)
 					local fovOrigin = resolveFovOriginScreen(Aim.fovOrigin, cam, aimStickyPart) or screenCenter
@@ -13176,62 +13375,58 @@ Bitstream Vera
 					return nil, nil
 				end
 
-				-- 1. In a duel: use livingEnemy
-				local duel, team = matchEnemies()
-				if duel then
-					local c, h = livingEnemy(player, duel, team)
-					if c and c.Parent then
-						return c, h
-					end
-				end
-
-				-- 2. Combat controllers FighterController
-				pcall(function()
-					local fighter = select(1, combatControllers())
-					if fighter and fighter.Objects then
-						for _, obj in fighter.Objects do
-							if obj and obj.Player == player and obj.Entity and obj.Entity.RootPart then
-								local root = obj.Entity.RootPart
-								local char = root.Parent
-								if char and char:IsA("Model") and char.Parent then
-									local hum = obj.Entity.Humanoid or char:FindFirstChildOfClass("Humanoid")
-									return char, hum
-								end
-							end
-						end
-					end
-				end)
-
-				-- 3. Standard livingCharacter
-				local c2, h2 = livingCharacter(player)
-				if c2 and c2.Parent then
-					return c2, h2
-				end
-
-				-- 4. Direct player.Character fallback
+				-- 1. Direct player.Character
 				local char = player.Character
 				if char and char.Parent then
 					local hum = char:FindFirstChildOfClass("Humanoid")
 					return char, hum
 				end
 
+				-- 2. Combat controllers FighterController
+				local ok, c, h = pcall(function()
+					local fighter = select(1, combatControllers())
+					if fighter and fighter.Objects then
+						for _, obj in fighter.Objects do
+							if obj and obj.Player == player and obj.Entity and obj.Entity.RootPart then
+								local root = obj.Entity.RootPart
+								local model = root.Parent
+								if model and model:IsA("Model") and model.Parent then
+									local hum = obj.Entity.Humanoid or model:FindFirstChildOfClass("Humanoid")
+									return model, hum
+								end
+							end
+						end
+					end
+					return nil, nil
+				end)
+				if ok and c then
+					return c, h
+				end
+
+				-- 3. Workspace model named after player
+				local wsChar = Workspace:FindFirstChild(player.Name)
+				if wsChar and wsChar:IsA("Model") and wsChar.Parent then
+					local hum = wsChar:FindFirstChildOfClass("Humanoid")
+					return wsChar, hum
+				end
+
 				return nil, nil
 			end
 
 			local function isCandidateAlive(player: Player, char: Model?, hum: Humanoid?): boolean
+				if not player or not player.Parent then
+					return false
+				end
 				if RageLive and RageLive.targetPlayer == player and RageLive.health and RageLive.health > 0 then
 					return true
 				end
-				if hum and hum.Health and hum.Health > 0 then
-					return true
+				if hum then
+					return hum.Health > 0
 				end
 				if char and char.Parent then
 					local head = char:FindFirstChild("Head") or char:FindFirstChild("HitboxHead")
 					local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
 					if head or root then
-						if hum and hum.Health and hum.Health <= 0 then
-							return false
-						end
 						return true
 					end
 				end
@@ -13239,47 +13434,7 @@ Bitstream Vera
 			end
 
 			local function isCandidateEnemy(player: Player): boolean
-				local lp = Players.LocalPlayer
-				if not lp or player == lp then
-					return false
-				end
-
-				local duel, localTeam = matchEnemies()
-				if duel then
-					local dueler = duel.GetDueler and duel:GetDueler(player)
-					if dueler then
-						if dueler._is_ally == true then
-							return false
-						end
-						local theirTeam = dueler:Get("TeamID")
-						if theirTeam ~= nil and localTeam ~= nil and theirTeam == localTeam then
-							return false
-						end
-						return true
-					end
-				end
-
-				if silentEnemyOf and silentEnemyOf[player] ~= nil then
-					return silentEnemyOf[player] == true
-				end
-
-				if type(isCombatEnemy) == "function" then
-					local ok, isEnemy = pcall(isCombatEnemy, player)
-					if ok and isEnemy ~= nil then
-						return isEnemy == true
-					end
-				end
-
-				local lpTeam = lp.Team
-				local pTeam = player.Team
-				if lpTeam ~= nil and pTeam ~= nil and lpTeam == pTeam then
-					local teamsSvc = game:FindService("Teams")
-					if teamsSvc and #teamsSvc:GetTeams() > 1 then
-						return false
-					end
-				end
-
-				return true
+				return isCombatEnemy(player)
 			end
 
 			local function getCharFovDistSq(char: Model?, fovCenter: Vector2, cam: Camera): (number?, Vector2?)
@@ -13320,8 +13475,8 @@ Bitstream Vera
 								bestPos = sPos
 							end
 						end
-					end
 				end
+			end
 
 				local okPivot, pivotCf = pcall(function() return char:GetPivot() end)
 				if okPivot and pivotCf then
@@ -13336,7 +13491,7 @@ Bitstream Vera
 							bestPos = sPos
 						end
 					end
-				end
+			end
 
 				return bestSq, bestPos
 			end
@@ -13353,13 +13508,11 @@ Bitstream Vera
 				-- 1. Check sticky candidates first
 				local stickyCandidates = {}
 				if silentStickyPart and silentStickyPart.Parent then
-					local c = silentStickyPart:FindFirstAncestorOfClass("Model")
-					local p = c and Players:GetPlayerFromCharacter(c)
+					local p = playerFromPart(silentStickyPart)
 					if p and p ~= lp then table.insert(stickyCandidates, p) end
 				end
 				if aimStickyPart and aimStickyPart.Parent then
-					local c = aimStickyPart:FindFirstAncestorOfClass("Model")
-					local p = c and Players:GetPlayerFromCharacter(c)
+					local p = playerFromPart(aimStickyPart)
 					if p and p ~= lp then table.insert(stickyCandidates, p) end
 				end
 				if RageLive and RageLive.targetPlayer and RageLive.targetPlayer.Parent and RageLive.targetPlayer ~= lp then
@@ -13371,7 +13524,7 @@ Bitstream Vera
 						local c, hum = resolveCandidateCharacter(cand)
 						if isCandidateAlive(cand, c, hum) then
 							local distSq, _ = getCharFovDistSq(c, fovCenter, cam)
-							if distSq and distSq <= radiusSq then
+							if distSq and distSq <= radiusSq * 1.15 then
 								return cand
 							end
 						end
@@ -13379,10 +13532,6 @@ Bitstream Vera
 				end
 
 				-- 2. Scan all players to find closest enemy inside FOV
-				pcall(function()
-					refreshSilentRoster(os.clock())
-				end)
-
 				local bestPl: Player? = nil
 				local bestDistSq = radiusSq
 
@@ -13480,7 +13629,8 @@ Bitstream Vera
 					char = player.Character
 					hum = char and char:FindFirstChildOfClass("Humanoid")
 				end
-				local hp = (RageLive.targetPlayer == player and RageLive.health) or (hum and hum.Health) or 100
+				local readHp = readPlayerHealth and readPlayerHealth(player)
+				local hp = (RageLive.targetPlayer == player and RageLive.health) or (hum and hum.Health) or readHp or 100
 				local maxHp = (hum and hum.MaxHealth) or 100
 				if maxHp < 1 then maxHp = 100 end
 				setHealthRatio(math.clamp(hp / maxHp, 0, 1), true)
