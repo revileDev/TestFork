@@ -2349,6 +2349,7 @@ export type Window = {
 			local life = math.clamp(HitFx.fade, 0.08, 2)
 			local tint = HitFx.color
 			local size = 3.2
+			local count = #hitMarks
 			for index = count, 1, -1 do
 				local mark = hitMarks[index]
 				local age = now - mark.born
@@ -4381,7 +4382,7 @@ Bitstream Vera
 				return nil, nil
 			end
 			if not duel then
-				return nil, nil
+				return livingCharacter(player)
 			end
 			if seenDuel ~= duel then
 				seenDuel = duel
@@ -5248,6 +5249,13 @@ Bitstream Vera
 				paintDirty = true,
 			})
 		end
+		DrawingBridge.spawnOnshot = function(char: Model)
+			if not onshotLive() or not char or not char.Parent then return end
+			local snap = snapshotCharacter(char)
+			if snap then
+				spawnOnshot(snap, os.clock())
+			end
+		end
 
 		local function rageTargetPlayer(): Player?
 			local rage = DrawingBridge.Rage
@@ -5442,11 +5450,13 @@ Bitstream Vera
 		table.insert(ears, UserInputService.InputBegan:Connect(function(input: InputObject)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
 				localShotAt = os.clock()
+				DrawingBridge.localShotAt = localShotAt
 			end
 		end))
 		table.insert(ears, UserInputService.InputEnded:Connect(function(input: InputObject)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
 				localShotAt = os.clock()
+				DrawingBridge.localShotAt = localShotAt
 			end
 		end))
 
@@ -5460,13 +5470,6 @@ Bitstream Vera
 				return
 			end
 			local duel, team = matchEnemies()
-			if not duel then
-				if next(hpTrack) ~= nil or next(pendingDrops) ~= nil then
-					table.clear(hpTrack)
-					table.clear(pendingDrops)
-				end
-				return
-			end
 			local now = os.clock()
 			local firing = now - localShotAt <= ONSHOT_WINDOW
 				or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
@@ -5497,20 +5500,23 @@ Bitstream Vera
 					spawnOnshot(fallback.snap, now)
 				end
 			end
-			for _, player in roster do
-				local character, humanoid = livingEnemy(player, duel, team)
-				local track = hpTrack[player]
-				if character and humanoid then
-					if not track or track.humanoid ~= humanoid then
-						hpTrack[player] = {
-							character = character,
-							humanoid = humanoid,
-							hp = humanoid.Health,
-							shotAt = 0,
-						}
+			local rosterList = if #roster > 0 then roster else Players:GetPlayers()
+			for _, player in rosterList do
+				if player ~= Players.LocalPlayer then
+					local character, humanoid = livingEnemy(player, duel, team)
+					local track = hpTrack[player]
+					if character and humanoid then
+						if not track or track.humanoid ~= humanoid then
+							hpTrack[player] = {
+								character = character,
+								humanoid = humanoid,
+								hp = humanoid.Health,
+								shotAt = 0,
+							}
+						end
+					elseif track then
+						hpTrack[player] = nil
 					end
-				elseif track then
-					hpTrack[player] = nil
 				end
 			end
 			for player in hpTrack do
@@ -5545,6 +5551,7 @@ Bitstream Vera
 			local camPos = camera.CFrame.Position
 			local styleDirty = styleChanged(ONSHOT_STYLE_KEYS, onshotLast)
 			refreshChamsFilter(camera, now)
+			local count = #onshots
 			for index = count, 1, -1 do
 				local shot = onshots[index]
 				local progress = (now - shot.born) / duration
@@ -22510,6 +22517,7 @@ Bitstream Vera
 					return
 				end
 				lastDamageAt = os.clock()
+				DrawingBridge.lastDamageAt = lastDamageAt
 				pcall(playHitSound)
 				local live = DrawingBridge.RageLive
 				local plr = live and live.targetPlayer
@@ -22519,7 +22527,39 @@ Bitstream Vera
 					local root = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Head")
 					if root and root:IsA("BasePart") then
 						pos = root.Position
+						part = root
 					end
+				end
+				if not plr then
+					local cam = Workspace.CurrentCamera
+					if cam then
+						local mouse = UserInputService:GetMouseLocation()
+						local bestDist = 280
+						for _, other in ipairs(Players:GetPlayers()) do
+							if other ~= lp and not isTeammate(other) then
+								local oChar = other.Character
+								local oRoot = oChar and oChar:FindFirstChild("HumanoidRootPart")
+								if oRoot then
+									local sp, onScreen = cam:WorldToViewportPoint(oRoot.Position)
+									if onScreen and sp.Z > 0 then
+										local d = (Vector2.new(sp.X, sp.Y) - mouse).Magnitude
+										if d < bestDist then
+											bestDist = d
+											plr = other
+											part = oRoot
+											pos = oRoot.Position
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+				if DrawingBridge.notifyDamageDealt then
+					pcall(DrawingBridge.notifyDamageDealt, plr, part, amount)
+				end
+				if plr and plr.Character and DrawingBridge.spawnOnshot then
+					pcall(DrawingBridge.spawnOnshot, plr.Character)
 				end
 				if pos and DrawingBridge.spawnHitFx then
 					pcall(DrawingBridge.spawnHitFx, pos, plr)
@@ -24045,6 +24085,7 @@ Bitstream Vera
 	-- Elimination Chams & Kill Flash Runtime
 	do
 		local playerHpTrack: { [Player]: number } = {}
+		local lastDamagedByMe: { [Player]: number } = {}
 		local flashGui: ScreenGui? = nil
 		local flashFrame: Frame? = nil
 
@@ -24105,8 +24146,54 @@ Bitstream Vera
 			end
 		end
 
+		local function isDamagedByMe(player: Player, root: BasePart?): boolean
+			local now = os.clock()
+			local lastHit = lastDamagedByMe[player]
+			if lastHit and (now - lastHit <= 0.6) then
+				return true
+			end
+			local localShotAt = DrawingBridge.localShotAt or 0
+			local lastDamageAt = DrawingBridge.lastDamageAt or 0
+			local isFiring = (now - localShotAt <= 0.45)
+				or (now - lastDamageAt <= 0.45)
+				or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+			if not isFiring then
+				return false
+			end
+			local rage = DrawingBridge.RageLive
+			if rage and rage.targetPlayer == player then
+				return true
+			end
+			if DrawingBridge.SilentAimTarget == player then
+				return true
+			end
+			local cam = Workspace.CurrentCamera
+			if cam and root then
+				local sp, onScreen = cam:WorldToViewportPoint(root.Position)
+				if onScreen and sp.Z > 0 then
+					local mouse = UserInputService:GetMouseLocation()
+					local dist = (Vector2.new(sp.X, sp.Y) - mouse).Magnitude
+					if dist <= 240 then
+						return true
+					end
+				end
+			end
+			return false
+		end
+
+		DrawingBridge.notifyDamageDealt = function(targetPlayer: Player?, part: BasePart?, dmg: number?)
+			local now = os.clock()
+			if targetPlayer then
+				lastDamagedByMe[targetPlayer] = now
+			end
+			if part and dmg and dmg > 0 then
+				create3DDamageIndicator(part, dmg)
+			end
+		end
+
 		RunService.Heartbeat:Connect(function()
 			local lp = Players.LocalPlayer
+			local now = os.clock()
 			for _, p in ipairs(Players:GetPlayers()) do
 				if p ~= lp then
 					local char = p.Character
@@ -24115,14 +24202,21 @@ Bitstream Vera
 					if hum and root then
 						local curHp = hum.Health
 						local prevHp = playerHpTrack[p]
-					if prevHp and prevHp > curHp then
-						local dmg = prevHp - curHp
-						create3DDamageIndicator(root, dmg)
-						if curHp <= 0 and prevHp > 0 then
-							triggerElimination(p, char)
+						if prevHp and prevHp > curHp then
+							local dmg = prevHp - curHp
+							if isDamagedByMe(p, root) then
+								lastDamagedByMe[p] = now
+								create3DDamageIndicator(root, dmg)
+							end
+							if curHp <= 0 and prevHp > 0 then
+								local hitAt = lastDamagedByMe[p]
+								if hitAt and (now - hitAt <= 1.5) then
+									lastDamagedByMe[p] = nil
+									triggerElimination(p, char)
+								end
+							end
 						end
-					end
-					playerHpTrack[p] = curHp
+						playerHpTrack[p] = curHp
 					end
 				end
 			end
