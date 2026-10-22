@@ -1274,6 +1274,10 @@ function AtomwareWindow:SwitchPage(name)
 end
 
 function AtomwareWindow:AddTab(rawName, order)
+    local lower = string.lower(rawName or "")
+    if lower == "spoofing" or lower == "spoof" then
+        return self:AddTab("misc")
+    end
     local displayName, icon = normalizeTabName(rawName)
     local existing = self.tabs[rawName] or self.tabs[displayName]
     if existing then return existing end

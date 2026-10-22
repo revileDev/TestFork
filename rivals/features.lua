@@ -503,7 +503,17 @@ local function createDrawingKit(bridge: any): any
 		if existing then
 			return existing
 		end
-		local created = bridge.menu:AddTab(name)
+		local lower = string.lower(name)
+		local created: any
+		if lower == "spoof" or lower == "spoofing" then
+			if _G.AtomwareIsLiteMode then
+				created = bridge.menu:AddTab("spoofing")
+			else
+				created = kit.tab("misc")
+			end
+		else
+			created = bridge.menu:AddTab(name)
+		end
 		bridge.tabs[name] = created
 		return created
 	end
@@ -21222,14 +21232,41 @@ Bitstream Vera
 			table.insert(worldPaint, DrawingBridge.requestSync)
 			table.insert(hudPaint, DrawingBridge.requestSync)
 
+			if DrawingBridge.builders.spoof then
+				pcall(DrawingBridge.builders.spoof, kit)
+			end
+			rebuildCrosshair()
+			end)
+		end
+
+		DrawingBridge.builders.spoof = function(kit: any)
+			if DrawingBridge.spoofBuilt then return end
+			DrawingBridge.spoofBuilt = true
+
+			local spoofTab: any
+			local okTab, resTab = pcall(function()
+				return kit.tab("spoofing") or kit.tab("misc")
+			end)
+			if okTab and resTab then
+				spoofTab = resTab
+			else
+				spoofTab = kit.tab("misc")
+			end
+
 			local Spoof = DrawingBridge.Spoof
-			if type(Spoof) == "table" then
-				local touch = DrawingBridge.spoofAutoApply or function() end
-				local profile = miscTab:AddSection("profile", 1)
+			if type(Spoof) ~= "table" then
+				Spoof = {}
+				DrawingBridge.Spoof = Spoof
+			end
+			local touch = DrawingBridge.spoofAutoApply or function() end
+
+			-- Profile Spoof
+			pcall(function()
+				local profile = spoofTab:AddSection("profile", 1)
 				profile.subTab = "bullshit"
 				kit.flag(profile, "name", Spoof, "nameOn", nil, touch)
 				kit.box(profile, "name", function()
-					return Spoof.name
+					return Spoof.name or ""
 				end, function(value: string)
 					Spoof.name = value
 					touch()
@@ -21242,8 +21279,11 @@ Bitstream Vera
 				kit.number(profile, "streak value", Spoof, "streak", 0, 999999, 1, { onSet = touch })
 				kit.flag(profile, "keys", Spoof, "keysOn", nil, touch)
 				kit.number(profile, "key amount", Spoof, "keys", 0, 9999999, 1, { onSet = touch })
+			end)
 
-				local rankBox = miscTab:AddSection("rank", 2)
+			-- Rank Spoof
+			pcall(function()
+				local rankBox = spoofTab:AddSection("rank", 2)
 				rankBox.subTab = "bullshit"
 				local rankName: any
 				local eloValue: any
@@ -21256,7 +21296,9 @@ Bitstream Vera
 					end
 					pcall(function()
 						rankBox:UpdateOptions()
-						miscTab:UpdateSections()
+						if spoofTab.UpdateSections then
+							spoofTab:UpdateSections()
+						end
 					end)
 				end
 				kit.flag(rankBox, "rank", Spoof, "rankOn", nil, function()
@@ -21264,7 +21306,7 @@ Bitstream Vera
 					touch()
 				end)
 				rankName = kit.choice(rankBox, "rank name", DrawingBridge.SpoofRanks or { "Nemesis" }, function()
-					return Spoof.rank
+					return Spoof.rank or "Nemesis"
 				end, function(value: string)
 					Spoof.rank = value
 					touch()
@@ -21276,18 +21318,21 @@ Bitstream Vera
 				eloValue = kit.number(rankBox, "elo value", Spoof, "elo", 0, 99999, 1, { onSet = touch })
 				table.insert(DrawingBridge.syncers, rankRefresh)
 				rankRefresh()
+			end)
 
-				local deviceBox = miscTab:AddSection("device", 2)
+			-- Device Spoof & Cases
+			pcall(function()
+				local deviceBox = spoofTab:AddSection("device", 2)
 				deviceBox.subTab = "bullshit"
 				kit.flag(deviceBox, "device", Spoof, "deviceOn", nil, touch)
 				kit.choice(deviceBox, "device type", DrawingBridge.SpoofDevices or { "Desktop", "Mobile", "Console", "VR" }, function()
-					return Spoof.device
+					return Spoof.device or "Desktop"
 				end, function(value: string)
 					Spoof.device = value
 					touch()
 				end)
 				kit.choice(deviceBox, "case", DrawingBridge.SpoofCases or { "Skin Case" }, function()
-					return Spoof.caseName
+					return Spoof.caseName or "Skin Case"
 				end, function(value: string)
 					Spoof.caseName = value
 				end)
@@ -21303,11 +21348,16 @@ Bitstream Vera
 						end,
 					},
 				})
-			end
+			end)
 
-			local AutoQueue = DrawingBridge.AutoQueue
-			if type(AutoQueue) == "table" then
-				local queueBox = miscTab:AddSection("auto queue", 1)
+			-- Auto Queue
+			pcall(function()
+				local AutoQueue = DrawingBridge.AutoQueue
+				if type(AutoQueue) ~= "table" then
+					AutoQueue = { enabled = false, match = "1v1" }
+					DrawingBridge.AutoQueue = AutoQueue
+				end
+				local queueBox = spoofTab:AddSection("auto queue", 1)
 				queueBox.subTab = "bullshit"
 				kit.flag(queueBox, "enabled", AutoQueue, "enabled")
 				kit.choice(queueBox, "match", DrawingBridge.AutoQueueMatches or { "1v1", "2v2", "3v3", "4v4", "5v5", "2v2_beginner" }, function()
@@ -21315,8 +21365,12 @@ Bitstream Vera
 				end, function(value: string)
 					AutoQueue.match = value
 				end)
-			end
-			rebuildCrosshair()
+			end)
+
+			pcall(function()
+				if spoofTab.UpdateSections then
+					spoofTab:UpdateSections()
+				end
 			end)
 		end
 
@@ -25921,10 +25975,10 @@ Bitstream Vera
 		DrawingBridge.library = library
 		print("[Atomware Rivals] Mounting UI tabs and feature cards onto Atomware UI...")
 
-		for _, name in { "visuals", "legit", "rage", "move", "world", "items", "misc", "extras" } do
+		for _, name in { "visuals", "legit", "rage", "move", "world", "items", "misc", "spoofing", "extras" } do
 			pcall(DKit.tab, name)
 		end
-		for _, key in { "combat", "esp", "world", "misc", "cosmetics", "lua" } do
+		for _, key in { "combat", "esp", "world", "misc", "spoof", "cosmetics", "lua" } do
 			local builder = DrawingBridge.builders[key]
 			if builder then
 				local okBuild, _buildErr = pcall(builder, DKit)

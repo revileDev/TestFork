@@ -1898,6 +1898,8 @@ function AtomwareMobileWindow:CreateRealTab(displayName, icon)
     function tabObj:AddSection(text, side, order)
         local card, body = createMobileCard(page, text, side)
         local section = wrapMobileSection(card, body, text)
+        section.tab = tabObj
+        section.parentTab = tabObj
         table.insert(tabObj.sections, section)
         return section
     end
@@ -1989,7 +1991,16 @@ function AtomwareMobileWindow:AddTab(rawName, order)
         return rageProxy
     end
 
-    -- 4. Misc Tab & Dedicated Spoofing Routing
+    -- 4. Dedicated Spoofing Tab
+    if lower == "spoofing" or lower == "spoof" then
+        local spoofTab = self.tabs["Spoofing"] or self:CreateRealTab("Spoofing", "🎭")
+        self.tabs[rawName] = spoofTab
+        self.tabs["Spoofing"] = spoofTab
+        self.tabs["spoofing"] = spoofTab
+        return spoofTab
+    end
+
+    -- 5. Misc Tab & Fallback Spoofing Routing
     if lower == "misc" then
         local realMiscTab = self.tabs["Misc"] or self:CreateRealTab("Misc", "🛠️")
         local spoofTab = self.tabs["Spoofing"] or self:CreateRealTab("Spoofing", "🎭")
@@ -1999,7 +2010,7 @@ function AtomwareMobileWindow:AddTab(rawName, order)
             sections = realMiscTab.sections,
             AddSection = function(selfProxy, text, side, sOrder)
                 local sLower = string.lower(text or "")
-                if sLower == "profile" or sLower == "rank" or sLower == "device" or sLower:find("spoof") then
+                if sLower == "profile" or sLower == "rank" or sLower == "device" or sLower:find("spoof") or sLower:find("queue") then
                     return spoofTab:AddSection(text, side, sOrder)
                 end
                 return realMiscTab:AddSection(text, side, sOrder)
