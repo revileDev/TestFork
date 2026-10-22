@@ -19399,7 +19399,7 @@ Bitstream Vera
 				pcall(collectgarbage, "step", 250)
 			end
 			-- Full GC sweep between match rounds or during menu idle
-			local inMatch = isInGameMatch()
+			local inMatch = (type(worldMatchActive) == "function" and worldMatchActive()) or false
 			if inMatchPrev and not inMatch then
 				if now - lastFullGc >= 15 then
 					lastFullGc = now

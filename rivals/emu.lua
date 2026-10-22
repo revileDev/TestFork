@@ -43,7 +43,8 @@ local state = {
     lastChallengeAt = nil :: number?,
     lastResponseAt = nil :: number?,
     lastLatency = -1,
-    logLevel = LOG_LEVELS.DEBUG,
+    logLevel = LOG_LEVELS.WARN,
+    firstChallengeLogged = false,
 }
 
 local function traceback(problem: any): string
@@ -146,10 +147,6 @@ local function observeResponses(challenge: RemoteEvent)
                     and math.floor((state.lastResponseAt - state.lastChallengeAt) * 1000 + 0.5)
                     or -1
                 state.lastLatency = latency
-                log("DEBUG", "CHALLENGE_RESPONSE", string.format(
-                    "count=%d latency=%dms packetItems=%d",
-                    state.responses, latency, #packet
-                ))
             else
                 state.malformed += 1
                 if state.malformed <= 3 or state.malformed % 10 == 0 then
@@ -182,7 +179,6 @@ local function attachRelay(challenge: RemoteEvent, native: any): boolean
     relay = challenge.OnClientEvent:Connect(function(...)
         state.inbound += 1
         state.lastChallengeAt = os.clock()
-        log("DEBUG", "CHALLENGE_INBOUND", string.format("Received challenge #%d from server", state.inbound))
 
         local args = table.pack(...)
         local failure = capture(function()
@@ -203,7 +199,10 @@ local function attachRelay(challenge: RemoteEvent, native: any): boolean
             log("WARN", "RELAY_FALLBACK", "native connection restored after callback failure")
         else
             state.invoked += 1
-            log("DEBUG", "CHALLENGE_SOLVED", string.format("Challenge #%d successfully solved by relay", state.inbound))
+            if not state.firstChallengeLogged then
+                state.firstChallengeLogged = true
+                print("[Atomware Emulator] Challenges verified & actively being solved in background")
+            end
         end
     end)
     state.relayConnection = relay
@@ -214,7 +213,7 @@ local function attachRelay(challenge: RemoteEvent, native: any): boolean
         pcall(function() state.originalScript.Enabled = false end)
     end
     state.active = true
-    log("INFO", "RELAY_ATTACHED", "Challenge relay active; LocalScript3 detached & isolated")
+
     return true
 end
 
@@ -286,10 +285,7 @@ local function cancelMiscThreads()
         end
     end
 
-    log("INFO", "MISC_TASKS", string.format(
-        "Scanned GC: found=%d cancelled=%d failed=%d",
-        state.miscFound, state.miscCancelled, state.miscFailed
-    ))
+
 end
 
 -- =========================================================================
@@ -346,7 +342,7 @@ end
 function Emulator.start()
     if state.started then return Emulator end
 
-    log("INFO", "STARTUP", "Initializing Atomware Rivals Challenge Emulator (Headless Background)...")
+
 
     -- Verification guards
     if game.GameId ~= UNIVERSE_ID and game.PlaceId ~= 17625359962 and tostring(game.PlaceId) ~= "17625359962" then
@@ -405,7 +401,7 @@ function Emulator.start()
                     cancelMiscThreads()
                     state.started = true
                     state.startedAt = os.clock()
-                    log("INFO", "STARTED", "Emulator started (delayed hook)")
+                    print("[Atomware Emulator] Initialized & active — challenges are being solved")
                     return
                 end
             end
@@ -432,7 +428,7 @@ function Emulator.start()
 
     state.started = true
     state.startedAt = os.clock()
-    log("INFO", "STARTED", "Atomware Rivals Challenge Emulator fully online (Running in background)")
+    print("[Atomware Emulator] Initialized & active — challenges are being solved")
 
     return Emulator
 end
