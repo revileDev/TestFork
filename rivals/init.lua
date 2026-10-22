@@ -106,9 +106,217 @@ _G.OnDropdown = nil
 _G.OnColorPicker = nil
 _G.OnKeybind = nil
 
--- Platform Detection
+-- Platform Detection & Low-End Device Advisory Middleware
 local IS_MOBILE = UserInputService.TouchEnabled
-local targetUIFile = IS_MOBILE and "mobile_ui.lua" or "main_ui.lua"
+local isLiteMode = false
+local targetUIFile = "main_ui.lua"
+
+if IS_MOBILE then
+    local CONFIG_FOLDER = "Atomware"
+    local PREF_FILE = CONFIG_FOLDER .. "/lite_mode_preference.json"
+    local hasFs = type(readfile) == "function" and type(writefile) == "function"
+    
+    local savedPref = nil
+    if hasFs then
+        pcall(function()
+            if readfile(PREF_FILE) then
+                local data = tostring(readfile(PREF_FILE)):lower()
+                if data:find("lite") then savedPref = "lite"
+                elseif data:find("full") then savedPref = "full"
+                end
+            end
+        end)
+    end
+    
+    if _G.AtomwareForceLite == true or savedPref == "lite" then
+        isLiteMode = true
+        targetUIFile = "mobile_lite.lua"
+    elseif _G.AtomwareForceFull == true or savedPref == "full" then
+        isLiteMode = false
+        targetUIFile = "mobile_ui.lua"
+    else
+        -- Hardware & Telemetry Evaluation for Lower-End Devices (3GB RAM or less)
+        local isLowEnd = false
+        pcall(function()
+            local Stats = game:GetService("Stats")
+            local totalMem = Stats and Stats:GetTotalMemoryUsageMb() or 0
+            local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.zero
+            if totalMem < 550 or totalMem > 1150 or (vp.X > 0 and (vp.X <= 1024 or vp.Y <= 768)) then
+                isLowEnd = true
+            end
+        end)
+        
+        -- Modal Advisory UI
+        local function showAdvisoryModal(): string
+            local gethui = gethui or function() return nil end
+            local parent = gethui() or game:GetService("CoreGui") or (Players.LocalPlayer and Players.LocalPlayer:FindFirstChildOfClass("PlayerGui"))
+            if not parent then return "mobile_lite.lua" end
+            
+            local oldPrompt = parent:FindFirstChild("Atomware_DeviceAdvisory")
+            if oldPrompt then pcall(function() oldPrompt:Destroy() end) end
+            
+            local sg = Instance.new("ScreenGui")
+            sg.Name = "Atomware_DeviceAdvisory"
+            sg.ResetOnSpawn = false
+            sg.DisplayOrder = 999999
+            sg.Parent = parent
+            
+            -- Dark blurred backdrop
+            local backdrop = Instance.new("TextButton")
+            backdrop.Size = UDim2.fromScale(1, 1)
+            backdrop.BackgroundColor3 = Color3.fromRGB(4, 3, 8)
+            backdrop.BackgroundTransparency = 0.35
+            backdrop.Text = ""
+            backdrop.AutoButtonColor = false
+            backdrop.Parent = sg
+            
+            -- Modal Card
+            local card = Instance.new("Frame")
+            card.AnchorPoint = Vector2.new(0.5, 0.5)
+            card.Position = UDim2.fromScale(0.5, 0.5)
+            card.Size = UDim2.fromOffset(360, 240)
+            card.BackgroundColor3 = Color3.fromRGB(12, 8, 22)
+            card.BorderSizePixel = 0
+            card.Parent = sg
+            
+            local cardCorner = Instance.new("UICorner")
+            cardCorner.CornerRadius = UDim.new(0, 12)
+            cardCorner.Parent = card
+            
+            local cardStroke = Instance.new("UIStroke")
+            cardStroke.Color = Color3.fromRGB(157, 48, 255)
+            cardStroke.Thickness = 1.5
+            cardStroke.Parent = card
+            
+            -- Header
+            local header = Instance.new("Frame")
+            header.Size = UDim2.new(1, 0, 0, 42)
+            header.BackgroundColor3 = Color3.fromRGB(18, 12, 32)
+            header.BorderSizePixel = 0
+            header.Parent = card
+            
+            local hCorner = Instance.new("UICorner")
+            hCorner.CornerRadius = UDim.new(0, 12)
+            hCorner.Parent = header
+            
+            local titleLbl = Instance.new("TextLabel")
+            titleLbl.Size = UDim2.new(1, -24, 1, 0)
+            titleLbl.Position = UDim2.fromOffset(14, 0)
+            titleLbl.BackgroundTransparency = 1
+            titleLbl.Text = "ATOMWARE SYSTEM ADVISORY"
+            titleLbl.TextColor3 = Color3.fromRGB(205, 104, 255)
+            titleLbl.TextSize = 12
+            titleLbl.Font = Enum.Font.GothamBold
+            titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+            titleLbl.Parent = header
+            
+            -- Body Description
+            local desc = Instance.new("TextLabel")
+            desc.Size = UDim2.new(1, -28, 0, 56)
+            desc.Position = UDim2.fromOffset(14, 50)
+            desc.BackgroundTransparency = 1
+            desc.Text = "We detected you are on a lower-end device (3GB RAM or less). We suggest Lite Mode for best performance, smoother frame rates, and zero crashes."
+            desc.TextColor3 = Color3.fromRGB(235, 225, 250)
+            desc.TextSize = 11
+            desc.Font = Enum.Font.GothamMedium
+            desc.TextWrapped = true
+            desc.TextXAlignment = Enum.TextXAlignment.Left
+            desc.TextYAlignment = Enum.TextYAlignment.Top
+            desc.Parent = card
+            
+            -- Button 1: Enable Lite Mode (Recommended) with animated countdown
+            local liteBtn = Instance.new("TextButton")
+            liteBtn.Size = UDim2.new(1, -28, 0, 36)
+            liteBtn.Position = UDim2.fromOffset(14, 114)
+            liteBtn.BackgroundColor3 = Color3.fromRGB(105, 35, 185)
+            liteBtn.Text = "Enable Lite Mode (Recommended) (6s)"
+            liteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            liteBtn.TextSize = 12
+            liteBtn.Font = Enum.Font.GothamBold
+            liteBtn.AutoButtonColor = false
+            liteBtn.Parent = card
+            
+            local bCorner = Instance.new("UICorner")
+            bCorner.CornerRadius = UDim.new(0, 8)
+            bCorner.Parent = liteBtn
+            
+            local bStroke = Instance.new("UIStroke")
+            bStroke.Color = Color3.fromRGB(205, 104, 255)
+            bStroke.Thickness = 1.2
+            bStroke.Parent = liteBtn
+            
+            -- Button 2: Continue with Full Version
+            local fullBtn = Instance.new("TextButton")
+            fullBtn.Size = UDim2.new(1, -28, 0, 32)
+            fullBtn.Position = UDim2.fromOffset(14, 158)
+            fullBtn.BackgroundColor3 = Color3.fromRGB(24, 16, 40)
+            fullBtn.Text = "Continue with Full Version"
+            fullBtn.TextColor3 = Color3.fromRGB(170, 155, 205)
+            fullBtn.TextSize = 11
+            fullBtn.Font = Enum.Font.GothamMedium
+            fullBtn.AutoButtonColor = false
+            fullBtn.Parent = card
+            
+            local fCorner = Instance.new("UICorner")
+            fCorner.CornerRadius = UDim.new(0, 8)
+            fCorner.Parent = fullBtn
+            
+            -- Checkbox: Remember Choice
+            local rememberChoice = true
+            local remBtn = Instance.new("TextButton")
+            remBtn.Size = UDim2.new(1, -28, 0, 20)
+            remBtn.Position = UDim2.fromOffset(14, 200)
+            remBtn.BackgroundTransparency = 1
+            remBtn.Text = "[✓] Remember my choice for future sessions"
+            remBtn.TextColor3 = Color3.fromRGB(180, 160, 220)
+            remBtn.TextSize = 10
+            remBtn.Font = Enum.Font.GothamMedium
+            remBtn.TextXAlignment = Enum.TextXAlignment.Left
+            remBtn.Parent = card
+            
+            remBtn.MouseButton1Click:Connect(function()
+                rememberChoice = not rememberChoice
+                remBtn.Text = (rememberChoice and "[✓] " or "[ ] ") .. "Remember my choice for future sessions"
+                remBtn.TextColor3 = rememberChoice and Color3.fromRGB(205, 104, 255) or Color3.fromRGB(120, 110, 150)
+            end)
+            
+            local decision = nil
+            liteBtn.MouseButton1Click:Connect(function() decision = "mobile_lite.lua" end)
+            fullBtn.MouseButton1Click:Connect(function() decision = "mobile_ui.lua" end)
+            
+            -- 6s Auto Selection Thread
+            task.spawn(function()
+                for i = 6, 1, -1 do
+                    if decision ~= nil or not sg.Parent then break end
+                    liteBtn.Text = "Enable Lite Mode (Recommended) (" .. tostring(i) .. "s)"
+                    task.wait(1)
+                end
+                if decision == nil then
+                    decision = "mobile_lite.lua"
+                end
+            end)
+            
+            while decision == nil do
+                task.wait(0.05)
+            end
+            
+            if rememberChoice and hasFs then
+                pcall(function()
+                    local isF = type(isfolder) == "function" and isfolder
+                    local makeF = type(makefolder) == "function" and makefolder
+                    if makeF and isF and not isF(CONFIG_FOLDER) then makeF(CONFIG_FOLDER) end
+                    writefile(PREF_FILE, decision == "mobile_lite.lua" and "lite" or "full")
+                end)
+            end
+            
+            pcall(function() sg:Destroy() end)
+            return decision
+        end
+        
+        targetUIFile = showAdvisoryModal()
+        isLiteMode = (targetUIFile == "mobile_lite.lua")
+    end
+end
 
 -- =========================================================================
 -- Hybrid Secure Module Loader
@@ -192,9 +400,11 @@ _G.AtomwareUnload = function()
     _G.OnToggle = nil
 end
 
--- 2. Load Cosmetics Subsystem
-if not loadModule("cosmetics.lua") then
-    warn("[Atomware Rivals] cosmetics subsystem could not be loaded; continuing.")
+-- 2. Load Cosmetics Subsystem (Omitted in Lite Mode to minimize memory usage)
+if not isLiteMode then
+    if not loadModule("cosmetics.lua") then
+        warn("[Atomware Rivals] cosmetics subsystem could not be loaded; continuing.")
+    end
 end
 
 -- 3. Load Platform UI (mobile_ui.lua vs main_ui.lua)
@@ -234,10 +444,11 @@ repeat
 until _G.AtomwareUILoaded and _G.AtomwareFeaturesLoaded
 
 -- 7. Confirmation Toast & Print
+local modeTag = if isLiteMode then "Mobile Lite" elseif IS_MOBILE then "Mobile" else "PC"
 if _G.AtomwareConfig and _G.AtomwareConfig.Notify then
-    _G.AtomwareConfig:Notify("Atomware Rivals Loaded (" .. (IS_MOBILE and "Mobile" or "PC") .. ")", 4)
+    _G.AtomwareConfig:Notify("Atomware Rivals Loaded (" .. modeTag .. ")", 4)
 end
-print("[Atomware Rivals] Fully Initialized on " .. (IS_MOBILE and "Mobile Touch" or "Desktop PC") .. "!")
+print("[Atomware Rivals] Fully Initialized on " .. modeTag .. "!")
 
 -- 8. Load Atomware Chatroom Widget
 task.spawn(function()
