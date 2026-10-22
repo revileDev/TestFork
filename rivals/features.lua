@@ -1477,6 +1477,9 @@ export type Window = {
 		onshotOccluded2: EspColor,
 		onshotTransparency: number,
 		onshotDuration: number,
+		lookTracer: boolean?,
+		lookTracerColor: EspColor?,
+		lookTracerLength: number?,
 	}
 
 	local Esp: EspSettings = {
@@ -1550,6 +1553,9 @@ export type Window = {
 		onshotOccluded2 = Color3.fromRGB(255, 90, 160),
 		onshotTransparency = 0.25,
 		onshotDuration = 1.2,
+		lookTracer = false,
+		lookTracerColor = Color3.fromRGB(255, 255, 255),
+		lookTracerLength = 10,
 	}
 	DrawingBridge.Esp = Esp
 
@@ -1696,6 +1702,9 @@ export type Window = {
 			onshotOccluded2 = colorToTable(Esp.onshotOccluded2),
 			onshotTransparency = Esp.onshotTransparency,
 			onshotDuration = Esp.onshotDuration,
+			lookTracer = Esp.lookTracer,
+			lookTracerColor = colorToTable(Esp.lookTracerColor),
+			lookTracerLength = Esp.lookTracerLength,
 			hitFx = HitFx.enabled,
 			hitStyle = HitFx.style,
 			hitColor = colorToTable(HitFx.color),
@@ -1807,6 +1816,9 @@ export type Window = {
 		Esp.onshotOccluded2 = tableToColor(data.onshotOccluded2, Esp.onshotOccluded2)
 		if type(data.onshotTransparency) == "number" then Esp.onshotTransparency = math.clamp(data.onshotTransparency, 0, 0.95) end
 		if type(data.onshotDuration) == "number" then Esp.onshotDuration = math.clamp(data.onshotDuration, 0.1, 5) end
+		if type(data.lookTracer) == "boolean" then Esp.lookTracer = data.lookTracer end
+		Esp.lookTracerColor = tableToColor(data.lookTracerColor, Esp.lookTracerColor)
+		if type(data.lookTracerLength) == "number" then Esp.lookTracerLength = math.clamp(data.lookTracerLength, 2, 40) end
 		if type(data.hitFx) == "boolean" then HitFx.enabled = data.hitFx end
 		if type(data.hitStyle) == "string" then HitFx.style = data.hitStyle end
 		HitFx.color = tableToColor(data.hitColor, HitFx.color)
@@ -1930,6 +1942,10 @@ export type Window = {
 		local flagHealth = kit.flag(features, "Health flag", state, "flagHealth")
 		local flagTeam = kit.flag(features, "Team flag", state, "flagTeam")
 		local flagsY = kit.number(features, "Flags Y", state, "flagsY", -200, 200, 1)
+		local lookTracer = kit.flag(features, "Look tracer", state, "lookTracer", { { key = "lookTracerColor" } }, function()
+			refreshFeatures()
+		end)
+		local lookLength = kit.number(features, "Tracer length", state, "lookTracerLength", 2, 30, 1, { suffix = " studs" })
 
 		refreshFeatures = function()
 			local on = state.master == true
@@ -1967,6 +1983,8 @@ export type Window = {
 				{ flagHealth, on and state.flags },
 				{ flagTeam, on and state.flags },
 				{ flagsY, on and state.flags },
+				{ lookTracer, on },
+				{ lookLength, on and state.lookTracer },
 			}
 			for _, entry in map do
 				entry[1].enabled = entry[2] == true
@@ -2171,6 +2189,35 @@ export type Window = {
 		end
 		table.insert(DrawingBridge.syncers, hitRefresh)
 		hitRefresh()
+
+		local ClientFx = DrawingBridge.ClientFx
+		if type(ClientFx) ~= "table" then
+			ClientFx = DrawingBridge.ClientFx
+		end
+		local tracersBox = tab:AddSection("bullet tracers", 2)
+		tracersBox.subTab = "players"
+		local tracerRef: () -> ()
+		local tracerWidth: any
+		local tracerLife: any
+		local tracerBright: any
+		kit.flag(tracersBox, "bullet tracers", ClientFx, "tracers", { { key = "tracerColor" } }, function()
+			if tracerRef then tracerRef() end
+		end)
+		tracerWidth = kit.number(tracersBox, "width", ClientFx, "tracerWidth", 0.05, 1.5, 0.05)
+		tracerLife = kit.number(tracersBox, "duration", ClientFx, "tracerLifetime", 0.1, 5, 0.1, { suffix = "s" })
+		tracerBright = kit.number(tracersBox, "brightness", ClientFx, "tracerBrightness", 0.1, 5, 0.1)
+		kit.flag(tracersBox, "replace old", ClientFx, "tracerReplace")
+		tracerRef = function()
+			local on = ClientFx.tracers == true
+			tracerWidth.enabled = on
+			tracerLife.enabled = on
+			tracerBright.enabled = on
+			pcall(function()
+				tracersBox:UpdateOptions()
+			end)
+		end
+		table.insert(DrawingBridge.syncers, tracerRef)
+		tracerRef()
 
 		table.insert(EspPaintFns, DrawingBridge.requestSync)
 	end
@@ -4077,6 +4124,13 @@ Bitstream Vera
 					if entry.arrowR then entry.arrowR.Visible = false end
 				end)
 			end
+			if entry.lookLine then
+				pcall(function()
+					entry.lookLine.Visible = false
+					if entry.lookTip1 then entry.lookTip1.Visible = false end
+					if entry.lookTip2 then entry.lookTip2.Visible = false end
+				end)
+			end
 			hideBones(entry)
 		end
 
@@ -5505,7 +5559,8 @@ Bitstream Vera
 			local showweapon = master and Esp.weapon
 			local showflags = master and Esp.flags
 			local showArrows = master and Esp.arrows
-			local visuals = showbox or shownames or showhealth or showdistance or showweapon or showflags or showSkeleton or showArrows
+			local showLookTracer = master and Esp.lookTracer
+			local visuals = showbox or shownames or showhealth or showdistance or showweapon or showflags or showSkeleton or showArrows or showLookTracer
 			if not visuals then
 				if not espHiddenIdle then
 					for _, entry in entries do
@@ -5849,6 +5904,79 @@ Bitstream Vera
 					entry.arrow.Visible = false
 					if entry.arrowL then entry.arrowL.Visible = false end
 					if entry.arrowR then entry.arrowR.Visible = false end
+				end
+				-- Look Tracer
+				if Esp.lookTracer and master then
+					local head = character:FindFirstChild("Head")
+					if head and head:IsA("BasePart") then
+						local lookLen = tonumber(Esp.lookTracerLength) or 10
+						local headCF = head.CFrame
+						local startPos = headCF.Position
+						local endPos = startPos + headCF.LookVector * lookLen
+						local sp0 = camera:WorldToViewportPoint(startPos)
+						local sp1 = camera:WorldToViewportPoint(endPos)
+						if sp0.Z > 0 and sp1.Z > 0 then
+							local v0 = Vector2.new(sp0.X, sp0.Y)
+							local v1 = Vector2.new(sp1.X, sp1.Y)
+							local tracerCol = if typeof(Esp.lookTracerColor) == "Color3" then Esp.lookTracerColor else Color3.fromRGB(255,255,255)
+							-- look tracer main line
+							if not entry.lookLine then
+								entry.lookLine = newline()
+								if entry.lookLine then
+									entry.lookLine.Thickness = 1.5
+									entry.lookLine.ZIndex = 6
+								end
+								entry.lookTip1 = newline()
+								if entry.lookTip1 then
+									entry.lookTip1.Thickness = 1.5
+									entry.lookTip1.ZIndex = 6
+								end
+								entry.lookTip2 = newline()
+								if entry.lookTip2 then
+									entry.lookTip2.Thickness = 1.5
+									entry.lookTip2.ZIndex = 6
+								end
+							end
+							if entry.lookLine then
+								local dir = (v1 - v0)
+								local dirLen = dir.Magnitude
+								local tipLen = math.min(dirLen * 0.3, 12)
+								local normDir = if dirLen > 0 then dir / dirLen else Vector2.new(1, 0)
+								local perpDir = Vector2.new(-normDir.Y, normDir.X)
+								local tipBase = v1 - normDir * tipLen
+								local tipA = tipBase + perpDir * tipLen * 0.5
+								local tipB = tipBase - perpDir * tipLen * 0.5
+								entry.lookLine.From = v0
+								entry.lookLine.To = v1
+								entry.lookLine.Color = tracerCol
+								entry.lookLine.Visible = true
+								if entry.lookTip1 then
+									entry.lookTip1.From = v1
+									entry.lookTip1.To = tipA
+									entry.lookTip1.Color = tracerCol
+									entry.lookTip1.Visible = true
+								end
+								if entry.lookTip2 then
+									entry.lookTip2.From = v1
+									entry.lookTip2.To = tipB
+									entry.lookTip2.Color = tracerCol
+									entry.lookTip2.Visible = true
+								end
+							end
+						else
+							if entry.lookLine then entry.lookLine.Visible = false end
+							if entry.lookTip1 then entry.lookTip1.Visible = false end
+							if entry.lookTip2 then entry.lookTip2.Visible = false end
+						end
+					else
+						if entry.lookLine then entry.lookLine.Visible = false end
+						if entry.lookTip1 then entry.lookTip1.Visible = false end
+						if entry.lookTip2 then entry.lookTip2.Visible = false end
+					end
+				else
+					if entry.lookLine then entry.lookLine.Visible = false end
+					if entry.lookTip1 then entry.lookTip1.Visible = false end
+					if entry.lookTip2 then entry.lookTip2.Visible = false end
 				end
 				end
 				end
@@ -12631,7 +12759,7 @@ Bitstream Vera
 				local nameLabel = Instance.new("TextLabel")
 				nameLabel.Name = "TargetName"
 				nameLabel.Position = UDim2.new(0, 68, 0, 12)
-				nameLabel.Size = UDim2.new(0, 292, 0, 18)
+				nameLabel.Size = UDim2.new(0, 236, 0, 18)
 				nameLabel.BackgroundTransparency = 1
 				nameLabel.Font = Enum.Font.GothamBold
 				nameLabel.TextSize = 15
@@ -12640,6 +12768,23 @@ Bitstream Vera
 				nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 				nameLabel.Text = "Target"
 				nameLabel.Parent = panel
+
+				-- "Looking At You" badge
+				local lookingBadge = Instance.new("TextLabel")
+				lookingBadge.Name = "LookingBadge"
+				lookingBadge.Position = UDim2.new(0, 310, 0, 13)
+				lookingBadge.Size = UDim2.new(0, 50, 0, 14)
+				lookingBadge.BackgroundColor3 = Color3.fromRGB(210, 50, 50)
+				lookingBadge.BackgroundTransparency = 0.3
+				lookingBadge.Font = Enum.Font.GothamBold
+				lookingBadge.TextSize = 9
+				lookingBadge.TextColor3 = Color3.fromRGB(255, 255, 255)
+				lookingBadge.Text = "👁 AT ME"
+				lookingBadge.Visible = false
+				lookingBadge.Parent = panel
+				local lbCorner = Instance.new("UICorner")
+				lbCorner.CornerRadius = UDim.new(0, 3)
+				lbCorner.Parent = lookingBadge
 
 				local hpTrack = Instance.new("Frame")
 				hpTrack.Name = "HpTrack"
@@ -12793,6 +12938,7 @@ Bitstream Vera
 					headshot = headshot,
 					headshotFallback = headshotFallback,
 					nameLabel = nameLabel,
+					lookingBadge = lookingBadge,
 					hpFill = hpFill,
 					hpText = hpText,
 					cards = cards,
@@ -13095,6 +13241,23 @@ Bitstream Vera
 					local weapons, equipped = readTargetWeapons(player)
 					setWeapons(weapons, equipped)
 				end
+				-- "Looking At You" badge
+				if objs.lookingBadge then
+					local lp = Players.LocalPlayer
+					local myChar = lp and lp.Character
+					local myHead = myChar and myChar:FindFirstChild("Head")
+					local enemyHead = char and char:FindFirstChild("Head")
+					local lookingAtMe = false
+					if myHead and enemyHead and enemyHead:IsA("BasePart") then
+						local toMe = (myHead.Position - enemyHead.Position)
+						local dist = toMe.Magnitude
+						if dist > 0.1 then
+							local dot = enemyHead.CFrame.LookVector:Dot(toMe.Unit)
+							lookingAtMe = dot > 0.70
+						end
+					end
+					objs.lookingBadge.Visible = lookingAtMe
+				end
 			end
 
 			table.insert(ears, RunService.RenderStepped:Connect(function(dt)
@@ -13105,6 +13268,48 @@ Bitstream Vera
 				end
 				local now = os.clock()
 				local targetPlayer = resolveAnyTargetPlayer()
+				-- FOV circle filter: if a FOV circle is active, only show HUD when target is inside it
+				if targetPlayer then
+					local cam = Workspace.CurrentCamera
+					local applyFovFilter = false
+					local fovRadius = 0
+					local fovOriginScreen: Vector2? = nil
+					if cam then
+						local center = cam.ViewportSize * 0.5
+						if Silent.enabled and Silent.drawFov then
+							local curFov = Silent.fov
+							local effectiveR = computeEffectiveFov(curFov, false, cam)
+							fovRadius = effectiveR
+							fovOriginScreen = center
+							applyFovFilter = true
+						elseif Aim.enabled and Aim.drawFov then
+							local effR = computeEffectiveFov(resolvedAimFov, Aim.dynamicFov, cam)
+							fovRadius = effR
+							fovOriginScreen = center
+							applyFovFilter = true
+						end
+						if applyFovFilter and fovOriginScreen then
+							local char = targetPlayer.Character
+							local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head"))
+							if hrp and hrp:IsA("BasePart") then
+								local sp = cam:WorldToViewportPoint(hrp.Position)
+								if sp.Z > 0 then
+									local dx = sp.X - fovOriginScreen.X
+									local dy = sp.Y - fovOriginScreen.Y
+									if dx*dx + dy*dy > fovRadius * fovRadius then
+										-- outside FOV, suppress HUD
+										inPreview = false
+										setVisible(false)
+										lastWeaponSig = ""
+										lastHealthRatio = -1
+										lastName = ""
+										return
+									end
+								end
+							end
+						end
+					end
+				end
 				if targetPlayer then
 					inPreview = false
 					showLive(targetPlayer)
@@ -19962,10 +20167,24 @@ Bitstream Vera
 				return Qol.autoLoadout
 			end, { loadoutPrimary, loadoutSecondary, loadoutMelee, loadoutUtility })
 
+			local Rage = DrawingBridge.Rage
+			if type(Rage) ~= "table" then
+				Rage = {}
+				DrawingBridge.Rage = Rage
+			end
+			if Rage.targetHud == nil then
+				Rage.targetHud = false
+			end
+			if type(Rage.targetHudScale) ~= "number" then
+				Rage.targetHudScale = 1
+			end
 			local targetHudBox = miscTab:AddSection("target hud", 2)
 			targetHudBox.subTab = "main"
 			kit.flag(targetHudBox, "target hud", Rage, "targetHud")
 			kit.number(targetHudBox, "hud size", Rage, "targetHudScale", 0.5, 2, 0.05, { suffix = "x" })
+			pcall(function()
+				targetHudBox:UpdateOptions()
+			end)
 
 			local ClientFx = DrawingBridge.ClientFx
 			if type(ClientFx) ~= "table" then
@@ -21478,6 +21697,7 @@ Bitstream Vera
 				return
 			end
 			local now = os.clock()
+			local n = #liveTracers
 			for i = n, 1, -1 do
 				local t = liveTracers[i]
 				local f = (now - t.t0) / t.life
