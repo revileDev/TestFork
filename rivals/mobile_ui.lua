@@ -1396,7 +1396,11 @@ local function wrapMobileSection(card, body, title)
         local btnObj = { enabled = true, count = 1, buttons = { btn } }
 
         local clickedOnce = false
-        trackConnection(btn.MouseButton1Click:Connect(function()
+        local lastClick = 0
+        local function handleMainClick()
+            local now = os.clock()
+            if now - lastClick < 0.12 then return end
+            lastClick = now
             if confirm and not clickedOnce then
                 clickedOnce = true
                 btn.Text = "Confirm?"
@@ -1412,7 +1416,9 @@ local function wrapMobileSection(card, body, title)
             btn.Text = text
             btn.TextColor3 = THEME.Text
             if callback then pcall(callback) end
-        end))
+        end
+        trackConnection(btn.MouseButton1Click:Connect(handleMainClick))
+        trackConnection(btn.Activated:Connect(handleMainClick))
 
         function btnObj:AddButton(subData)
             btnObj.count = btnObj.count + 1
@@ -1434,9 +1440,30 @@ local function wrapMobileSection(card, body, title)
             stroke(subBtn, THEME.BorderDim, 1)
             table.insert(btnObj.buttons, subBtn)
 
-            trackConnection(subBtn.MouseButton1Click:Connect(function()
+            local subClickedOnce = false
+            local lastSubClick = 0
+            local function handleSubClick()
+                local now = os.clock()
+                if now - lastSubClick < 0.12 then return end
+                lastSubClick = now
+                if subData.confirm == true and not subClickedOnce then
+                    subClickedOnce = true
+                    subBtn.Text = "Confirm?"
+                    subBtn.TextColor3 = THEME.Red
+                    task.delay(3, function()
+                        subClickedOnce = false
+                        subBtn.Text = subData.text or "Button"
+                        subBtn.TextColor3 = THEME.Text
+                    end)
+                    return
+                end
+                subClickedOnce = false
+                subBtn.Text = subData.text or "Button"
+                subBtn.TextColor3 = THEME.Text
                 if subData.callback then pcall(subData.callback) end
-            end))
+            end
+            trackConnection(subBtn.MouseButton1Click:Connect(handleSubClick))
+            trackConnection(subBtn.Activated:Connect(handleSubClick))
             return btnObj
         end
 
@@ -1487,10 +1514,17 @@ local function wrapMobileSection(card, body, title)
         trackConnection(box.FocusLost:Connect(function()
             if callback then pcall(callback, box.Text) end
         end))
+        trackConnection(box:GetPropertyChangedSignal("Text"):Connect(function()
+            if callback then pcall(callback, box.Text) end
+        end))
 
         function boxObj:SetInput(val, skipCallback)
             box.Text = tostring(val or "")
             if not skipCallback and callback then pcall(callback, box.Text) end
+        end
+
+        function boxObj:GetInput()
+            return box.Text
         end
 
         table.insert(section.options, { row = row, obj = boxObj })

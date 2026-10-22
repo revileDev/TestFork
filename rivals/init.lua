@@ -92,6 +92,132 @@ if not checkGameSupported() then
     return
 end
 
+-- Executor Environment Pre-flight Verification Guard
+local function checkExecutorSupported()
+    local missingApis = {}
+
+    -- 1. Hooking APIs (Required for emulation and game function hooks)
+    local hasHooking = type(hookmetamethod) == "function"
+        or type(hookfunction) == "function"
+        or (type(debug) == "table" and type((debug :: any).hookmetamethod) == "function")
+        or (type(debug) == "table" and type((debug :: any).hookfunction) == "function")
+        or type(replaceclosure) == "function"
+    if not hasHooking then
+        table.insert(missingApis, "hookmetamethod / hookfunction")
+    end
+
+    -- 2. Connections API (Required by anticheat emulator to intercept RenderStepped challenges)
+    local hasConnections = type(getconnections) == "function"
+        or (type(debug) == "table" and type((debug :: any).getconnections) == "function")
+    if not hasConnections then
+        table.insert(missingApis, "getconnections")
+    end
+
+    -- 3. File System APIs (Required for profile configs, autoload, and assets)
+    local hasFs = type(readfile) == "function" and type(writefile) == "function"
+    if not hasFs then
+        table.insert(missingApis, "readfile / writefile")
+    end
+
+    -- 4. Environment Closure Support
+    local hasClosure = type(newcclosure) == "function"
+    if not hasClosure then
+        table.insert(missingApis, "newcclosure")
+    end
+
+    if #missingApis == 0 then
+        return true
+    end
+
+    local execName = "Unknown"
+    pcall(function()
+        if type(identifyexecutor) == "function" then
+            execName = tostring(identifyexecutor())
+        elseif type(getexecutorname) == "function" then
+            execName = tostring(getexecutorname())
+        end
+    end)
+
+    local missingList = table.concat(missingApis, ", ")
+
+    -- 1. Native StarterGui Notification
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Atomware Rivals",
+            Text = "Executor not supported (" .. execName .. ")",
+            Duration = 8,
+        })
+    end)
+
+    -- 2. Fallback On-Screen Toast Modal
+    pcall(function()
+        local gethui = gethui or function() return nil end
+        local parent = gethui() or game:GetService("CoreGui") or (Players.LocalPlayer and Players.LocalPlayer:FindFirstChildOfClass("PlayerGui"))
+        if parent then
+            local oldToast = parent:FindFirstChild("Atomware_UnsupportedExecutor")
+            if oldToast then oldToast:Destroy() end
+
+            local sg = Instance.new("ScreenGui")
+            sg.Name = "Atomware_UnsupportedExecutor"
+            sg.ResetOnSpawn = false
+            sg.DisplayOrder = 9999
+            sg.Parent = parent
+
+            local banner = Instance.new("Frame")
+            banner.AnchorPoint = Vector2.new(0.5, 0)
+            banner.Position = UDim2.new(0.5, 0, 0, 24)
+            banner.Size = UDim2.fromOffset(360, 68)
+            banner.BackgroundColor3 = Color3.fromRGB(18, 12, 28)
+            banner.BorderSizePixel = 0
+            banner.Parent = sg
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 10)
+            corner.Parent = banner
+
+            local stroke = Instance.new("UIStroke")
+            stroke.Color = Color3.fromRGB(255, 75, 125)
+            stroke.Thickness = 1.5
+            stroke.Parent = banner
+
+            local title = Instance.new("TextLabel")
+            title.Size = UDim2.new(1, -24, 0, 20)
+            title.Position = UDim2.fromOffset(12, 6)
+            title.BackgroundTransparency = 1
+            title.Text = "ATOMWARE · UNSUPPORTED EXECUTOR"
+            title.TextColor3 = Color3.fromRGB(255, 100, 140)
+            title.TextSize = 11
+            title.Font = Enum.Font.GothamBold
+            title.TextXAlignment = Enum.TextXAlignment.Left
+            title.Parent = banner
+
+            local desc = Instance.new("TextLabel")
+            desc.Size = UDim2.new(1, -24, 0, 36)
+            desc.Position = UDim2.fromOffset(12, 24)
+            desc.BackgroundTransparency = 1
+            desc.Text = "Your executor (" .. execName .. ") is missing required APIs: " .. missingList .. ". Startup halted to prevent crashes."
+            desc.TextColor3 = Color3.fromRGB(255, 241, 255)
+            desc.TextSize = 10
+            desc.Font = Enum.Font.GothamMedium
+            desc.TextWrapped = true
+            desc.TextXAlignment = Enum.TextXAlignment.Left
+            desc.TextYAlignment = Enum.TextYAlignment.Top
+            desc.Parent = banner
+
+            task.delay(8, function()
+                if sg and sg.Parent then sg:Destroy() end
+            end)
+        end
+    end)
+
+    warn("[Atomware] Unsupported executor detected: " .. execName .. ". Missing required APIs: " .. missingList .. ". Aborting startup.")
+    return false
+end
+
+if not checkExecutorSupported() then
+    return
+end
+
 -- If the initializer is run again, unload the previous UI/backend first.
 if _G.AtomwareUnload and (_G.AtomwareUILoaded or _G.AtomwareFeaturesLoaded) then
     pcall(_G.AtomwareUnload)

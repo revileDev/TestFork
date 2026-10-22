@@ -20547,50 +20547,6 @@ Bitstream Vera
 			ClientFx.tracerLifetime = if type(ClientFx.tracerLifetime) == "number" then ClientFx.tracerLifetime else 0.35
 			ClientFx.tracerBrightness = if type(ClientFx.tracerBrightness) == "number" then ClientFx.tracerBrightness else 1
 
-			local wol = miscTab:AddSection("wol", 1)
-			wol.subTab = "main"
-			local wolRefresh: () -> ()
-			local wolWidth: any
-			local wolLife: any
-			local wolBright: any
-			local wolColor: any
-			local wolReplace: any
-			kit.flag(wol, "bullet tracers", ClientFx, "tracers", nil, function()
-				if wolRefresh then
-					wolRefresh()
-				end
-			end)
-			wolReplace = kit.flag(wol, "replace game tracers", ClientFx, "tracerReplace")
-			wolColor = kit.color(wol, "color", function()
-				return if typeof(ClientFx.tracerColor) == "Color3" then ClientFx.tracerColor else Color3.fromRGB(255, 180, 60)
-			end, function(c3: Color3)
-				if typeof(c3) == "Color3" then
-					ClientFx.tracerColor = Color3.new(c3.R, c3.G, c3.B)
-				end
-				if DrawingBridge.recolorClientFx then
-					pcall(DrawingBridge.recolorClientFx)
-				end
-			end)
-			wolWidth = kit.number(wol, "size", ClientFx, "tracerWidth", 1, 80, 1, { scale = 100 })
-			wolLife = kit.number(wol, "duration", ClientFx, "tracerLifetime", 50, 2000, 10, { scale = 1000, suffix = "ms" })
-			wolBright = kit.number(wol, "brightness", ClientFx, "tracerBrightness", 0, 300, 5, { scale = 100, suffix = "%" })
-			wolRefresh = function()
-				local on = ClientFx.tracers == true
-				for _, opt in { wolReplace, wolColor, wolWidth, wolLife, wolBright } do
-					if opt then
-						opt.enabled = on
-					end
-				end
-				pcall(function()
-					wol:UpdateOptions()
-					miscTab:UpdateSections()
-				end)
-				if DrawingBridge.recolorClientFx then
-					pcall(DrawingBridge.recolorClientFx)
-				end
-			end
-			table.insert(DrawingBridge.syncers, wolRefresh)
-			wolRefresh()
 
 			ClientFx.ambience = ClientFx.ambience == true
 			ClientFx.ambienceTrack = if type(ClientFx.ambienceTrack) == "string" then ClientFx.ambienceTrack else "city"
@@ -23939,7 +23895,10 @@ Bitstream Vera
 		end
 	end
 
-	local function sanitizeConfigName(name: string): string
+	local function sanitizeConfigName(name: any): string
+		if type(name) ~= "string" then
+			return "config"
+		end
 		local cleaned = string.gsub(name, "[^%w%-_ ]", "")
 		cleaned = string.gsub(cleaned, "^%s+", "")
 		cleaned = string.gsub(cleaned, "%s+$", "")
@@ -24477,7 +24436,12 @@ Bitstream Vera
 	end
 
 	local function buildConfigPayload(): any
-		local skins, wraps, charms, finishers = Cosmetics:export()
+		local skins, wraps, charms, finishers = nil, nil, nil, nil
+		if Cosmetics and type(Cosmetics.export) == "function" then
+			pcall(function()
+				skins, wraps, charms, finishers = Cosmetics:export()
+			end)
+		end
 		local payload = {
 			version = 4,
 			name = "Atomware Rivals",
@@ -24489,10 +24453,10 @@ Bitstream Vera
 			esp = if exportEsp then exportEsp() else nil,
 			combat = if exportCombat then exportCombat() else nil,
 			world = if exportWorldQol then exportWorldQol() else nil,
-			client = exportClientFx(),
-			spoof = exportSpoof(),
-			autoQueue = exportAutoQueue(),
-			ui = exportUiSettings(),
+			client = if exportClientFx then exportClientFx() else nil,
+			spoof = if exportSpoof then exportSpoof() else nil,
+			autoQueue = if exportAutoQueue then exportAutoQueue() else nil,
+			ui = if exportUiSettings then exportUiSettings() else nil,
 		}
 		local ok, encoded = pcall(function()
 			return HttpService:JSONEncode(payload)
@@ -24586,7 +24550,10 @@ Bitstream Vera
 		elseif clean == "" then
 			clean = "config"
 		end
-		local payload = buildConfigPayload()
+		local okPayload, payload = pcall(buildConfigPayload)
+		if not okPayload or type(payload) ~= "table" then
+			return false, "failed to build config data"
+		end
 		payload.name = clean
 		payload.savedAt = os.time()
 		local ok, encoded = pcall(function()
@@ -25656,12 +25623,19 @@ Bitstream Vera
 			{
 				text = "Create",
 				callback = function()
-					local target = sanitizeConfigName(nameText)
+					local targetName = nameText
+					if nameBox and type(nameBox.GetInput) == "function" then
+						local cur = nameBox:GetInput()
+						if type(cur) == "string" and cur ~= "" then
+							targetName = cur
+						end
+					end
+					local target = sanitizeConfigName(targetName or "config")
 					local ok, result = createConfig(target)
 					if ok then
 						selectedConfig = result
 						nameText = result
-						if nameBox then
+						if nameBox and type(nameBox.SetInput) == "function" then
 							nameBox:SetInput(result, true)
 						end
 						refreshConfigs()
@@ -25674,11 +25648,24 @@ Bitstream Vera
 			{
 				text = "Save",
 				callback = function()
-					local target = sanitizeConfigName(nameText)
+					local targetName = nameText
+					if nameBox and type(nameBox.GetInput) == "function" then
+						local cur = nameBox:GetInput()
+						if type(cur) == "string" and cur ~= "" then
+							targetName = cur
+						end
+					end
+					if not targetName or targetName == "" then
+						targetName = selectedConfig or loadedConfigName or "default"
+					end
+					local target = sanitizeConfigName(targetName)
 					local ok, result = saveConfig(target)
 					if ok then
 						selectedConfig = result
 						nameText = result
+						if nameBox and type(nameBox.SetInput) == "function" then
+							nameBox:SetInput(result, true)
+						end
 						refreshConfigs()
 						notify("saved · " .. result)
 					else
