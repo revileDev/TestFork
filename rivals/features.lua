@@ -19284,15 +19284,16 @@ Bitstream Vera
 		end
 
 		DrawingBridge.builders.world = function(kit: any)
-			local function rebuild()
-				pcall(rebuildCrosshair)
-			end
-			local function mapChanged(_value: any?)
-				requestWorldMapApply()
-			end
-			local function skyTouch(_value: any?)
-				pcall(applyWorldSky)
-			end
+			pcall(function()
+				local function rebuild()
+					pcall(rebuildCrosshair)
+				end
+				local function mapChanged(_value: any?)
+					requestWorldMapApply()
+				end
+				local function skyTouch(_value: any?)
+					pcall(applyWorldSky)
+				end
 
 			local WORLD_THEMES = { "Dark", "Light", "Sepia", "Night" }
 			local function applyWorldTheme(name: string)
@@ -19666,12 +19667,24 @@ Bitstream Vera
 			kit.gate(extras, function()
 				return WorldSky.skybox
 			end, { skyboxList })
-
-			local miscTab = kit.tab("misc")
-			pcall(function()
-			miscTab:AddSubTabs({ "main", "client", "bullshit" })
 			end)
-			local hud = miscTab:AddSection("crosshair", 1)
+			if DrawingBridge.builders.misc then
+				pcall(DrawingBridge.builders.misc, kit)
+			end
+		end
+
+		DrawingBridge.builders.misc = function(kit: any)
+			if DrawingBridge.miscBuilt then return end
+			DrawingBridge.miscBuilt = true
+			pcall(function()
+				local function rebuild()
+					pcall(rebuildCrosshair)
+				end
+				local miscTab = kit.tab("misc")
+				pcall(function()
+					miscTab:AddSubTabs({ "main", "client", "bullshit" })
+				end)
+				local hud = miscTab:AddSection("crosshair", 1)
 			hud.subTab = "main"
 			local hudRefresh: () -> ()
 			kit.flag(hud, "crosshair", Hud, "enabled", nil, function()
@@ -20659,6 +20672,8 @@ Bitstream Vera
 					AutoQueue.match = value
 				end)
 			end
+			rebuildCrosshair()
+			end)
 		end
 
 		rebuildCrosshair()
@@ -25232,7 +25247,7 @@ Bitstream Vera
 		for _, name in { "visuals", "legit", "rage", "move", "world", "items", "misc", "extras" } do
 			pcall(DKit.tab, name)
 		end
-		for _, key in { "combat", "esp", "world", "cosmetics", "lua" } do
+		for _, key in { "combat", "esp", "world", "misc", "cosmetics", "lua" } do
 			local builder = DrawingBridge.builders[key]
 			if builder then
 				local okBuild, _buildErr = pcall(builder, DKit)

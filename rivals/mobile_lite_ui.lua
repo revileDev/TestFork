@@ -519,6 +519,11 @@ local function createMockButton()
     function btn:AddButton(opts)
         return createMockButton()
     end
+    setmetatable(btn, {
+        __index = function(t, k)
+            return function(...) return btn end
+        end
+    })
     return btn
 end
 
@@ -527,6 +532,7 @@ local function createMockScrollList(opts)
         values = opts and opts.values or {},
         selected = opts and opts.selected or "",
         enabled = true,
+        scroll = 0,
     }
     function list:AddValue(val)
         table.insert(list.values, val)
@@ -534,7 +540,22 @@ local function createMockScrollList(opts)
     function list:SetValues(newVals)
         list.values = newVals or {}
     end
+    function list:ClearValues()
+        list.values = {}
+    end
+    function list:Select(val, skip)
+        list.selected = val
+        if not skip and opts and opts.callback then
+            pcall(opts.callback, val)
+        end
+    end
     function list:SetText(txt) end
+
+    setmetatable(list, {
+        __index = function(t, k)
+            return function(...) return list end
+        end
+    })
     return list
 end
 
@@ -543,37 +564,54 @@ local function createMockSection(name)
 
     function mockSec:AddToggle(opts)
         local state = opts and opts.state or false
-        return {
+        local toggleObj = {
+            enabled = true,
             state = state,
             SetState = function(self, val, skip)
                 self.state = val
                 if not skip and opts and opts.callback then pcall(opts.callback, val) end
             end,
-            AddColor = function(self) return { SetColor = function() end } end,
-            AddKeyPicker = function(self) return { SetKey = function() end } end,
+            AddColor = function(self)
+                return {
+                    color = Color3.new(1, 1, 1),
+                    SetColor = function() end,
+                }
+            end,
+            AddKeyPicker = function(self)
+                return {
+                    key = "None",
+                    SetKey = function() end,
+                }
+            end,
         }
+        setmetatable(toggleObj, {
+            __index = function(t, k)
+                return function(...) return toggleObj end
+            end
+        })
+        return toggleObj
     end
 
     function mockSec:AddSlider(opts)
         local val = opts and opts.default or 0
-        return {
+        local sliderObj = {
+            enabled = true,
             value = val,
             SetValue = function(self, v, skip)
                 self.value = v
                 if not skip and opts and opts.callback then pcall(opts.callback, v) end
             end,
         }
+        setmetatable(sliderObj, {
+            __index = function(t, k)
+                return function(...) return sliderObj end
+            end
+        })
+        return sliderObj
     end
 
     function mockSec:AddDropdown(opts)
-        local sel = opts and opts.default or nil
-        return {
-            selected = sel,
-            Select = function(self, v, skip)
-                self.selected = v
-                if not skip and opts and opts.callback then pcall(opts.callback, v) end
-            end,
-        }
+        return createMockScrollList(opts)
     end
 
     function mockSec:AddList(opts)
@@ -585,24 +623,45 @@ local function createMockSection(name)
     end
 
     function mockSec:AddBox(opts)
-        return {
+        local boxObj = {
+            enabled = true,
             text = opts and opts.default or "",
             SetInput = function() end,
         }
+        setmetatable(boxObj, {
+            __index = function(t, k)
+                return function(...) return boxObj end
+            end
+        })
+        return boxObj
     end
 
     function mockSec:AddBind(opts)
-        return {
+        local bindObj = {
+            enabled = true,
             bind = opts and opts.bind or "None",
             SetBind = function() end,
         }
+        setmetatable(bindObj, {
+            __index = function(t, k)
+                return function(...) return bindObj end
+            end
+        })
+        return bindObj
     end
 
     function mockSec:AddColor(opts)
-        return {
+        local colorObj = {
+            enabled = true,
             color = opts and opts.default or Color3.new(1, 1, 1),
             SetColor = function() end,
         }
+        setmetatable(colorObj, {
+            __index = function(t, k)
+                return function(...) return colorObj end
+            end
+        })
+        return colorObj
     end
 
     function mockSec:AddButton(opts)
@@ -622,7 +681,7 @@ local function createMockSection(name)
     setmetatable(mockSec, {
         __index = function(t, k)
             return function(...)
-                return {
+                local dummy = {
                     values = {},
                     selected = nil,
                     state = false,
@@ -630,9 +689,11 @@ local function createMockSection(name)
                     text = "",
                     enabled = true,
                     count = 1,
+                    scroll = 0,
                     AddButton = function() return createMockButton() end,
                     AddValue = function() end,
                     SetValues = function() end,
+                    ClearValues = function() end,
                     SetText = function() end,
                     SetState = function() end,
                     SetValue = function() end,
@@ -642,6 +703,12 @@ local function createMockSection(name)
                     Select = function() end,
                     UpdateOptions = function() end,
                 }
+                setmetatable(dummy, {
+                    __index = function(dt, dk)
+                        return function(...) return dummy end
+                    end
+                })
+                return dummy
             end
         end
     })
@@ -805,7 +872,7 @@ local function wrapMobileSection(card, body, title)
         knob.Parent = btn
         corner(knob, 7)
 
-        local toggleObj = { enabled = true }
+        local toggleObj = { enabled = true, state = state }
 
         local function setState(val, skipCallback)
             local newVal = (val == true)
@@ -813,6 +880,7 @@ local function wrapMobileSection(card, body, title)
                 return
             end
             state = newVal
+            toggleObj.state = state
             lbl.TextColor3 = state and THEME.Text or THEME.TextMuted
             if skipCallback then
                 btn.BackgroundColor3 = state and THEME.Accent or THEME.CardAlt
@@ -831,6 +899,19 @@ local function wrapMobileSection(card, body, title)
         function toggleObj:SetState(val, skipCallback)
             setState(val, skipCallback)
         end
+
+        function toggleObj:AddKeyPicker(spec)
+            return {
+                key = spec and spec.bind or "None",
+                SetKey = function() end,
+            }
+        end
+
+        setmetatable(toggleObj, {
+            __index = function(t, k)
+                return function(...) return toggleObj end
+            end
+        })
 
         function toggleObj:AddColor(spec)
             local col = spec.color or Color3.fromRGB(255, 255, 255)
@@ -973,6 +1054,12 @@ local function wrapMobileSection(card, body, title)
         function sliderObj:SetValue(newVal, skipCallback)
             setValue(newVal, skipCallback)
         end
+
+        setmetatable(sliderObj, {
+            __index = function(t, k)
+                return function(...) return sliderObj end
+            end
+        })
 
         table.insert(section.options, { row = row, obj = sliderObj })
         return sliderObj
@@ -1168,6 +1255,12 @@ local function wrapMobileSection(card, body, title)
             lbl.Text = newTxt
         end
 
+        setmetatable(listObj, {
+            __index = function(t, k)
+                return function(...) return listObj end
+            end
+        })
+
         table.insert(section.options, { row = row, obj = listObj })
         return listObj
     end
@@ -1316,6 +1409,12 @@ local function wrapMobileSection(card, body, title)
         function scrollListObj:SetText(newTxt)
             titleLbl.Text = newTxt
         end
+
+        setmetatable(scrollListObj, {
+            __index = function(t, k)
+                return function(...) return scrollListObj end
+            end
+        })
 
         table.insert(section.options, { row = container, obj = scrollListObj })
         return scrollListObj
@@ -1647,6 +1746,12 @@ local function wrapMobileSection(card, body, title)
             if not skipCallback and callback then pcall(callback, box.Text) end
         end
 
+        setmetatable(boxObj, {
+            __index = function(t, k)
+                return function(...) return boxObj end
+            end
+        })
+
         table.insert(section.options, { row = row, obj = boxObj })
         return boxObj
     end
@@ -1681,6 +1786,14 @@ local function wrapMobileSection(card, body, title)
             end
         end
     end
+
+    setmetatable(section, {
+        __index = function(t, k)
+            return function(...)
+                return createMockSection(title)
+            end
+        end
+    })
 
     return section
 end
@@ -1836,8 +1949,11 @@ function AtomwareMobileWindow:AddTab(rawName, order)
 
     -- 4. Movement, Misc, Settings
     local displayName, icon = normalizeTabName(rawName)
-    local tab = self.tabs[displayName] or self:CreateRealTab(displayName, icon)
+    local existing = self.tabs[rawName] or self.tabs[displayName]
+    if existing then return existing end
+    local tab = self:CreateRealTab(displayName, icon)
     self.tabs[rawName] = tab
+    self.tabs[displayName] = tab
     return tab
 end
 
