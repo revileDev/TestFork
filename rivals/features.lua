@@ -393,6 +393,7 @@ pcall(installSignalGuard)
 
 local Players = getService("Players") :: Players
 local UserInputService = getService("UserInputService") :: UserInputService
+local IS_MOBILE = UserInputService.TouchEnabled or not UserInputService.MouseEnabled
 local RunService = getService("RunService") :: RunService
 local ReplicatedStorage = getService("ReplicatedStorage") :: ReplicatedStorage
 local Workspace = getService("Workspace") :: Workspace
@@ -2191,19 +2192,13 @@ export type Window = {
 
 		local hitMarks: { any } = {}
 		local function hitLine(): any?
-			if not DrawingLib then
-				return nil
+			local line = newline()
+			if line then
+				line.Visible = false
+				line.Thickness = 1
+				line.Transparency = 1
+				line.ZIndex = 55
 			end
-			local ok, line = pcall(function()
-				return DrawingLib.new("Line")
-			end)
-			if not ok or not line then
-				return nil
-			end
-			line.Visible = false
-			line.Thickness = 1
-			line.Transparency = 1
-			line.ZIndex = 55
 			return line
 		end
 		local function hideHit(mark: any)
@@ -2902,6 +2897,11 @@ Bitstream Vera
 				EspFontFaces[key] = faceAsset
 				return store(faceAsset)
 			end
+			if IS_MOBILE then
+				local safeNative = Font.fromEnum(Enum.Font.GothamBold)
+				EspFontFaces[key] = safeNative
+				return store(safeNative)
+			end
 			local fallback = EspFontFaces.Plex or EspFontFaces.System or EspFontFaces.UI
 			if typeof(fallback) == "Font" then
 				local okF, faceF = pcall(function()
@@ -2912,7 +2912,7 @@ Bitstream Vera
 				end
 				return store(fallback)
 			end
-			return Font.fromEnum(Enum.Font.Code)
+			return Font.fromEnum(Enum.Font.GothamBold)
 		end
 
 		local FONT_PACK = {
@@ -3254,40 +3254,328 @@ Bitstream Vera
 		end
 
 		local function newsquare(z: number): any?
-			if not DrawingLib then
+			local zval = math.max(1, z or 1)
+			if not IS_MOBILE and DrawingLib and type(DrawingLib.new) == "function" then
+				local ok, square = pcall(function()
+					return DrawingLib.new("Square")
+				end)
+				if ok and square then
+					square.Filled = false
+					square.Thickness = 1
+					square.Color = Color3.new(0, 0, 0)
+					square.Visible = false
+					square.Transparency = 1
+					square.ZIndex = zval
+					return square
+				end
+			end
+
+			local gui = ensureEspTextGui()
+			if not gui then
 				return nil
 			end
-			local ok, square = pcall(function()
-				return DrawingLib.new("Square")
-			end)
-			if not ok or not square then
-				return nil
-			end
-			square.Filled = false
-			square.Thickness = 1
-			square.Color = Color3.new(0, 0, 0)
-			square.Visible = false
-			square.Transparency = 1
-			square.ZIndex = math.max(1, z)
-			return square
+
+			local frame = Instance.new("Frame")
+			frame.Name = "esp_square"
+			frame.BorderSizePixel = 0
+			frame.BackgroundTransparency = 1
+			frame.BackgroundColor3 = Color3.new(1, 1, 1)
+			frame.Visible = false
+			frame.ZIndex = zval
+			frame.Parent = gui
+
+			local stroke = Instance.new("UIStroke")
+			stroke.Name = "stroke"
+			stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			stroke.Thickness = 1
+			stroke.Color = Color3.new(0, 0, 0)
+			stroke.Transparency = 0
+			stroke.Enabled = true
+			stroke.Parent = frame
+
+			local state = {
+				Visible = false,
+				Filled = false,
+				Thickness = 1,
+				Color = Color3.new(0, 0, 0),
+				Transparency = 1,
+				Position = Vector2.zero,
+				Size = Vector2.zero,
+				ZIndex = zval,
+			}
+
+			local proxy: any = {}
+			setmetatable(proxy, {
+				__index = function(_, key: string): any
+					if key == "Visible" then return state.Visible
+					elseif key == "Filled" then return state.Filled
+					elseif key == "Thickness" then return state.Thickness
+					elseif key == "Color" then return state.Color
+					elseif key == "Transparency" then return state.Transparency
+					elseif key == "Position" then return state.Position
+					elseif key == "Size" then return state.Size
+					elseif key == "ZIndex" then return state.ZIndex
+					elseif key == "Remove" or key == "Destroy" then
+						return function()
+							pcall(function() frame:Destroy() end)
+						end
+					end
+					return nil
+				end,
+				__newindex = function(_, key: string, value: any)
+					if key == "Visible" then
+						local v = value == true
+						state.Visible = v
+						frame.Visible = v
+					elseif key == "Filled" then
+						local f = value == true
+						state.Filled = f
+						if f then
+							frame.BackgroundTransparency = math.clamp(1 - state.Transparency, 0, 1)
+							frame.BackgroundColor3 = state.Color
+							stroke.Enabled = false
+						else
+							frame.BackgroundTransparency = 1
+							stroke.Enabled = true
+						end
+					elseif key == "Thickness" and type(value) == "number" then
+						state.Thickness = value
+						stroke.Thickness = math.max(1, value)
+					elseif key == "Color" and typeof(value) == "Color3" then
+						state.Color = value
+						if state.Filled then
+							frame.BackgroundColor3 = value
+						else
+							stroke.Color = value
+						end
+					elseif key == "Transparency" and type(value) == "number" then
+						state.Transparency = value
+						local trans = math.clamp(1 - value, 0, 1)
+						if state.Filled then
+							frame.BackgroundTransparency = trans
+						else
+							stroke.Transparency = trans
+						end
+					elseif key == "Position" and typeof(value) == "Vector2" then
+						state.Position = value
+						frame.Position = UDim2.fromOffset(math.floor(value.X + 0.5), math.floor(value.Y + 0.5))
+					elseif key == "Size" and typeof(value) == "Vector2" then
+						state.Size = value
+						frame.Size = UDim2.fromOffset(math.max(0, math.floor(value.X + 0.5)), math.max(0, math.floor(value.Y + 0.5)))
+					elseif key == "ZIndex" and type(value) == "number" then
+						state.ZIndex = value
+						frame.ZIndex = value
+					end
+				end,
+			})
+			return proxy
 		end
 
 		local function newline(): any?
-			if not DrawingLib then
+			if not IS_MOBILE and DrawingLib and type(DrawingLib.new) == "function" then
+				local ok, line = pcall(function()
+					return DrawingLib.new("Line")
+				end)
+				if ok and line then
+					line.Thickness = 1
+					line.Color = Color3.new(1, 1, 1)
+					line.Visible = false
+					line.Transparency = 1
+					line.ZIndex = 1
+					return line
+				end
+			end
+
+			local gui = ensureEspTextGui()
+			if not gui then
 				return nil
 			end
-			local ok, line = pcall(function()
-				return DrawingLib.new("Line")
-			end)
-			if not ok or not line then
-				return nil
+
+			local lineFrame = Instance.new("Frame")
+			lineFrame.Name = "esp_line"
+			lineFrame.BorderSizePixel = 0
+			lineFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+			lineFrame.BackgroundTransparency = 0
+			lineFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+			lineFrame.Visible = false
+			lineFrame.ZIndex = 3
+			lineFrame.Parent = gui
+
+			local state = {
+				Visible = false,
+				From = Vector2.zero,
+				To = Vector2.zero,
+				Color = Color3.new(1, 1, 1),
+				Thickness = 1,
+				Transparency = 1,
+				ZIndex = 3,
+			}
+
+			local function updateGeom()
+				local diff = state.To - state.From
+				local dist = diff.Magnitude
+				local angle = math.atan2(diff.Y, diff.X)
+				lineFrame.Size = UDim2.fromOffset(dist, math.max(1, state.Thickness))
+				lineFrame.Position = UDim2.fromOffset((state.From.X + state.To.X) * 0.5, (state.From.Y + state.To.Y) * 0.5)
+				lineFrame.Rotation = math.deg(angle)
 			end
-			line.Thickness = 1
-			line.Color = Color3.new(1, 1, 1)
-			line.Visible = false
-			line.Transparency = 1
-			line.ZIndex = 1
-			return line
+
+			local proxy: any = {}
+			setmetatable(proxy, {
+				__index = function(_, key: string): any
+					if key == "Visible" then return state.Visible
+					elseif key == "From" then return state.From
+					elseif key == "To" then return state.To
+					elseif key == "Color" then return state.Color
+					elseif key == "Thickness" then return state.Thickness
+					elseif key == "Transparency" then return state.Transparency
+					elseif key == "ZIndex" then return state.ZIndex
+					elseif key == "Remove" or key == "Destroy" then
+						return function()
+							pcall(function() lineFrame:Destroy() end)
+						end
+					end
+					return nil
+				end,
+				__newindex = function(_, key: string, value: any)
+					if key == "Visible" then
+						local v = value == true
+						state.Visible = v
+						lineFrame.Visible = v
+					elseif key == "From" and typeof(value) == "Vector2" then
+						state.From = value
+						updateGeom()
+					elseif key == "To" and typeof(value) == "Vector2" then
+						state.To = value
+						updateGeom()
+					elseif key == "Color" and typeof(value) == "Color3" then
+						state.Color = value
+						lineFrame.BackgroundColor3 = value
+					elseif key == "Thickness" and type(value) == "number" then
+						state.Thickness = value
+						updateGeom()
+					elseif key == "Transparency" and type(value) == "number" then
+						state.Transparency = value
+						lineFrame.BackgroundTransparency = math.clamp(1 - value, 0, 1)
+					elseif key == "ZIndex" and type(value) == "number" then
+						state.ZIndex = value
+						lineFrame.ZIndex = value
+					end
+				end,
+			})
+			return proxy
+		end
+
+		local function newcircle(z: number): any?
+			local zval = math.max(1, z or 2)
+			if not IS_MOBILE and DrawingLib and type(DrawingLib.new) == "function" then
+				local ok, c = pcall(function()
+					return DrawingLib.new("Circle")
+				end)
+				if ok and c then
+					c.Filled = false
+					c.NumSides = 32
+					c.Thickness = 1
+					c.Visible = false
+					c.ZIndex = zval
+					return c
+				end
+			end
+
+			local gui = ensureEspTextGui()
+			if not gui then return nil end
+
+			local frame = Instance.new("Frame")
+			frame.Name = "esp_circle"
+			frame.AnchorPoint = Vector2.new(0.5, 0.5)
+			frame.BorderSizePixel = 0
+			frame.BackgroundTransparency = 1
+			frame.Visible = false
+			frame.ZIndex = zval
+			frame.Parent = gui
+
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(1, 0)
+			corner.Parent = frame
+
+			local stroke = Instance.new("UIStroke")
+			stroke.Thickness = 1
+			stroke.Color = Color3.new(1, 1, 1)
+			stroke.Transparency = 0
+			stroke.Parent = frame
+
+			local state = {
+				Visible = false,
+				Filled = false,
+				Thickness = 1,
+				Radius = 0,
+				Color = Color3.new(1, 1, 1),
+				Transparency = 1,
+				Position = Vector2.zero,
+				ZIndex = zval,
+			}
+
+			local proxy: any = {}
+			setmetatable(proxy, {
+				__index = function(_, key: string): any
+					if key == "Visible" then return state.Visible
+					elseif key == "Radius" then return state.Radius
+					elseif key == "Position" then return state.Position
+					elseif key == "Color" then return state.Color
+					elseif key == "Thickness" then return state.Thickness
+					elseif key == "Filled" then return state.Filled
+					elseif key == "Transparency" then return state.Transparency
+					elseif key == "ZIndex" then return state.ZIndex
+					elseif key == "Remove" or key == "Destroy" then
+						return function() pcall(function() frame:Destroy() end) end
+					end
+					return nil
+				end,
+				__newindex = function(_, key: string, value: any)
+					if key == "Visible" then
+						local v = value == true
+						state.Visible = v
+						frame.Visible = v
+					elseif key == "Position" and typeof(value) == "Vector2" then
+						state.Position = value
+						frame.Position = UDim2.fromOffset(math.floor(value.X + 0.5), math.floor(value.Y + 0.5))
+					elseif key == "Radius" and type(value) == "number" then
+						state.Radius = value
+						local d = math.max(0, math.floor(value * 2 + 0.5))
+						frame.Size = UDim2.fromOffset(d, d)
+					elseif key == "Color" and typeof(value) == "Color3" then
+						state.Color = value
+						stroke.Color = value
+						if state.Filled then frame.BackgroundColor3 = value end
+					elseif key == "Thickness" and type(value) == "number" then
+						state.Thickness = value
+						stroke.Thickness = math.max(1, value)
+					elseif key == "Filled" then
+						local f = value == true
+						state.Filled = f
+						if f then
+							frame.BackgroundTransparency = math.clamp(1 - state.Transparency, 0, 1)
+							frame.BackgroundColor3 = state.Color
+							stroke.Enabled = false
+						else
+							frame.BackgroundTransparency = 1
+							stroke.Enabled = true
+						end
+					elseif key == "Transparency" and type(value) == "number" then
+						state.Transparency = value
+						local trans = math.clamp(1 - value, 0, 1)
+						if state.Filled then
+							frame.BackgroundTransparency = trans
+						else
+							stroke.Transparency = trans
+						end
+					elseif key == "ZIndex" and type(value) == "number" then
+						state.ZIndex = value
+						frame.ZIndex = value
+					end
+				end,
+			})
+			return proxy
 		end
 
 		local PIXEL_OUTLINE_DIRS = {
@@ -3321,7 +3609,8 @@ Bitstream Vera
 				label.TextXAlignment = Enum.TextXAlignment.Left
 				label.TextYAlignment = Enum.TextYAlignment.Top
 				label.AnchorPoint = Vector2.zero
-				label.FontFace = EspFontFaces.Plex or Font.fromEnum(Enum.Font.Code)
+				label.Font = Enum.Font.GothamBold
+				label.FontFace = Font.fromEnum(Enum.Font.GothamBold)
 				label.Visible = false
 				label.ZIndex = z
 				label.Text = ""
@@ -3403,20 +3692,29 @@ Bitstream Vera
 				local ax = math.floor(state.Position.X + 0.5)
 				local ay = math.floor(state.Position.Y + 0.5)
 				local x, y = ax, ay
+				local b = label.TextBounds
 				if state.Center then
-					local b = label.TextBounds
-					x = math.floor(ax - b.X * 0.5 + 0.5)
-					y = math.floor(ay - b.Y * 0.5 + 0.5)
+					if b.X > 0 and b.Y > 0 then
+						x = math.floor(ax - b.X * 0.5 + 0.5)
+						y = math.floor(ay - b.Y * 0.5 + 0.5)
+						label.AnchorPoint = Vector2.zero
+						label.TextXAlignment = Enum.TextXAlignment.Left
+					else
+						label.AnchorPoint = Vector2.new(0.5, 0)
+						label.TextXAlignment = Enum.TextXAlignment.Center
+						x, y = ax, ay
+					end
+				else
+					label.AnchorPoint = Vector2.zero
+					label.TextXAlignment = Enum.TextXAlignment.Left
 				end
-				label.AnchorPoint = Vector2.zero
 				label.Position = UDim2.fromOffset(x, y)
-				label.TextXAlignment = Enum.TextXAlignment.Left
 				label.TextYAlignment = Enum.TextYAlignment.Top
 				for i, ol in outlines do
 					local d = PIXEL_OUTLINE_DIRS[i]
-					ol.AnchorPoint = Vector2.zero
+					ol.AnchorPoint = label.AnchorPoint
 					ol.Position = UDim2.fromOffset(x + d.X, y + d.Y)
-					ol.TextXAlignment = Enum.TextXAlignment.Left
+					ol.TextXAlignment = label.TextXAlignment
 					ol.TextYAlignment = Enum.TextYAlignment.Top
 				end
 				syncOutlineStyle()
@@ -3452,7 +3750,10 @@ Bitstream Vera
 					end
 				end
 				pcall(function()
-					label.Font = Enum.Font.Unknown
+					label.Font = Enum.Font.GothamBold
+					for _, ol in outlines do
+						ol.Font = Enum.Font.GothamBold
+					end
 				end)
 				applyTextSize(state.Size)
 				applyLayout()
@@ -5132,9 +5433,6 @@ Bitstream Vera
 		local espHiddenIdle = false
 		local espActive: { [Player]: boolean } = {}
 		table.insert(ears, RunService.RenderStepped:Connect(function()
-			if not DrawingLib then
-				return
-			end
 			if DrawingBridge.library and DrawingBridge.library.uiDragging then
 				return
 			end
@@ -5661,18 +5959,7 @@ Bitstream Vera
 					end
 					v.lines[i] = line
 				end
-				v.circle = nil
-				if DrawingLib then
-					pcall(function()
-						local c = DrawingLib.new("Circle")
-						c.Filled = false
-						c.NumSides = 32
-						c.Thickness = 1
-						c.Visible = false
-						c.ZIndex = 2
-						v.circle = c
-					end)
-				end
+				v.circle = newcircle(2)
 				v.fontKey = nil
 				for _, text in { v.name, v.distance } do
 					if text then
@@ -7063,14 +7350,17 @@ Bitstream Vera
 		aimStroke.Name = "Stroke"
 		silentStroke.Name = "Stroke"
 
+		local isMobileAim = IS_MOBILE
 		local moveMouse: any = nil
-		pcall(function()
-			local env = fsGetgenv and fsGetgenv()
-			moveMouse = mousemoverel or mouse_move
-			if type(moveMouse) ~= "function" and type(env) == "table" then
-				moveMouse = env.mousemoverel or env.mouse_move
-			end
-		end)
+		if not isMobileAim then
+			pcall(function()
+				local env = fsGetgenv and fsGetgenv()
+				moveMouse = mousemoverel or mouse_move
+				if type(moveMouse) ~= "function" and type(env) == "table" then
+					moveMouse = env.mousemoverel or env.mouse_move
+				end
+			end)
+		end
 
 		local aimHeld = false
 		local aimStickyPart: BasePart? = nil
@@ -8581,15 +8871,18 @@ Bitstream Vera
 									jy += (math.random() - 0.5) * human * 5
 								end
 							end
-							if type(moveMouse) == "function" then
+							if not isMobileAim and type(moveMouse) == "function" then
 								pcall(moveMouse, mx + jx, my + jy)
 							else
-								-- Smooth mobile camera interpolation when mousemoverel is unavailable
+								-- Smooth mobile camera interpolation (safe from SIGSEGV and NaN)
 								pcall(function()
 									local curCF = cam.CFrame
-									local targetCF = CFrame.lookAt(curCF.Position, worldPos)
-									local lerpFactor = if smooth <= 0.05 then 0.85 else math.clamp(1 - math.exp(-math.max(dt, 1 / 240) * (6 + snap * 22)), 0.04, 0.6)
-									cam.CFrame = curCF:Lerp(targetCF, lerpFactor)
+									local delta = worldPos - curCF.Position
+									if delta.Magnitude > 0.05 then
+										local targetCF = CFrame.lookAt(curCF.Position, worldPos)
+										local lerpFactor = if smooth <= 0.05 then 0.85 else math.clamp(1 - math.exp(-math.max(dt, 1 / 240) * (6 + snap * 22)), 0.04, 0.6)
+										cam.CFrame = curCF:Lerp(targetCF, lerpFactor)
+									end
 								end)
 							end
 						else
@@ -8933,8 +9226,8 @@ Bitstream Vera
 			local lmbDown = false
 			local lastLmbClick = 0
 			local function setLmb(down: boolean)
-				local press = execApi("mouse1press")
-				local release = execApi("mouse1release")
+				local press = not IS_MOBILE and execApi("mouse1press") or nil
+				local release = not IS_MOBILE and execApi("mouse1release") or nil
 				if typeof(press) == "function" and typeof(release) == "function" then
 					if down == lmbDown then
 						return
@@ -8990,7 +9283,7 @@ Bitstream Vera
 						local dx = sp.X - center.X * 0.5
 						local dy = sp.Y - center.Y * 0.5
 						local speed = math.clamp(Flick.speed, 0.1, 10)
-						if type(moveMouse) == "function" then
+						if not isMobileAim and type(moveMouse) == "function" then
 							if speed <= 0.15 then
 								pcall(moveMouse, dx, dy)
 							else
@@ -8999,8 +9292,12 @@ Bitstream Vera
 							end
 						else
 							pcall(function()
-								local step = math.clamp((dt * 4.5) / speed, 0.05, 0.9)
-								cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, part.Position), step)
+								local curCF = cam.CFrame
+								local delta = part.Position - curCF.Position
+								if delta.Magnitude > 0.05 then
+									local step = math.clamp((dt * 4.5) / speed, 0.05, 0.9)
+									cam.CFrame = curCF:Lerp(CFrame.lookAt(curCF.Position, part.Position), step)
+								end
 							end)
 						end
 						if Flick.shoot and math.abs(dx) < 10 and math.abs(dy) < 10 then
