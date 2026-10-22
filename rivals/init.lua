@@ -418,10 +418,6 @@ _G.AtomwareUnload = function()
     if _G.AtomwareEmulator and type(_G.AtomwareEmulator.stop) == "function" then
         pcall(_G.AtomwareEmulator.stop)
     end
-    pcall(function()
-        local emuGui = (playerGui and playerGui:FindFirstChild("Atomware_EmulatorDebugUI")) or (cg and cg:FindFirstChild("Atomware_EmulatorDebugUI"))
-        if emuGui then emuGui:Destroy() end
-    end)
     _G.AtomwareChatroomLoaded = nil
     _G.AtomwareUILoaded = nil
     _G.AtomwareFeaturesLoaded = nil
