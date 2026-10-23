@@ -3499,7 +3499,7 @@ for _, v in pairs(viz["CFrameVisualize"]:GetChildren()) do
     if v:IsA("BasePart") then
         v.Transparency = 0.6
         v.Material     = Enum.Material.ForceField
-        v.Color        = Library.AccentColor
+        v.Color = Color3.fromRGB(157, 48, 255)
         v.CanCollide   = false
         v.Anchored     = false
     end
