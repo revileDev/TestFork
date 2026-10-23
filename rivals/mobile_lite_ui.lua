@@ -1839,6 +1839,8 @@ end
 --//==================================================
 
 local AtomwareMobileWindow = {
+    name = "Atomware Mobile Lite",
+    isLiteMode = true,
     tabs = {},
     open = true,
     uiDragging = false,
@@ -2049,5 +2051,6 @@ end
 
 _G.AtomwareWindow = AtomwareMobileWindow
 _G.AtomwareUILoaded = true
+_G.AtomwareIsLiteMode = true
 
 return AtomwareMobileWindow

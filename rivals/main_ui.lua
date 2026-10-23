@@ -331,14 +331,13 @@ ContentArea.Parent = MainFrame
 
 local TAB_ORDER = {
     ["Visuals"]   = 1,
-    ["Legit"]     = 2,
-    ["Rage"]      = 3,
-    ["Movement"]  = 4,
-    ["World"]     = 5,
-    ["Cosmetics"] = 6,
-    ["Misc"]      = 7,
-    ["Extras"]    = 8,
-    ["Settings"]  = 9,
+    ["Combat"]    = 2,
+    ["Movement"]  = 3,
+    ["World"]     = 4,
+    ["Cosmetics"] = 5,
+    ["Misc"]      = 6,
+    ["Extras"]    = 7,
+    ["Settings"]  = 8,
 }
 
 local Pages = {}
@@ -414,8 +413,7 @@ local TAB_ICONS = {
 
 local function normalizeTabName(name)
     local lower = string.lower(name)
-    if lower == "legit" then return "Legit", "🎯" end
-    if lower == "rage" then return "Rage", "⚡" end
+    if lower == "combat" or lower == "legit" or lower == "rage" then return "Combat", "🎯" end
     if lower == "visuals" then return "Visuals", "👁️" end
     if lower == "move" or lower == "movement" then return "Movement", "🏃" end
     if lower == "world" then return "World", "🌍" end
