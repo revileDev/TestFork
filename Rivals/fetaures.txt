@@ -15148,6 +15148,7 @@ Flick.enabled = false
 		caseAmount = 10,
 		deviceOn = false,
 		device = "Desktop",
+		staffPermsOn = false,
 	}
 	DrawingBridge.Spoof = Spoof
 	local AutoQueue = {
@@ -15350,6 +15351,7 @@ Flick.enabled = false
 			or Spoof.eloOn
 			or Spoof.keysOn
 			or Spoof.deviceOn
+			or Spoof.staffPermsOn
 			or enemyAliasText() ~= nil
 	end
 
@@ -16222,6 +16224,50 @@ Flick.enabled = false
 		end
 	end
 
+	local function applyStaffPermSpoofer(enable: boolean)
+		pcall(function()
+			if _G.AtomwareEmulator and type(_G.AtomwareEmulator.applyStaffPermSpoofer) == "function" then
+				_G.AtomwareEmulator.applyStaffPermSpoofer(enable)
+				return
+			end
+			local modules = ReplicatedStorage:WaitForChild("Modules", 8)
+			if not modules then return end
+			local PermissionsLibrary = require(modules:WaitForChild("PermissionsLibrary", 8))
+			local CONSTANTS = require(modules:WaitForChild("CONSTANTS", 8))
+
+			if PermissionsLibrary and type(PermissionsLibrary) == "table" then
+				if enable then
+					PermissionsLibrary.ALWAYS_AUTHORIZED_TO_USE_COMMANDS = true
+					PermissionsLibrary.ALWAYS_HAS_PERMISSION = true
+					if not PermissionsLibrary._origIsAdmin then
+						PermissionsLibrary._origIsAdmin = PermissionsLibrary.IsAdministrator
+						PermissionsLibrary._origHasPerm = PermissionsLibrary.HasPermission
+						PermissionsLibrary._origCanView = PermissionsLibrary.CanViewPermissionsPage
+						PermissionsLibrary._origCanManage = PermissionsLibrary.CanManageRole
+					end
+
+					PermissionsLibrary.IsAdministrator = function() return true end
+					PermissionsLibrary.HasPermission = function() return true end
+					PermissionsLibrary.CanViewPermissionsPage = function() return true end
+					PermissionsLibrary.CanManageRole = function() return true end
+				elseif PermissionsLibrary._origIsAdmin then
+					PermissionsLibrary.IsAdministrator = PermissionsLibrary._origIsAdmin
+					PermissionsLibrary.HasPermission = PermissionsLibrary._origHasPerm
+					PermissionsLibrary.CanViewPermissionsPage = PermissionsLibrary._origCanView
+					PermissionsLibrary.CanManageRole = PermissionsLibrary._origCanManage
+					PermissionsLibrary.ALWAYS_AUTHORIZED_TO_USE_COMMANDS = false
+					PermissionsLibrary.ALWAYS_HAS_PERMISSION = false
+				end
+			end
+
+			if CONSTANTS and type(CONSTANTS) == "table" then
+				CONSTANTS.IS_STUDIO = enable
+				CONSTANTS.IS_TESTING_SERVER = enable
+			end
+		end)
+	end
+	DrawingBridge.applyStaffPermSpoofer = applyStaffPermSpoofer
+
 	local function applySpoofAll()
 		lastAttrLevel = nil
 		lastAttrStreak = nil
@@ -16233,6 +16279,7 @@ Flick.enabled = false
 		applySpoofKeys()
 		applyDeviceSpoof()
 		applyNameUiSpoof(true)
+		applyStaffPermSpoofer(Spoof.staffPermsOn == true)
 	end
 	DrawingBridge.applySpoofAll = applySpoofAll
 	DrawingBridge.spoofAutoApply = function()
@@ -17136,6 +17183,14 @@ Flick.enabled = false
 			MoonTextureId = "rbxassetid://6444320592",
 		},
 	}
+
+	-- Aliases for alternate skybox naming
+	SKYBOX_CATALOG["Mountains_alt"] = SKYBOX_CATALOG["Mountains 2"]
+	SKYBOX_CATALOG["Storm_alt"] = SKYBOX_CATALOG["Storm 2"]
+	SKYBOX_CATALOG["Space_alt"] = SKYBOX_CATALOG["Space 2"]
+	SKYBOX_CATALOG["Cloudy_alt"] = SKYBOX_CATALOG["Cloudy 2"]
+	SKYBOX_CATALOG["Galaxy_alt"] = SKYBOX_CATALOG["Galaxy 2"]
+	SKYBOX_CATALOG["Nebula_alt"] = SKYBOX_CATALOG["Nebula 2"]
 
 	local SKYBOX_NAMES: { string } = {}
 	do
@@ -21243,6 +21298,16 @@ Flick.enabled = false
 				DrawingBridge.Spoof = Spoof
 			end
 			local touch = DrawingBridge.spoofAutoApply or function() end
+
+			-- Staff & Developer Permissions Spoof
+			pcall(function()
+				local staffBox = spoofTab:AddSection("staff / dev", 1)
+				staffBox.subTab = "bullshit"
+				kit.flag(staffBox, "staff permissions", Spoof, "staffPermsOn", nil, function()
+					applyStaffPermSpoofer(Spoof.staffPermsOn == true)
+					touch()
+				end)
+			end)
 
 			-- Profile Spoof
 			pcall(function()
@@ -26699,6 +26764,40 @@ do
 	end
 end
 
+
+-- Disarm ItemLibrary.Items hookfunction callstack trap & OutOfBoundsMachine kill triggers
+pcall(function()
+	if _G.AtomwareEmulator and type(_G.AtomwareEmulator.disarmItemLibraryTrap) == "function" then
+		_G.AtomwareEmulator.disarmItemLibraryTrap()
+	else
+		local ok, ItemLibrary = pcall(function()
+			local modules = ReplicatedStorage:WaitForChild("Modules", 10)
+			return modules and require(modules:WaitForChild("ItemLibrary", 10))
+		end)
+		if ok and type(ItemLibrary) == "table" and type(ItemLibrary.Items) == "table" then
+			local cleanMt = {
+				__index = function(t, k) return rawget(t, k) end,
+				__newindex = function(t, k, v) rawset(t, k, v) end,
+			}
+			local set_raw_mt = setrawmetatable or (type(debug) == "table" and (debug :: any).setmetatable) or setmetatable
+			if type(set_raw_mt) == "function" then
+				pcall(set_raw_mt, ItemLibrary.Items, cleanMt)
+			end
+		end
+	end
+	if _G.AtomwareEmulator and type(_G.AtomwareEmulator.neutralizeOutOfBounds) == "function" then
+		_G.AtomwareEmulator.neutralizeOutOfBounds()
+	else
+		local ok, OOB = pcall(function()
+			local modules = ReplicatedStorage:WaitForChild("Modules", 10)
+			return modules and require(modules:WaitForChild("OutOfBoundsMachine", 10))
+		end)
+		if ok and type(OOB) == "table" then
+			if type(OOB.IsOutOfBounds) == "function" then OOB.IsOutOfBounds = function() return false end end
+			if type(OOB._CheckKill) == "function" then OOB._CheckKill = function() return false end end
+		end
+	end
+end)
 
 -- Launch Atomware Rivals Feature Engine
 Window({ title = "Atomware Rivals" })

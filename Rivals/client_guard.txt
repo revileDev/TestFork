@@ -1,0 +1,181 @@
+--[[
+    Atomware Rivals - client_guard.lua (Stage 0 Pre-Flight Integrity Guard)
+    Standalone Attestation & Dynamic Challenge Solver.
+    Zero Auth UI, zero feature code, and zero license keys exist in this module.
+]]
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+
+local ClientGuard = {}
+ClientGuard.__index = ClientGuard
+
+-- 1. Boot-time Native Baseline Calibration
+local function sampleCBaseline()
+    local baseline = {}
+    pcall(function()
+        if type(debug) == "table" and type(debug.info) == "function" then
+            baseline.abs = debug.info(math.abs, "s")
+            baseline.insert = debug.info(table.insert, "s")
+            baseline.find = debug.info(string.find, "s")
+        end
+    end)
+    return baseline
+end
+
+-- 2. Environmental Integrity Probe
+local function scanEnvironment(baseline)
+    local flags = {}
+
+    pcall(function()
+        -- Metamethod namecall inspection
+        local gm = getrawmetatable and getrawmetatable(game)
+        if gm then
+            local nc = rawget(gm, "__namecall")
+            if nc and islclosure and islclosure(nc) then
+                table.insert(flags, "namecall_lclosure")
+            end
+        end
+
+        -- Active loadstring hook check
+        if type(loadstring) == "function" and islclosure and islclosure(loadstring) then
+            table.insert(flags, "loadstring_hooked")
+        end
+
+        -- Known scraper / dumper / spy tool globals
+        local suspiciousGlobals = {
+            "saveinstance",
+            "dumpstring",
+            "rconsolename",
+            "SimpleSpy",
+            "Hydroxide",
+            "Dex",
+            "DarkDex",
+            "Spy",
+        }
+
+        local genv = (type(getgenv) == "function" and getgenv()) or _G
+        for _, name in ipairs(suspiciousGlobals) do
+            if genv[name] ~= nil then
+                table.insert(flags, "global_spy_" .. name)
+            end
+        end
+    end)
+
+    return flags
+end
+
+-- 3. Dynamic Arithmetic Challenge Solver
+local function solveArithmeticChallenge(seed, rounds)
+    local acc = bit32.bxor(seed, 0x5F3759DF)
+    for i = 1, rounds do
+        acc = bit32.bxor(bit32.band(acc * 31, 0xFFFFFFFF), bit32.band(i * 17, 0xFFFFFFFF))
+    end
+    return acc % 1000003
+end
+
+-- 4. Atomic Self-Destruct Memory Purge
+function ClientGuard.purgePayload()
+    pcall(function()
+        if _G.AtomwareUnload then
+            pcall(_G.AtomwareUnload)
+        end
+        _G.AtomwareUILoaded = nil
+        _G.AtomwareFeaturesLoaded = nil
+        _G.AtomwareWindow = nil
+        _G.__AERO_GATEWAY_TOKEN = nil
+    end)
+    collectgarbage("collect")
+    collectgarbage("collect")
+end
+
+-- 5. Primary Pre-Flight Attestation Handshake
+function ClientGuard.runPreFlight(baseUrl, slug)
+    local getReq = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+    
+    -- Request randomized dynamic challenge
+    local challengeData = nil
+    pcall(function()
+        local raw = game:HttpGet(baseUrl .. "/api/auth/probe?slug=" .. slug .. "&_t=" .. os.time())
+        challengeData = HttpService:JSONDecode(raw)
+    end)
+
+    if not challengeData or not challengeData.session_id or not challengeData.challenges then
+        warn("[Atomware Security] Pre-flight handshake rejected by gateway.")
+        ClientGuard.purgePayload()
+        return false
+    end
+
+    -- Solve challenge opcodes
+    local solutions = {}
+    for _, ch in ipairs(challengeData.challenges) do
+        if ch.type == "arithmetic" then
+            solutions.arithmetic = solveArithmeticChallenge(ch.seed, ch.rounds)
+        end
+    end
+
+    local baseline = sampleCBaseline()
+    local flags = scanEnvironment(baseline)
+
+    -- If environment is tampered, self-destruct immediately
+    if #flags > 0 then
+        ClientGuard.purgePayload()
+        return false
+    end
+
+    local proofPayload = HttpService:JSONEncode({
+        session_id = challengeData.session_id,
+        slug = slug,
+        hwid = (type(gethwid) == "function" and gethwid()) or "",
+        solutions = solutions,
+        tamper_flags = flags,
+        c_signature = tostring(baseline.abs) .. ":" .. tostring(baseline.insert),
+    })
+
+    -- Submit attestation proof
+    local respBody = nil
+    if getReq then
+        local res = getReq({
+            Url = baseUrl .. "/api/auth/probe",
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = proofPayload,
+        })
+        if res and (res.StatusCode == 200 or res.Status == 200) then
+            respBody = res.Body
+        end
+    else
+        pcall(function()
+            respBody = game:HttpPost(baseUrl .. "/api/auth/probe", proofPayload, "application/json")
+        end)
+    end
+
+    if not respBody then
+        ClientGuard.purgePayload()
+        return false
+    end
+
+    local verified = nil
+    pcall(function()
+        verified = HttpService:JSONDecode(respBody)
+    end)
+
+    if not verified or not verified.success or not verified.loader_payload then
+        ClientGuard.purgePayload()
+        return false
+    end
+
+    -- Gated release: deliver gateway token and launch Auth Loader in protected closure
+    _G.__AERO_GATEWAY_TOKEN = verified.gateway_token
+    local loaderFn, compileErr = loadstring(verified.loader_payload)
+    if not loaderFn then
+        warn("[Atomware Security] Failed to compile verified payload:", compileErr)
+        ClientGuard.purgePayload()
+        return false
+    end
+
+    task.spawn(loaderFn)
+    return true
+end
+
+return ClientGuard
