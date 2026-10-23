@@ -4984,7 +4984,10 @@ Bitstream Vera
 			if string.find(name, "Hitbox", 1, true) or string.find(name, "Physical", 1, true) then
 				return false
 			end
-			return (part :: BasePart).Transparency < 0.95
+			if (part :: BasePart).Transparency < 0.95 then
+				return true
+			end
+			return name == "Head" or name:find("Torso") ~= nil or name:find("Arm") ~= nil or name:find("Leg") ~= nil or name:find("Hand") ~= nil or name:find("Foot") ~= nil
 		end
 
 		local function gradientWeights(character: Model, parts: { BasePart }): { [BasePart]: number }
@@ -5160,7 +5163,7 @@ Bitstream Vera
 		end
 
 		local function onshotLive(): boolean
-			return Esp.master == true and Esp.onshot == true
+			return Esp.onshot == true
 		end
 
 		local function snapshotCharacter(character: Model): OnshotSnap?
@@ -5194,18 +5197,16 @@ Bitstream Vera
 
 		local onshotAnchorPart: BasePart? = nil
 		local function onshotAnchor(): BasePart?
-			local cam = Workspace.CurrentCamera
-			if not cam then
-				return nil
-			end
+			local parent = Workspace:FindFirstChild("Terrain") or Workspace
 			local part = onshotAnchorPart
-			if part and part.Parent == cam then
+			if part and part.Parent == parent then
 				return part
 			end
 			if part then
 				pcall(part.Destroy, part)
 			end
 			local created = Instance.new("Part")
+			created.Name = "__sonata_onshot_anchor"
 			created.Anchored = true
 			created.CanCollide = false
 			created.CanQuery = false
@@ -5214,25 +5215,23 @@ Bitstream Vera
 			created.Transparency = 1
 			created.Size = Vector3.new(0.05, 0.05, 0.05)
 			created.CFrame = CFrame.identity
-			created.Parent = cam
+			created.Parent = parent
 			onshotAnchorPart = created
 			return created
 		end
 
 		local function spawnOnshot(snap: OnshotSnap, now: number)
-			local folder = chamsContainer()
-			if not folder then
+			local anchor = onshotAnchor()
+			if not anchor then
 				return
 			end
 			while #onshots >= ONSHOT_MAX do
 				destroyOnshot(1)
 			end
-			local anchor = onshotAnchor()
-			if not anchor then
-				return
-			end
 			local anchorCf = anchor.CFrame
-			local alpha = math.clamp(Esp.onshotTransparency, 0, 0.95)
+			local alpha = math.clamp(Esp.onshotTransparency or 0.25, 0, 0.95)
+			local topCol = Esp.onshotVisible or Color3.fromRGB(255, 255, 255)
+			local botCol = Esp.onshotVisible2 or Color3.fromRGB(170, 120, 255)
 			local boxes: { BoxHandleAdornment } = table.create(#snap.cframes)
 			for index, cf in snap.cframes do
 				local box = Instance.new("BoxHandleAdornment")
@@ -5241,9 +5240,11 @@ Bitstream Vera
 				box.Size = snap.sizes[index]
 				box.CFrame = anchorCf:ToObjectSpace(cf)
 				box.Transparency = alpha
-				box.Visible = false
+				box.Visible = true
+				local w = snap.weights[index] or 0.5
+				box.Color3 = topCol:Lerp(botCol, w)
 				box.Adornee = anchor
-				box.Parent = folder
+				box.Parent = anchor
 				boxes[index] = box
 			end
 			table.insert(onshots, {
@@ -5252,7 +5253,7 @@ Bitstream Vera
 				probe = snap.probe,
 				born = now,
 				occluded = nil,
-				shown = nil,
+				shown = true,
 				rayAt = -1,
 				paintDirty = true,
 			})
@@ -5586,14 +5587,11 @@ Bitstream Vera
 						shot.paintDirty = false
 					end
 					local fade = alpha + (1 - alpha) * progress * progress
-					local toggleShown = shot.shown ~= show
 					shot.shown = show
 					for _, box in shot.boxes do
+						box.Visible = show
 						if show then
 							box.Transparency = fade
-						end
-						if toggleShown then
-							box.Visible = show
 						end
 					end
 				end
@@ -22450,6 +22448,15 @@ Flick.enabled = false
 				local plr = live and live.targetPlayer
 				local part = live and live.hitPart
 				local pos = if part and part.Parent then part.Position else nil
+				if not plr then
+					plr = DrawingBridge.SilentAimTarget
+					if plr and plr.Character then
+						part = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Head")
+						if part and part:IsA("BasePart") then
+							pos = part.Position
+						end
+					end
+				end
 				if not pos and plr and plr.Character then
 					local root = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Head")
 					if root and root:IsA("BasePart") then
