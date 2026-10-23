@@ -1,5 +1,5 @@
 --[[
-    Atomware Rivals - cleanup.lua
+    Atomware DaHood - cleanup.lua
     Central owner for runtime resources (connections, tasks, drawings, instances, hook restorers).
     Ensures safe, 100% leak-free unloading and reloading.
 ]]
@@ -130,9 +130,9 @@ function Cleanup:UnloadAll()
 
     -- Invoke features fullUnload if present
     local g = (getgenv and getgenv()) or _G
-    if type(g) == "table" and type(g.__atomware_rivals_unload) == "function" then
-        pcall(g.__atomware_rivals_unload)
-        g.__atomware_rivals_unload = nil
+    if type(g) == "table" and type(g.__atomware_dahood_unload) == "function" then
+        pcall(g.__atomware_dahood_unload)
+        g.__atomware_dahood_unload = nil
     end
 
     -- Invoke _G.AtomwareUnload if present
@@ -195,7 +195,7 @@ function Cleanup:UnloadAll()
         g.__sonataOnshotDealt = nil
         g.__sonataDamageEffectHitV1 = nil
         g.__sonataOnshotHookV1 = nil
-        g.__atomware_rivals_unload = nil
+        g.__atomware_dahood_unload = nil
     end
 
     print("[Atomware DaHood] Full unload completed successfully.")

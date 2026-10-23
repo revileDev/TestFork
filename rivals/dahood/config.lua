@@ -1,5 +1,5 @@
 --[[
-    Atomware Rivals - config.lua
+    Atomware DaHood - config.lua
     Shared settings, profile storage, notifications, watermark, and UI overlay helpers.
 ]]
 
@@ -8,7 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Environment = (type(getgenv) == "function" and getgenv()) or _G
 
-local ROOT = "Atomware/Rivals"
+local ROOT = "Atomware/DaHood"
 local PROFILE_DIR = ROOT .. "/Profiles"
 local ACTIVE_FILE = PROFILE_DIR .. "/autoload.txt"
 
@@ -220,7 +220,7 @@ function Config:AttachUI(screenGui, deviceName)
     watermark.BackgroundColor3 = Color3.fromRGB(10, 7, 20)
     watermark.BackgroundTransparency = 0.15
     watermark.TextColor3 = Config.WatermarkColor
-    watermark.Text = "Atomware Rivals  •  " .. deviceName
+    watermark.Text = "Atomware DaHood  •  " .. deviceName
     watermark.TextSize = 13
     watermark.Font = Enum.Font.GothamBold
     watermark.Visible = Config.WatermarkVisible
