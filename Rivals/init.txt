@@ -448,59 +448,91 @@ _G.AtomwareIsLiteMode = isLiteMode
 
 -- =========================================================================
 -- Hybrid Secure Module Loader
--- 1. Direct TestFork GitHub loader with dynamic cache-busting
--- 2. In-Memory Virtual File System (Fallback)
--- 3. Virtual require hook
+-- 1. In-Memory Virtual File System (Instant local execution)
+-- 2. Virtual require hook
+-- 3. Direct TestFork GitHub loader with dynamic cache-busting & path resolution
+-- 4. Local Filesystem fallback
 -- =========================================================================
 local function loadModule(path)
-    local cleanName = path:gsub("%.lua$", "")
+    local cleanName = path:gsub("%.lua$", ""):gsub("%.txt$", "")
+    local candidates = {
+        cleanName,
+        cleanName .. ".txt",
+        cleanName .. ".lua",
+        path
+    }
+    if cleanName == "features" then
+        table.insert(candidates, 1, "fetaures.txt")
+        table.insert(candidates, 2, "fetaures")
+    elseif cleanName == "fetaures" then
+        table.insert(candidates, 1, "features.txt")
+        table.insert(candidates, 2, "features")
+    end
 
-    -- 0. Local Filesystem (Direct executor file fallback)
-    if type(readfile) == "function" then
-        local okFs, src = pcall(readfile, path)
-        if not okFs then okFs, src = pcall(readfile, "rivals/" .. path) end
-        if okFs and type(src) == "string" and #src > 0 then
-            local compileOk, chunk = pcall(loadstring, src)
-            if compileOk and chunk then
-                local runOk, runErr = pcall(chunk)
-                if runOk then return true end
-                warn("[Atomware Rivals] Error executing local module " .. path .. ":", runErr)
+    -- 1. In-Memory Virtual File System (Fastest & offline)
+    if type(__VFS_MODULES) == "table" then
+        for _, name in ipairs(candidates) do
+            local loader = __VFS_MODULES[name]
+                or __VFS_MODULES["Rivals/" .. name]
+                or __VFS_MODULES["rivals/" .. name]
+            if loader then
+                local ok, resOrErr = pcall(loader)
+                if ok then return true end
+                warn("[Atomware Rivals] Failed to execute in-memory module " .. name .. ":", resOrErr)
             end
         end
     end
 
-    -- 1. TestFork GitHub Repository (Primary direct source with live cache-busting)
-    local TESTFORK_URL = "https://raw.githubusercontent.com/revileDev/TestFork/main/rivals/"
-    local cacheBuster = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
-    local okTest, testSource = pcall(function()
-        return game:HttpGet(TESTFORK_URL .. path .. "?v=" .. cacheBuster)
-    end)
-    if okTest and testSource and #testSource > 0 and not testSource:find("404: Not Found") and not testSource:find("<!DOCTYPE") then
-        local compileOk, chunk, compileErr = pcall(loadstring, testSource)
-        if compileOk and chunk then
-            local runOk, runErr = pcall(chunk)
-            if runOk then return true end
-            warn("[Atomware Rivals] Error running module from TestFork (" .. path .. "):", runErr)
-        else
-            warn("[Atomware Rivals] Error compiling module from TestFork (" .. path .. "):", compileErr)
-        end
-    end
-
-    -- 2. In-Memory Virtual File System (Fallback)
-    if type(__VFS_MODULES) == "table" then
-        local loader = __VFS_MODULES[path] or __VFS_MODULES[cleanName]
-        if loader then
-            local ok, err = pcall(loader)
-            if ok then return true end
-            warn("[Atomware Rivals] Failed to execute in-memory module " .. path .. ":", err)
-        end
-    end
-
-    -- 3. Virtual require hook
+    -- 2. Virtual require hook
     if type(require) == "function" then
-        local ok, res = pcall(require, cleanName)
-        if ok and res ~= nil then
-            return true
+        for _, name in ipairs(candidates) do
+            local ok, res = pcall(require, name)
+            if ok and res ~= nil then
+                return true
+            end
+        end
+    end
+
+    -- 3. TestFork GitHub Repository (Primary direct source with live cache-busting)
+    local TESTFORK_BASE = "https://raw.githubusercontent.com/revileDev/TestFork/main/"
+    local cacheBuster = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
+    local gitPaths = {}
+    for _, name in ipairs(candidates) do
+        table.insert(gitPaths, "Rivals/" .. name)
+        table.insert(gitPaths, name)
+    end
+
+    for _, gitPath in ipairs(gitPaths) do
+        local okTest, testSource = pcall(function()
+            return game:HttpGet(TESTFORK_BASE .. gitPath .. "?v=" .. cacheBuster)
+        end)
+        if okTest and testSource and #testSource > 0 and not testSource:find("404: Not Found") and not testSource:find("<!DOCTYPE") then
+            local compileOk, chunk, compileErr = pcall(loadstring, testSource)
+            if compileOk and chunk then
+                local runOk, runErr = pcall(chunk)
+                if runOk then return true end
+                warn("[Atomware Rivals] Error running module from TestFork (" .. gitPath .. "):", runErr)
+            else
+                warn("[Atomware Rivals] Error compiling module from TestFork (" .. gitPath .. "):", compileErr)
+            end
+        end
+    end
+
+    -- 4. Local Filesystem (Direct executor file fallback)
+    if type(readfile) == "function" then
+        for _, name in ipairs(candidates) do
+            local prefixes = {"", "rivals/", "Rivals/"}
+            for _, pfx in ipairs(prefixes) do
+                local okFs, src = pcall(readfile, pfx .. name)
+                if okFs and type(src) == "string" and #src > 0 then
+                    local compileOk, chunk = pcall(loadstring, src)
+                    if compileOk and chunk then
+                        local runOk, runErr = pcall(chunk)
+                        if runOk then return true end
+                        warn("[Atomware Rivals] Error executing local module " .. pfx .. name .. ":", runErr)
+                    end
+                end
+            end
         end
     end
 
