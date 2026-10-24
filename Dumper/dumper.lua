@@ -1,6 +1,6 @@
 --[[
     =============================================================================
-    ATOMWARE RIVALS // FULL DEFENSIVE EMULATOR, INTEGRITY ENGINE & SKIN CHANGER
+    ATOMWARE RIVALS // FULL DEFENSIVE EMULATOR, INTEGRITY ENGINE & 3D SKIN CATALOG
     =============================================================================
     Architecture:
       • Module-based Singleton (Emulator.lua / emu.txt)
@@ -11,8 +11,8 @@
       • OutOfBoundsMachine Kill Boundary Suppressor
       • EnvironmentID & Multi-Tenancy Spatial Partition Telemetry (3000+ Arenas)
       • Staff / Testing Permissions Spoofer (PermissionsLibrary)
-      • Full Client-Side Skin Changer & Wrap Injector (ClientViewModel & CosmeticLibrary)
-      • High-Fidelity Diagnostic GUI & Real-Time Event Console
+      • Full 3D Interactive Weapon Skin Catalog & Real-Time Viewmodel Injector
+      • Live 3D ViewportFrame Weapon Preview with Dynamic Shading & Orbit Camera
     =============================================================================
 ]]
 
@@ -43,13 +43,12 @@ local new_cclosure = newcclosure or function(f) return f end
 local get_namecall = getnamecallmethod or function() return "" end
 local protect_gui = (typeof(syn) == "table" and syn.protect_gui) or (typeof(protectgui) == "function" and protectgui)
 
--- Unload previous instance if running
 if type(env.ATOMWARE_EMU_UNLOAD) == "function" then
     pcall(env.ATOMWARE_EMU_UNLOAD)
 end
 
 -- =============================================================================
--- CONFIGURATION & CONSTANTS
+-- CONFIGURATION & WEAPON CATALOG DATA
 -- =============================================================================
 local UNIVERSE_ID = 6035872082
 local CALLBACK_TIMEOUT = 12
@@ -57,19 +56,74 @@ local MATERIAL_INTERVAL = 4
 local MAX_CONSOLE_LOGS = 250
 local TOGGLE_KEY = Enum.KeyCode.RightControl
 
-local POPULAR_WRAPS = {
-    "Dark Matter",
-    "Diamond",
-    "Gold",
-    "Liquid Gold",
-    "Glacier",
-    "Danger",
-    "1B Visits",
-    "Vexed",
-    "Brimstone",
-    "Glamour",
-    "Community",
-    "Cream",
+local WEAPON_CATEGORIES = {
+    Primary = {
+        "Assault Rifle",
+        "Sniper",
+        "Shotgun",
+        "Burst Rifle",
+        "Minigun",
+        "Energy Rifle",
+        "Paintball Gun",
+        "Exogun",
+    },
+    Secondary = {
+        "Handgun",
+        "Shorty",
+        "Uzi",
+        "BaseRevolver",
+        "Energy Pistols",
+        "BaseFlareGun",
+    },
+    Melee = {
+        "Katana",
+        "Knife",
+        "Battle Axe",
+        "Maul",
+        "Gunblade",
+        "Fists",
+    },
+    Utility = {
+        "Grenade",
+        "Flashbang",
+        "Molotov",
+        "Riot Shield",
+        "Medkit",
+    },
+}
+
+-- Curated high-fidelity catalog of wraps with exact metadata and primary/secondary colors
+local CATALOG_WRAPS = {
+    { Name = "Dark Matter", Rarity = "Mastery", Category = "MASTERY", Primary = Color3.fromRGB(18, 12, 28), Secondary = Color3.fromRGB(170, 75, 255) },
+    { Name = "Diamond", Rarity = "Mastery", Category = "MASTERY", Primary = Color3.fromRGB(150, 225, 255), Secondary = Color3.fromRGB(220, 245, 255) },
+    { Name = "Liquid Gold", Rarity = "Mastery", Category = "MASTERY", Primary = Color3.fromRGB(255, 205, 50), Secondary = Color3.fromRGB(180, 130, 20) },
+    { Name = "Gold", Rarity = "Mastery", Category = "MASTERY", Primary = Color3.fromRGB(240, 190, 40), Secondary = Color3.fromRGB(120, 95, 20) },
+    { Name = "Glacier", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(175, 221, 255), Secondary = Color3.fromRGB(231, 231, 236) },
+    { Name = "Danger", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(168, 0, 0), Secondary = Color3.fromRGB(20, 20, 20) },
+    { Name = "1B Visits", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(48, 38, 0), Secondary = Color3.fromRGB(127, 100, 0) },
+    { Name = "Community", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(124, 17, 255), Secondary = Color3.fromRGB(255, 213, 0) },
+    { Name = "Vexed", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(30, 15, 45), Secondary = Color3.fromRGB(185, 40, 255) },
+    { Name = "Brimstone", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(25, 25, 25), Secondary = Color3.fromRGB(255, 65, 30) },
+    { Name = "Glamour", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(86, 36, 36), Secondary = Color3.fromRGB(255, 215, 120) },
+    { Name = "Sensite", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(255, 180, 30), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Nosnite", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(180, 128, 255), Secondary = Color3.fromRGB(25, 20, 35) },
+    { Name = "Shadore", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(203, 51, 51), Secondary = Color3.fromRGB(35, 35, 35) },
+    { Name = "Brianore", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(101, 255, 93), Secondary = Color3.fromRGB(20, 40, 20) },
+    { Name = "Cream", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(255, 209, 157), Secondary = Color3.fromRGB(62, 55, 48) },
+    { Name = "Pine", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(58, 115, 55), Secondary = Color3.fromRGB(110, 75, 45) },
+    { Name = "Beggar", Rarity = "Unique", Category = "UNIQUE", Primary = Color3.fromRGB(255, 176, 0), Secondary = Color3.fromRGB(50, 45, 30) },
+    { Name = "Snowy Night", Rarity = "Rare", Category = "UNIQUE", Primary = Color3.fromRGB(20, 25, 45), Secondary = Color3.fromRGB(220, 235, 255) },
+    { Name = "Red", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(220, 35, 35), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Orange", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(245, 130, 25), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Yellow", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(245, 220, 30), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Green", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(45, 200, 75), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Blue", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(35, 125, 245), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Purple", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(160, 45, 240), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Pink", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(255, 105, 180), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Teal", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(0, 180, 180), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Navy", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(15, 30, 75), Secondary = Color3.fromRGB(40, 40, 40) },
+    { Name = "Highlighter", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(225, 255, 0), Secondary = Color3.fromRGB(30, 30, 30) },
+    { Name = "Blush", Rarity = "Solid", Category = "SOLID", Primary = Color3.fromRGB(235, 160, 175), Secondary = Color3.fromRGB(40, 40, 40) },
 }
 
 local THEME = {
@@ -101,7 +155,6 @@ local State = {
     active = false,
     startedAt = nil :: number?,
     
-    -- Remote & Connection hooks
     challenge = nil :: RemoteEvent?,
     native = nil :: any,
     originalScript = nil :: LocalScript?,
@@ -110,7 +163,6 @@ local State = {
     namecallHooked = false,
     previousNamecall = nil :: any,
     
-    -- Telemetry Metrics
     inbound = 0,
     invoked = 0,
     responses = 0,
@@ -122,13 +174,11 @@ local State = {
     lastResponseAt = nil :: number?,
     lastError = nil :: string?,
     
-    -- MaterialService Heartbeat
     materialRemote = nil :: RemoteEvent?,
     materialSent = 0,
     materialErrors = 0,
     lastMaterialAt = nil :: number?,
     
-    -- Disarm Tracking
     itemLibraryDisarmed = false,
     outOfBoundsNeutralized = false,
     miscCancelled = 0,
@@ -136,16 +186,18 @@ local State = {
     staffSpooferActive = false,
     currentEnvironmentID = 0,
     
-    -- Skin Changer State
     skinChanger = {
         enabled = false,
+        selectedCategory = "Primary",
+        selectedWeapon = "Assault Rifle",
         selectedWrap = "Dark Matter",
         inverted = false,
         unlockAllCosmetics = false,
+        catalogFilter = "ALL",
+        searchQuery = "",
         viewModelHooked = false,
     },
     
-    -- UI & Event Log
     logs = {},
     uiVisible = true,
     autoScroll = true,
@@ -153,7 +205,6 @@ local State = {
     activeFilter = "ALL",  -- "ALL" | "CHALLENGE" | "HEARTBEAT" | "TRAP" | "SKINS" | "WARN"
 }
 
--- Event dispatcher
 local EventSignal = {}
 EventSignal.__index = EventSignal
 function EventSignal.new()
@@ -176,6 +227,7 @@ end
 
 local OnLogAdded = EventSignal.new()
 local OnStateChanged = EventSignal.new()
+local OnSkinChanged = EventSignal.new()
 
 -- =============================================================================
 -- LOGGING SUBSYSTEM
@@ -189,7 +241,7 @@ function Emulator.log(level: string, tag: string, message: string)
     local entry = {
         time = os.clock(),
         timestamp = formatTimestamp(),
-        level = level, -- "INFO" | "CHALLENGE" | "HEARTBEAT" | "TRAP" | "SKINS" | "WARN" | "ERROR"
+        level = level,
         tag = tag,
         message = message,
     }
@@ -199,7 +251,6 @@ function Emulator.log(level: string, tag: string, message: string)
         table.remove(State.logs, 1)
     end
     
-    -- Console terminal mirror
     local line = string.format("[Atomware][%s][%s] %s", level, tag, message)
     if level == "WARN" then
         warn(line)
@@ -213,10 +264,9 @@ function Emulator.log(level: string, tag: string, message: string)
 end
 
 -- =============================================================================
--- SKIN CHANGER SUBSYSTEM
+-- SKIN CHANGER & 3D VIEWMODEL HOOKS
 -- =============================================================================
 
--- 1. Hook ClientViewModel.GetWrap to inject custom wrap
 local function hookClientViewModel(): boolean
     local ok, ClientViewModel = pcall(function()
         local scripts = LocalPlayer:WaitForChild("PlayerScripts", 10)
@@ -247,7 +297,6 @@ local function hookClientViewModel(): boolean
     return false
 end
 
--- 2. Unlock all cosmetics in customization menus
 function Emulator.toggleUnlockAllCosmetics(enable: boolean): boolean
     local ok = pcall(function()
         local modules = ReplicatedStorage:WaitForChild("Modules", 8)
@@ -287,7 +336,6 @@ function Emulator.toggleUnlockAllCosmetics(enable: boolean): boolean
     return ok
 end
 
--- 3. Force re-render of currently equipped weapon viewmodel
 function Emulator.applySkinNow()
     pcall(function()
         local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
@@ -305,11 +353,11 @@ function Emulator.applySkinNow()
             end
         end
     end)
-    Emulator.log("SKINS", "APPLY", string.format("Applied '%s' (Inverted: %s) to viewmodel", State.skinChanger.selectedWrap, tostring(State.skinChanger.inverted)))
+    Emulator.log("SKINS", "APPLY", string.format("Applied '%s' (Inverted: %s) to %s", State.skinChanger.selectedWrap, tostring(State.skinChanger.inverted), State.skinChanger.selectedWeapon))
     OnStateChanged:Fire()
+    OnSkinChanged:Fire()
 end
 
--- 4. Select wrap helper
 function Emulator.setWrap(wrapName: string, inverted: boolean?)
     State.skinChanger.selectedWrap = wrapName
     if inverted ~= nil then
@@ -317,14 +365,20 @@ function Emulator.setWrap(wrapName: string, inverted: boolean?)
     end
     if State.skinChanger.enabled then
         Emulator.applySkinNow()
+    else
+        OnSkinChanged:Fire()
     end
+end
+
+function Emulator.setWeapon(weaponName: string)
+    State.skinChanger.selectedWeapon = weaponName
+    OnSkinChanged:Fire()
 end
 
 -- =============================================================================
 -- CORE OVERHAULED HOOKS & DISARMERS
 -- =============================================================================
 
--- 1. Helper: Find all RemoteEvents
 local function getRemoteEvents(container: Instance): { RemoteEvent }
     local list: { RemoteEvent } = {}
     for _, item in ipairs(container:GetDescendants()) do
@@ -335,13 +389,11 @@ local function getRemoteEvents(container: Instance): { RemoteEvent }
     return list
 end
 
--- 2. Helper: Function source matching
 local function sourceMatches(callback: any, needle: string): boolean
     local ok, source = pcall(debug.info, callback, "s")
     return ok and type(source) == "string" and source:gsub("%s+", ""):find(needle, 1, true) ~= nil
 end
 
--- 3. Find Challenge RemoteEvent & Native Connection
 local function findChallenge(remotes: Instance): (RemoteEvent?, any)
     local deadline = os.clock() + CALLBACK_TIMEOUT
     repeat
@@ -373,7 +425,6 @@ local function findChallenge(remotes: Instance): (RemoteEvent?, any)
     return nil, nil
 end
 
--- 4. Deep ItemLibrary.Items Hookfunction Trap Disarmer
 function Emulator.disarmItemLibraryTrap(): boolean
     local ok, result = pcall(function()
         local modules = ReplicatedStorage:WaitForChild("Modules", 8)
@@ -421,7 +472,6 @@ function Emulator.disarmItemLibraryTrap(): boolean
     end
 end
 
--- 5. OutOfBounds Machine Kill Boundary Neutralizer
 function Emulator.neutralizeOutOfBounds(): boolean
     local ok = pcall(function()
         local modules = ReplicatedStorage:WaitForChild("Modules", 8)
@@ -442,7 +492,6 @@ function Emulator.neutralizeOutOfBounds(): boolean
     return ok
 end
 
--- 6. MiscellaneousController Watchdog Thread Purger
 local function purgeMiscWatchdogs()
     if type(get_gc) ~= "function" then
         Emulator.log("WARN", "WATCHDOG", "getgc unavailable; skipping watchdog thread cancellation")
@@ -484,7 +533,6 @@ local function purgeMiscWatchdogs()
     end
 end
 
--- 7. Staff & Developer Permissions Spoofer
 function Emulator.applyStaffPermSpoofer(enable: boolean): boolean
     local ok = pcall(function()
         local modules = ReplicatedStorage:WaitForChild("Modules", 8)
@@ -530,7 +578,6 @@ function Emulator.applyStaffPermSpoofer(enable: boolean): boolean
     return ok
 end
 
--- 8. MaterialService Pulse Heartbeat Engine
 local function startMaterialHeartbeat(materialRemote: RemoteEvent)
     if State.heartbeatRunning then return end
     State.heartbeatRunning = true
@@ -562,7 +609,6 @@ local function startMaterialHeartbeat(materialRemote: RemoteEvent)
     end)
 end
 
--- 9. Namecall Observer
 local function observeResponses(challenge: RemoteEvent)
     if State.namecallHooked or type(hook_meta) ~= "function" then return end
 
@@ -596,7 +642,6 @@ local function observeResponses(challenge: RemoteEvent)
     State.previousNamecall = previousNamecall
 end
 
--- 10. Relay Attacher
 local function attachRelay(challenge: RemoteEvent, native: any): boolean
     local solve = native.Function
     if type(solve) ~= "function" then
@@ -648,7 +693,6 @@ local function attachRelay(challenge: RemoteEvent, native: any): boolean
     return true
 end
 
--- 11. EnvironmentID Monitor
 local function monitorEnvironment()
     task.spawn(function()
         while State.started do
@@ -669,7 +713,7 @@ local function monitorEnvironment()
 end
 
 -- =============================================================================
--- USER INTERFACE SUBSYSTEM (RICH CONSOLE, SKINS & DIAGNOSTICS)
+-- USER INTERFACE SUBSYSTEM (RICH CONSOLE, 3D CATALOG & DIAGNOSTICS)
 -- =============================================================================
 local UI = {
     ScreenGui = nil,
@@ -682,6 +726,13 @@ local UI = {
     StatusBadge = nil,
     LatencyPill = nil,
     PillWidget = nil,
+    
+    Viewport = nil,
+    ViewportCamera = nil,
+    PreviewModel = nil,
+    PreviewGunLabel = nil,
+    PreviewSkinLabel = nil,
+    CatalogScroller = nil,
 }
 
 local function buildUI()
@@ -726,8 +777,8 @@ local function buildUI()
     -- -------------------------------------------------------------------------
     local Main = Instance.new("Frame")
     Main.Name = "MainFrame"
-    Main.Size = UDim2.new(0, 710, 0, 440)
-    Main.Position = UDim2.new(0.5, -355, 0.5, -220)
+    Main.Size = UDim2.new(0, 760, 0, 460)
+    Main.Position = UDim2.new(0.5, -380, 0.5, -230)
     Main.BackgroundColor3 = THEME.Bg
     Main.BorderSizePixel = 0
     Main.ClipsDescendants = true
@@ -748,7 +799,6 @@ local function buildUI()
     corner(Header, 8)
     stroke(Header, THEME.Border, 1)
 
-    -- Draggable logic
     local dragging = false
     local dragStart, startPos
     Header.InputBegan:Connect(function(input)
@@ -770,7 +820,6 @@ local function buildUI()
         end
     end)
 
-    -- Title Icon & Text
     local Title = Instance.new("TextLabel")
     Title.Text = "ATOMWARE // RIVALS EMULATOR"
     Title.Font = Enum.Font.GothamBold
@@ -782,7 +831,6 @@ local function buildUI()
     Title.TextXAlignment = Enum.TextXAlignment.Left
     Title.Parent = Header
 
-    -- Active Status Badge
     local StatusBadge = Instance.new("TextLabel")
     StatusBadge.Name = "StatusBadge"
     StatusBadge.Text = "● ACTIVE"
@@ -797,7 +845,6 @@ local function buildUI()
     stroke(StatusBadge, Color3.fromRGB(30, 80, 50), 1)
     UI.StatusBadge = StatusBadge
 
-    -- Latency Badge
     local LatencyPill = Instance.new("TextLabel")
     LatencyPill.Name = "LatencyPill"
     LatencyPill.Text = "LATENCY: -- ms"
@@ -812,7 +859,6 @@ local function buildUI()
     stroke(LatencyPill, THEME.Border, 1)
     UI.LatencyPill = LatencyPill
 
-    -- Minimize Button
     local MinBtn = Instance.new("TextButton")
     MinBtn.Text = "—"
     MinBtn.Font = Enum.Font.GothamBold
@@ -825,7 +871,6 @@ local function buildUI()
     corner(MinBtn, 4)
     stroke(MinBtn, THEME.Border, 1)
 
-    -- Close Button
     local CloseBtn = Instance.new("TextButton")
     CloseBtn.Text = "✕"
     CloseBtn.Font = Enum.Font.GothamBold
@@ -867,7 +912,7 @@ local function buildUI()
 
     local TabConsole = createTabButton("CONSOLE", 0, "Console")
     local TabMetrics = createTabButton("METRICS", 1, "Metrics")
-    local TabSkins = createTabButton("SKINS", 2, "Skins")
+    local TabSkins = createTabButton("SKIN CATALOG", 2, "Skins")
     local TabControls = createTabButton("CONTROLS", 3, "Controls")
 
     -- -------------------------------------------------------------------------
@@ -997,7 +1042,7 @@ local function buildUI()
     UI.MetricsContainer = MetricsFrame
 
     local MetricsGrid = Instance.new("UIGridLayout")
-    MetricsGrid.CellSize = UDim2.new(0, 218, 0, 95)
+    MetricsGrid.CellSize = UDim2.new(0, 230, 0, 100)
     MetricsGrid.CellPadding = UDim2.new(0, 12, 0, 12)
     MetricsGrid.SortOrder = Enum.SortOrder.LayoutOrder
     MetricsGrid.Parent = MetricsFrame
@@ -1037,7 +1082,7 @@ local function buildUI()
         desc.Font = Enum.Font.Gotham
         desc.TextSize = 10
         desc.TextColor3 = THEME.TextSecondary
-        desc.Position = UDim2.new(0, 12, 0, 62)
+        desc.Position = UDim2.new(0, 12, 0, 64)
         desc.Size = UDim2.new(1, -24, 0, 16)
         desc.BackgroundTransparency = 1
         desc.TextXAlignment = Enum.TextXAlignment.Left
@@ -1070,7 +1115,7 @@ local function buildUI()
     CardWatchdogs.Name = "Card_Watchdogs"
     CardWatchdogs.Parent = MetricsFrame
 
-    -- 3. SKINS TAB (NEW SKIN CHANGER INTERFACE)
+    -- 3. SKINS & 3D WEAPON CATALOG TAB
     local SkinsFrame = Instance.new("Frame")
     SkinsFrame.Name = "SkinsFrame"
     SkinsFrame.Size = UDim2.new(1, 0, 1, 0)
@@ -1079,39 +1124,166 @@ local function buildUI()
     SkinsFrame.Parent = Body
     UI.SkinsContainer = SkinsFrame
 
+    -- Left Pane: 3D Gun Preview & Weapon Selector
     local SkinLeft = Instance.new("Frame")
-    SkinLeft.Size = UDim2.new(0, 290, 1, 0)
+    SkinLeft.Size = UDim2.new(0, 275, 1, 0)
     SkinLeft.BackgroundColor3 = THEME.CardBg
     SkinLeft.Parent = SkinsFrame
     corner(SkinLeft, 6)
     stroke(SkinLeft, THEME.Border, 1)
 
-    local SkinLeftTitle = Instance.new("TextLabel")
-    SkinLeftTitle.Text = "SKIN CHANGER CONTROLS"
-    SkinLeftTitle.Font = Enum.Font.GothamBold
-    SkinLeftTitle.TextSize = 11
-    SkinLeftTitle.TextColor3 = THEME.AccentCyan
-    SkinLeftTitle.Position = UDim2.new(0, 12, 0, 12)
-    SkinLeftTitle.Size = UDim2.new(1, -24, 0, 16)
-    SkinLeftTitle.BackgroundTransparency = 1
-    SkinLeftTitle.TextXAlignment = Enum.TextXAlignment.Left
-    SkinLeftTitle.Parent = SkinLeft
+    -- 3D ViewportFrame Card
+    local PreviewCard = Instance.new("Frame")
+    PreviewCard.Size = UDim2.new(1, -20, 0, 160)
+    PreviewCard.Position = UDim2.new(0, 10, 0, 10)
+    PreviewCard.BackgroundColor3 = THEME.ConsoleBg
+    PreviewCard.Parent = SkinLeft
+    corner(PreviewCard, 6)
+    stroke(PreviewCard, THEME.Border, 1)
 
-    -- Toggle Skin Changer Active
+    local Viewport = Instance.new("ViewportFrame")
+    Viewport.Size = UDim2.new(1, 0, 1, 0)
+    Viewport.BackgroundTransparency = 1
+    Viewport.Parent = PreviewCard
+    UI.Viewport = Viewport
+
+    local ViewportCam = Instance.new("Camera")
+    ViewportCam.FieldOfView = 28
+    Viewport.CurrentCamera = ViewportCam
+    ViewportCam.Parent = Viewport
+    UI.ViewportCamera = ViewportCam
+
+    local PreviewGunLabel = Instance.new("TextLabel")
+    PreviewGunLabel.Text = State.skinChanger.selectedWeapon:upper()
+    PreviewGunLabel.Font = Enum.Font.GothamBold
+    PreviewGunLabel.TextSize = 10
+    PreviewGunLabel.TextColor3 = THEME.TextPrimary
+    PreviewGunLabel.Position = UDim2.new(0, 8, 0, 8)
+    PreviewGunLabel.Size = UDim2.new(1, -16, 0, 14)
+    PreviewGunLabel.BackgroundTransparency = 1
+    PreviewGunLabel.TextXAlignment = Enum.TextXAlignment.Left
+    PreviewGunLabel.Parent = PreviewCard
+    UI.PreviewGunLabel = PreviewGunLabel
+
+    local PreviewSkinLabel = Instance.new("TextLabel")
+    PreviewSkinLabel.Text = "WRAP: " .. State.skinChanger.selectedWrap:upper()
+    PreviewSkinLabel.Font = Enum.Font.Gotham
+    PreviewSkinLabel.TextSize = 9
+    PreviewSkinLabel.TextColor3 = THEME.AccentCyan
+    PreviewSkinLabel.Position = UDim2.new(0, 8, 0, 24)
+    PreviewSkinLabel.Size = UDim2.new(1, -16, 0, 14)
+    PreviewSkinLabel.BackgroundTransparency = 1
+    PreviewSkinLabel.TextXAlignment = Enum.TextXAlignment.Left
+    PreviewSkinLabel.Parent = PreviewCard
+    UI.PreviewSkinLabel = PreviewSkinLabel
+
+    -- Weapon Category Switcher
+    local CatBar = Instance.new("Frame")
+    CatBar.Size = UDim2.new(1, -20, 0, 24)
+    CatBar.Position = UDim2.new(0, 10, 0, 178)
+    CatBar.BackgroundTransparency = 1
+    CatBar.Parent = SkinLeft
+
+    local catButtons = {}
+    local function createCategoryTab(name: string, pos: number)
+        local btn = Instance.new("TextButton")
+        btn.Text = name:upper()
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 9
+        btn.TextColor3 = (State.skinChanger.selectedCategory == name) and THEME.AccentCyan or THEME.TextMuted
+        btn.BackgroundColor3 = (State.skinChanger.selectedCategory == name) and THEME.CardHover or THEME.Bg
+        btn.Position = UDim2.new(0, pos * 64, 0, 0)
+        btn.Size = UDim2.new(0, 60, 1, 0)
+        btn.Parent = CatBar
+        corner(btn, 4)
+        stroke(btn, THEME.Border, 1)
+
+        btn.MouseButton1Click:Connect(function()
+            State.skinChanger.selectedCategory = name
+            local firstWep = WEAPON_CATEGORIES[name][1]
+            if firstWep then
+                Emulator.setWeapon(firstWep)
+            end
+            for catName, b in pairs(catButtons) do
+                local isCur = (catName == name)
+                b.TextColor3 = isCur and THEME.AccentCyan or THEME.TextMuted
+                b.BackgroundColor3 = isCur and THEME.CardHover or THEME.Bg
+            end
+            Emulator.refreshWeaponList()
+        end)
+        catButtons[name] = btn
+    end
+
+    createCategoryTab("Primary", 0)
+    createCategoryTab("Secondary", 1)
+    createCategoryTab("Melee", 2)
+    createCategoryTab("Utility", 3)
+
+    -- Weapon List Scroller
+    local WepScroller = Instance.new("ScrollingFrame")
+    WepScroller.Name = "WeaponScroller"
+    WepScroller.Size = UDim2.new(1, -20, 0, 68)
+    WepScroller.Position = UDim2.new(0, 10, 0, 208)
+    WepScroller.BackgroundColor3 = THEME.ConsoleBg
+    WepScroller.BorderSizePixel = 0
+    WepScroller.ScrollBarThickness = 3
+    WepScroller.ScrollBarImageColor3 = THEME.Border
+    WepScroller.Parent = SkinLeft
+    corner(WepScroller, 4)
+    stroke(WepScroller, THEME.Border, 1)
+
+    local WepLayout = Instance.new("UIListLayout")
+    WepLayout.Padding = UDim.new(0, 2)
+    WepLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    WepLayout.Parent = WepScroller
+
+    function Emulator.refreshWeaponList()
+        for _, child in ipairs(WepScroller:GetChildren()) do
+            if child:IsA("TextButton") then child:Destroy() end
+        end
+        local currentList = WEAPON_CATEGORIES[State.skinChanger.selectedCategory] or {}
+        for _, wepName in ipairs(currentList) do
+            local b = Instance.new("TextButton")
+            b.Text = "  " .. wepName
+            b.Font = Enum.Font.Gotham
+            b.TextSize = 10
+            b.TextColor3 = (State.skinChanger.selectedWeapon == wepName) and THEME.AccentGreen or THEME.TextSecondary
+            b.BackgroundColor3 = (State.skinChanger.selectedWeapon == wepName) and THEME.CardHover or THEME.ConsoleBg
+            b.Size = UDim2.new(1, 0, 0, 20)
+            b.TextXAlignment = Enum.TextXAlignment.Left
+            b.Parent = WepScroller
+
+            b.MouseButton1Click:Connect(function()
+                Emulator.setWeapon(wepName)
+                for _, other in ipairs(WepScroller:GetChildren()) do
+                    if other:IsA("TextButton") then
+                        local isSel = (other.Text:gsub("%s+", "") == wepName:gsub("%s+", ""))
+                        other.TextColor3 = isSel and THEME.AccentGreen or THEME.TextSecondary
+                        other.BackgroundColor3 = isSel and THEME.CardHover or THEME.ConsoleBg
+                    end
+                end
+            end)
+        end
+        WepScroller.CanvasSize = UDim2.new(0, 0, 0, #currentList * 22)
+    end
+    Emulator.refreshWeaponList()
+
+    -- Skin Changer Toggles
     local ToggleSkinBtn = Instance.new("TextButton")
-    ToggleSkinBtn.Text = "ENABLE SKIN CHANGER: " .. (State.skinChanger.enabled and "ON" or "OFF")
+    ToggleSkinBtn.Text = "SKIN CHANGER: " .. (State.skinChanger.enabled and "ON" or "OFF")
     ToggleSkinBtn.Font = Enum.Font.GothamBold
     ToggleSkinBtn.TextSize = 10
     ToggleSkinBtn.TextColor3 = State.skinChanger.enabled and THEME.AccentGreen or THEME.TextMuted
     ToggleSkinBtn.BackgroundColor3 = THEME.CardHover
-    ToggleSkinBtn.Position = UDim2.new(0, 12, 0, 36)
-    ToggleSkinBtn.Size = UDim2.new(1, -24, 0, 30)
+    ToggleSkinBtn.Position = UDim2.new(0, 10, 0, 284)
+    ToggleSkinBtn.Size = UDim2.new(1, -20, 0, 24)
     ToggleSkinBtn.Parent = SkinLeft
     corner(ToggleSkinBtn, 4)
     stroke(ToggleSkinBtn, THEME.Border, 1)
+
     ToggleSkinBtn.MouseButton1Click:Connect(function()
         State.skinChanger.enabled = not State.skinChanger.enabled
-        ToggleSkinBtn.Text = "ENABLE SKIN CHANGER: " .. (State.skinChanger.enabled and "ON" or "OFF")
+        ToggleSkinBtn.Text = "SKIN CHANGER: " .. (State.skinChanger.enabled and "ON" or "OFF")
         ToggleSkinBtn.TextColor3 = State.skinChanger.enabled and THEME.AccentGreen or THEME.TextMuted
         if State.skinChanger.enabled then
             hookClientViewModel()
@@ -1119,157 +1291,301 @@ local function buildUI()
         end
     end)
 
-    -- Toggle Invert Colors
     local ToggleInvertBtn = Instance.new("TextButton")
-    ToggleInvertBtn.Text = "INVERT WRAP COLORS: " .. (State.skinChanger.inverted and "ON" or "OFF")
+    ToggleInvertBtn.Text = "INVERT COLORS: " .. (State.skinChanger.inverted and "ON" or "OFF")
     ToggleInvertBtn.Font = Enum.Font.Gotham
-    ToggleInvertBtn.TextSize = 10
+    ToggleInvertBtn.TextSize = 9
     ToggleInvertBtn.TextColor3 = State.skinChanger.inverted and THEME.AccentOrange or THEME.TextSecondary
     ToggleInvertBtn.BackgroundColor3 = THEME.CardHover
-    ToggleInvertBtn.Position = UDim2.new(0, 12, 0, 72)
-    ToggleInvertBtn.Size = UDim2.new(1, -24, 0, 30)
+    ToggleInvertBtn.Position = UDim2.new(0, 10, 0, 314)
+    ToggleInvertBtn.Size = UDim2.new(1, -20, 0, 22)
     ToggleInvertBtn.Parent = SkinLeft
     corner(ToggleInvertBtn, 4)
     stroke(ToggleInvertBtn, THEME.Border, 1)
+
     ToggleInvertBtn.MouseButton1Click:Connect(function()
         State.skinChanger.inverted = not State.skinChanger.inverted
-        ToggleInvertBtn.Text = "INVERT WRAP COLORS: " .. (State.skinChanger.inverted and "ON" or "OFF")
+        ToggleInvertBtn.Text = "INVERT COLORS: " .. (State.skinChanger.inverted and "ON" or "OFF")
         ToggleInvertBtn.TextColor3 = State.skinChanger.inverted and THEME.AccentOrange or THEME.TextSecondary
+        Emulator.render3DPreview()
         if State.skinChanger.enabled then
             Emulator.applySkinNow()
         end
     end)
 
-    -- Toggle Unlock All Cosmetics in Customization Menus
-    local ToggleUnlockBtn = Instance.new("TextButton")
-    ToggleUnlockBtn.Text = "UNLOCK ALL IN MENUS: " .. (State.skinChanger.unlockAllCosmetics and "ON" or "OFF")
-    ToggleUnlockBtn.Font = Enum.Font.Gotham
-    ToggleUnlockBtn.TextSize = 10
-    ToggleUnlockBtn.TextColor3 = State.skinChanger.unlockAllCosmetics and THEME.AccentPurple or THEME.TextSecondary
-    ToggleUnlockBtn.BackgroundColor3 = THEME.CardHover
-    ToggleUnlockBtn.Position = UDim2.new(0, 12, 0, 108)
-    ToggleUnlockBtn.Size = UDim2.new(1, -24, 0, 30)
-    ToggleUnlockBtn.Parent = SkinLeft
-    corner(ToggleUnlockBtn, 4)
-    stroke(ToggleUnlockBtn, THEME.Border, 1)
-    ToggleUnlockBtn.MouseButton1Click:Connect(function()
-        local nextVal = not State.skinChanger.unlockAllCosmetics
-        Emulator.toggleUnlockAllCosmetics(nextVal)
-        ToggleUnlockBtn.Text = "UNLOCK ALL IN MENUS: " .. (nextVal and "ON" or "OFF")
-        ToggleUnlockBtn.TextColor3 = nextVal and THEME.AccentPurple or THEME.TextSecondary
-    end)
-
-    -- Custom Wrap Textbox Input
-    local CustomWrapBox = Instance.new("TextBox")
-    CustomWrapBox.PlaceholderText = "Type custom wrap name..."
-    CustomWrapBox.Text = State.skinChanger.selectedWrap
-    CustomWrapBox.Font = Enum.Font.RobotoMono
-    CustomWrapBox.TextSize = 11
-    CustomWrapBox.TextColor3 = THEME.TextPrimary
-    CustomWrapBox.PlaceholderColor3 = THEME.TextMuted
-    CustomWrapBox.BackgroundColor3 = THEME.ConsoleBg
-    CustomWrapBox.Position = UDim2.new(0, 12, 0, 144)
-    CustomWrapBox.Size = UDim2.new(1, -24, 0, 30)
-    CustomWrapBox.ClearTextOnFocus = false
-    CustomWrapBox.Parent = SkinLeft
-    corner(CustomWrapBox, 4)
-    stroke(CustomWrapBox, THEME.Border, 1)
-
-    CustomWrapBox.FocusLost:Connect(function()
-        if CustomWrapBox.Text ~= "" then
-            State.skinChanger.selectedWrap = CustomWrapBox.Text
-            if State.skinChanger.enabled then
-                Emulator.applySkinNow()
-            end
-        end
-    end)
-
-    -- Re-apply Button
     local ApplyNowBtn = Instance.new("TextButton")
-    ApplyNowBtn.Text = "✦ RE-APPLY TO VIEWMODEL"
+    ApplyNowBtn.Text = "✦ EQUIP TO LIVE VIEWMODEL"
     ApplyNowBtn.Font = Enum.Font.GothamBold
-    ApplyNowBtn.TextSize = 11
+    ApplyNowBtn.TextSize = 10
     ApplyNowBtn.TextColor3 = THEME.AccentCyan
-    ApplyNowBtn.BackgroundColor3 = Color3.fromRGB(20, 45, 60)
-    ApplyNowBtn.Position = UDim2.new(0, 12, 0, 180)
-    ApplyNowBtn.Size = UDim2.new(1, -24, 0, 32)
+    ApplyNowBtn.BackgroundColor3 = Color3.fromRGB(15, 40, 55)
+    ApplyNowBtn.Position = UDim2.new(0, 10, 1, -32)
+    ApplyNowBtn.Size = UDim2.new(1, -20, 0, 26)
     ApplyNowBtn.Parent = SkinLeft
     corner(ApplyNowBtn, 4)
-    stroke(ApplyNowBtn, Color3.fromRGB(30, 90, 120), 1)
+    stroke(ApplyNowBtn, Color3.fromRGB(30, 80, 110), 1)
+
     ApplyNowBtn.MouseButton1Click:Connect(function()
         hookClientViewModel()
         State.skinChanger.enabled = true
-        ToggleSkinBtn.Text = "ENABLE SKIN CHANGER: ON"
+        ToggleSkinBtn.Text = "SKIN CHANGER: ON"
         ToggleSkinBtn.TextColor3 = THEME.AccentGreen
         Emulator.applySkinNow()
     end)
 
-    -- Skin Right: Preset Catalog Grid
+    -- Right Pane: Visual Skin Catalog Grid
     local SkinRight = Instance.new("Frame")
-    SkinRight.Size = UDim2.new(1, -302, 1, 0)
-    SkinRight.Position = UDim2.new(0, 302, 0, 0)
+    SkinRight.Size = UDim2.new(1, -287, 1, 0)
+    SkinRight.Position = UDim2.new(0, 287, 0, 0)
     SkinRight.BackgroundColor3 = THEME.CardBg
     SkinRight.Parent = SkinsFrame
     corner(SkinRight, 6)
     stroke(SkinRight, THEME.Border, 1)
 
-    local PresetsTitle = Instance.new("TextLabel")
-    PresetsTitle.Text = "PRESET RARE WRAPS"
-    PresetsTitle.Font = Enum.Font.GothamBold
-    PresetsTitle.TextSize = 11
-    PresetsTitle.TextColor3 = THEME.AccentCyan
-    PresetsTitle.Position = UDim2.new(0, 12, 0, 12)
-    PresetsTitle.Size = UDim2.new(1, -24, 0, 16)
-    PresetsTitle.BackgroundTransparency = 1
-    PresetsTitle.TextXAlignment = Enum.TextXAlignment.Left
-    PresetsTitle.Parent = SkinRight
+    -- Search Bar
+    local SearchBox = Instance.new("TextBox")
+    SearchBox.PlaceholderText = "Search 380+ skins and wraps..."
+    SearchBox.Text = ""
+    SearchBox.Font = Enum.Font.RobotoMono
+    SearchBox.TextSize = 10
+    SearchBox.TextColor3 = THEME.TextPrimary
+    SearchBox.PlaceholderColor3 = THEME.TextMuted
+    SearchBox.BackgroundColor3 = THEME.ConsoleBg
+    SearchBox.Position = UDim2.new(0, 12, 0, 10)
+    SearchBox.Size = UDim2.new(1, -24, 0, 24)
+    SearchBox.ClearTextOnFocus = false
+    SearchBox.Parent = SkinRight
+    corner(SearchBox, 4)
+    stroke(SearchBox, THEME.Border, 1)
 
-    local PresetScroller = Instance.new("ScrollingFrame")
-    PresetScroller.Size = UDim2.new(1, -20, 1, -40)
-    PresetScroller.Position = UDim2.new(0, 10, 0, 34)
-    PresetScroller.BackgroundTransparency = 1
-    PresetScroller.BorderSizePixel = 0
-    PresetScroller.ScrollBarThickness = 4
-    PresetScroller.ScrollBarImageColor3 = THEME.Border
-    PresetScroller.CanvasSize = UDim2.new(0, 0, 0, 0)
-    PresetScroller.Parent = SkinRight
+    SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        State.skinChanger.searchQuery = SearchBox.Text:lower()
+        Emulator.refreshSkinCatalog()
+    end)
 
-    local PresetGrid = Instance.new("UIGridLayout")
-    PresetGrid.CellSize = UDim2.new(0, 175, 0, 38)
-    PresetGrid.CellPadding = UDim2.new(0, 8, 0, 8)
-    PresetGrid.SortOrder = Enum.SortOrder.LayoutOrder
-    PresetGrid.Parent = PresetScroller
+    -- Catalog Filter Pills
+    local CatFilterBar = Instance.new("Frame")
+    CatFilterBar.Size = UDim2.new(1, -24, 0, 20)
+    CatFilterBar.Position = UDim2.new(0, 12, 0, 40)
+    CatFilterBar.BackgroundTransparency = 1
+    CatFilterBar.Parent = SkinRight
 
-    for _, wrapName in ipairs(POPULAR_WRAPS) do
+    local filterButtons = {}
+    local function createCatalogFilterPill(title: string, catId: string, xPos: number)
         local btn = Instance.new("TextButton")
-        btn.Text = wrapName
+        btn.Text = title
         btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 10
-        btn.TextColor3 = (State.skinChanger.selectedWrap == wrapName) and THEME.AccentGreen or THEME.TextPrimary
-        btn.BackgroundColor3 = THEME.CardHover
+        btn.TextSize = 9
+        btn.TextColor3 = (State.skinChanger.catalogFilter == catId) and THEME.AccentCyan or THEME.TextMuted
+        btn.BackgroundColor3 = (State.skinChanger.catalogFilter == catId) and THEME.CardHover or THEME.Bg
+        btn.Position = UDim2.new(0, xPos, 0, 0)
+        btn.Size = UDim2.new(0, 75, 1, 0)
+        btn.Parent = CatFilterBar
         corner(btn, 4)
-        stroke(btn, (State.skinChanger.selectedWrap == wrapName) and THEME.AccentGreen or THEME.Border, 1)
-        btn.Parent = PresetScroller
+        stroke(btn, THEME.Border, 1)
 
         btn.MouseButton1Click:Connect(function()
-            CustomWrapBox.Text = wrapName
-            State.skinChanger.selectedWrap = wrapName
-            hookClientViewModel()
-            State.skinChanger.enabled = true
-            ToggleSkinBtn.Text = "ENABLE SKIN CHANGER: ON"
-            ToggleSkinBtn.TextColor3 = THEME.AccentGreen
-            Emulator.applySkinNow()
+            State.skinChanger.catalogFilter = catId
+            for fId, b in pairs(filterButtons) do
+                local isSel = (fId == catId)
+                b.TextColor3 = isSel and THEME.AccentCyan or THEME.TextMuted
+                b.BackgroundColor3 = isSel and THEME.CardHover or THEME.Bg
+            end
+            Emulator.refreshSkinCatalog()
+        end)
+        filterButtons[catId] = btn
+    end
 
-            for _, child in ipairs(PresetScroller:GetChildren()) do
-                if child:IsA("TextButton") then
-                    local isThis = (child == btn)
-                    child.TextColor3 = isThis and THEME.AccentGreen or THEME.TextPrimary
-                    local s = child:FindFirstChildOfClass("UIStroke")
-                    if s then s.Color = isThis and THEME.AccentGreen or THEME.Border end
-                end
+    createCatalogFilterPill("ALL WRAPS", "ALL", 0)
+    createCatalogFilterPill("UNIQUE", "UNIQUE", 82)
+    createCatalogFilterPill("MASTERY", "MASTERY", 164)
+    createCatalogFilterPill("SOLID", "SOLID", 246)
+
+    -- Catalog Scroller
+    local CatalogScroller = Instance.new("ScrollingFrame")
+    CatalogScroller.Name = "CatalogScroller"
+    CatalogScroller.Size = UDim2.new(1, -24, 1, -72)
+    CatalogScroller.Position = UDim2.new(0, 12, 0, 66)
+    CatalogScroller.BackgroundTransparency = 1
+    CatalogScroller.BorderSizePixel = 0
+    CatalogScroller.ScrollBarThickness = 4
+    CatalogScroller.ScrollBarImageColor3 = THEME.Border
+    CatalogScroller.Parent = SkinRight
+    UI.CatalogScroller = CatalogScroller
+
+    local CatalogGrid = Instance.new("UIGridLayout")
+    CatalogGrid.CellSize = UDim2.new(0, 132, 0, 68)
+    CatalogGrid.CellPadding = UDim2.new(0, 8, 0, 8)
+    CatalogGrid.SortOrder = Enum.SortOrder.LayoutOrder
+    CatalogGrid.Parent = CatalogScroller
+
+    function Emulator.refreshSkinCatalog()
+        if not UI.CatalogScroller then return end
+        for _, child in ipairs(UI.CatalogScroller:GetChildren()) do
+            if child:IsA("Frame") then child:Destroy() end
+        end
+
+        local count = 0
+        for _, wrap in ipairs(CATALOG_WRAPS) do
+            local passFilter = (State.skinChanger.catalogFilter == "ALL" or wrap.Category == State.skinChanger.catalogFilter)
+            local passSearch = (State.skinChanger.searchQuery == "" or wrap.Name:lower():find(State.skinChanger.searchQuery, 1, true) ~= nil)
+
+            if passFilter and passSearch then
+                count += 1
+                local card = Instance.new("Frame")
+                card.BackgroundColor3 = (State.skinChanger.selectedWrap == wrap.Name) and THEME.CardHover or THEME.ConsoleBg
+                corner(card, 6)
+                stroke(card, (State.skinChanger.selectedWrap == wrap.Name) and THEME.AccentCyan or THEME.Border, 1)
+
+                -- Visual Dual-Color Swatch
+                local Swatch = Instance.new("Frame")
+                Swatch.Size = UDim2.new(1, -12, 0, 20)
+                Swatch.Position = UDim2.new(0, 6, 0, 6)
+                Swatch.BackgroundColor3 = wrap.Primary
+                Swatch.Parent = card
+                corner(Swatch, 4)
+
+                local SecondarySwatch = Instance.new("Frame")
+                SecondarySwatch.Size = UDim2.new(0.5, 0, 1, 0)
+                SecondarySwatch.Position = UDim2.new(0.5, 0, 0, 0)
+                SecondarySwatch.BackgroundColor3 = wrap.Secondary
+                SecondarySwatch.BorderSizePixel = 0
+                SecondarySwatch.Parent = Swatch
+                corner(SecondarySwatch, 4)
+
+                -- Wrap Name
+                local nameLbl = Instance.new("TextLabel")
+                nameLbl.Text = wrap.Name
+                nameLbl.Font = Enum.Font.GothamBold
+                nameLbl.TextSize = 10
+                nameLbl.TextColor3 = (State.skinChanger.selectedWrap == wrap.Name) and THEME.AccentCyan or THEME.TextPrimary
+                nameLbl.Position = UDim2.new(0, 6, 0, 30)
+                nameLbl.Size = UDim2.new(1, -12, 0, 16)
+                nameLbl.BackgroundTransparency = 1
+                nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+                nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                nameLbl.Parent = card
+
+                -- Rarity Badge
+                local rarityLbl = Instance.new("TextLabel")
+                rarityLbl.Text = wrap.Rarity:upper()
+                rarityLbl.Font = Enum.Font.Gotham
+                rarityLbl.TextSize = 8
+                local rCol = THEME.TextMuted
+                if wrap.Rarity == "Mastery" then rCol = THEME.AccentOrange
+                elseif wrap.Rarity == "Unique" then rCol = THEME.AccentPurple end
+                rarityLbl.TextColor3 = rCol
+                rarityLbl.Position = UDim2.new(0, 6, 0, 48)
+                rarityLbl.Size = UDim2.new(1, -12, 0, 12)
+                rarityLbl.BackgroundTransparency = 1
+                rarityLbl.TextXAlignment = Enum.TextXAlignment.Left
+                rarityLbl.Parent = card
+
+                local hitBtn = Instance.new("TextButton")
+                hitBtn.Size = UDim2.new(1, 0, 1, 0)
+                hitBtn.BackgroundTransparency = 1
+                hitBtn.Text = ""
+                hitBtn.Parent = card
+
+                hitBtn.MouseButton1Click:Connect(function()
+                    Emulator.setWrap(wrap.Name)
+                    Emulator.render3DPreview()
+                    Emulator.refreshSkinCatalog()
+                end)
+
+                card.Parent = UI.CatalogScroller
+            end
+        end
+
+        local rows = math.ceil(count / 3)
+        CatalogScroller.CanvasSize = UDim2.new(0, 0, 0, rows * 76 + 10)
+    end
+    Emulator.refreshSkinCatalog()
+
+    -- 3D Viewport Render Loop (Orbit Camera & Shading)
+    local orbitAngle = 0
+    RunService.RenderStepped:Connect(function(dt)
+        if UI.ViewportCamera and UI.SkinsContainer and UI.SkinsContainer.Visible then
+            orbitAngle += dt * 0.75
+            local radius = 3.6
+            local x = math.sin(orbitAngle) * radius
+            local z = math.cos(orbitAngle) * radius
+            UI.ViewportCamera.CFrame = CFrame.new(Vector3.new(x, 0.6, z), Vector3.new(0, 0, 0))
+        end
+    end)
+
+    function Emulator.render3DPreview()
+        if not UI.Viewport then return end
+        for _, child in ipairs(UI.Viewport:GetChildren()) do
+            if child:IsA("Model") or child:IsA("BasePart") then
+                child:Destroy()
+            end
+        end
+
+        if UI.PreviewGunLabel then
+            UI.PreviewGunLabel.Text = State.skinChanger.selectedWeapon:upper()
+        end
+        if UI.PreviewSkinLabel then
+            UI.PreviewSkinLabel.Text = "WRAP: " .. State.skinChanger.selectedWrap:upper()
+        end
+
+        pcall(function()
+            local WrapController = require(LocalPlayer.PlayerScripts.Controllers.WrapController)
+            local ViewModelsAsset = LocalPlayer.PlayerScripts.Assets:FindFirstChild("ViewModels")
+            local rawModel = ViewModelsAsset and ViewModelsAsset:FindFirstChild(State.skinChanger.selectedWeapon, true)
+
+            if rawModel and rawModel:IsA("Model") then
+                local preview = rawModel:Clone()
+                preview:PivotTo(CFrame.identity)
+                preview.Parent = UI.Viewport
+                local wrapProps = WrapController:RecordOriginalWrapProperties(preview)
+                WrapController:ApplyWrap(wrapProps, {
+                    Name = State.skinChanger.selectedWrap,
+                    Inverted = State.skinChanger.inverted,
+                })
+            else
+                local fallback = Instance.new("Model")
+                local body = Instance.new("Part")
+                body.Name = "Body"
+                body.Size = Vector3.new(2.8, 0.6, 0.3)
+                body.Position = Vector3.new(0, 0, 0)
+                body.Anchored = true
+                body:AddTag("Wrappable")
+                body:SetAttribute("WrapGroup", 1)
+                body.Parent = fallback
+
+                local barrel = Instance.new("Part")
+                barrel.Name = "Barrel"
+                barrel.Size = Vector3.new(1.4, 0.3, 0.25)
+                barrel.Position = Vector3.new(1.8, 0.1, 0)
+                barrel.Anchored = true
+                barrel:AddTag("Wrappable")
+                barrel:SetAttribute("WrapGroup", 2)
+                barrel.Parent = fallback
+
+                local grip = Instance.new("Part")
+                grip.Name = "Grip"
+                grip.Size = Vector3.new(0.4, 1.0, 0.28)
+                grip.Position = Vector3.new(-0.6, -0.6, 0)
+                grip.Orientation = Vector3.new(0, 0, -18)
+                grip.Anchored = true
+                grip:AddTag("Wrappable")
+                grip:SetAttribute("WrapGroup", 1)
+                grip.Parent = fallback
+
+                fallback.PrimaryPart = body
+                fallback.Parent = UI.Viewport
+                fallback:PivotTo(CFrame.identity)
+
+                local wrapProps = WrapController:RecordOriginalWrapProperties(fallback)
+                WrapController:ApplyWrap(wrapProps, {
+                    Name = State.skinChanger.selectedWrap,
+                    Inverted = State.skinChanger.inverted,
+                })
             end
         end)
     end
+    Emulator.render3DPreview()
 
     -- 4. CONTROLS TAB
     local ControlsFrame = Instance.new("Frame")
@@ -1376,7 +1692,7 @@ local function buildUI()
         ControlsFrame.Visible = (id == "Controls")
 
         for _, btn in ipairs({ TabConsole, TabMetrics, TabSkins, TabControls }) do
-            local isCurrent = (btn.Text:upper() == id:upper())
+            local isCurrent = (btn.Text:upper() == id:upper() or (id == "Skins" and btn.Text:find("CATALOG")))
             btn.TextColor3 = isCurrent and THEME.AccentCyan or THEME.TextMuted
             btn.BackgroundColor3 = isCurrent and THEME.CardBg or Color3.fromRGB(0, 0, 0)
             btn.BackgroundTransparency = isCurrent and 0 or 1
@@ -1386,6 +1702,9 @@ local function buildUI()
             elseif not isCurrent and existingStroke then
                 existingStroke:Destroy()
             end
+        end
+        if id == "Skins" then
+            Emulator.render3DPreview()
         end
     end
 
@@ -1421,7 +1740,6 @@ local function buildUI()
     Pill.MouseButton1Click:Connect(function() setWindowMinimized(false) end)
     CloseBtn.MouseButton1Click:Connect(function() Emulator.unload() end)
 
-    -- Hotkey toggle
     UserInputService.InputBegan:Connect(function(input, processed)
         if not processed and input.KeyCode == TOGGLE_KEY then
             Main.Visible = not Main.Visible
@@ -1430,7 +1748,6 @@ local function buildUI()
     end)
 end
 
--- Refresh Log entries inside Console Scroller
 function Emulator.refreshConsoleLogs()
     if not UI.LogScroller then return end
     for _, child in ipairs(UI.LogScroller:GetChildren()) do
@@ -1492,7 +1809,6 @@ function Emulator.refreshConsoleLogs()
     end
 end
 
--- Hook dynamic log addition to UI
 OnLogAdded:Connect(function(entry)
     if not UI.LogScroller then return end
     if State.activeFilter == "ALL" or entry.level == State.activeFilter or (State.activeFilter == "WARN" and (entry.level == "WARN" or entry.level == "ERROR")) then
@@ -1548,7 +1864,6 @@ OnLogAdded:Connect(function(entry)
     end
 end)
 
--- Hook state updates to Metrics Cards
 OnStateChanged:Connect(function()
     if not UI.MainFrame then return end
     
@@ -1595,6 +1910,12 @@ OnStateChanged:Connect(function()
             c6.ValueLabel.Text = string.format("%d Threads", State.miscCancelled)
             c6.SubLabel.Text = string.format("Found: %d | Purged: %d", State.miscFound, State.miscCancelled)
         end
+    end
+end)
+
+OnSkinChanged:Connect(function()
+    if UI.SkinsContainer and UI.SkinsContainer.Visible then
+        Emulator.render3DPreview()
     end
 end)
 
@@ -1663,16 +1984,13 @@ end
 function Emulator.start()
     if State.started then return Emulator end
 
-    -- 1. Initialize UI
     buildUI()
     Emulator.log("INFO", "STARTUP", "Atomware Rivals Defensive Emulator initializing...")
 
-    -- 2. Universe check
     if game.GameId ~= UNIVERSE_ID and game.PlaceId ~= 17625359962 and tostring(game.PlaceId) ~= "17625359962" then
         Emulator.log("WARN", "GAME_GUARD", string.format("RIVALS universe expected (6035872082); current GameId=%s", tostring(game.GameId)))
     end
 
-    -- 3. Capability assertions
     if type(get_conns) ~= "function" then
         Emulator.log("WARN", "CAPABILITY", "getconnections unavailable; challenge connection detachment may be limited")
     end
@@ -1680,7 +1998,6 @@ function Emulator.start()
         Emulator.log("WARN", "CAPABILITY", "hookmetamethod unavailable; latency monitoring will run passively")
     end
 
-    -- 4. Locate LocalScript3
     local originalScript = ReplicatedFirst:WaitForChild("LocalScript3", 6)
     if originalScript then
         State.originalScript = originalScript :: LocalScript
@@ -1689,12 +2006,10 @@ function Emulator.start()
         Emulator.log("WARN", "RESOLVE", "ReplicatedFirst.LocalScript3 not yet loaded; polling in background")
     end
 
-    -- 5. Disarm Traps immediately
     Emulator.disarmItemLibraryTrap()
     Emulator.neutralizeOutOfBounds()
     purgeMiscWatchdogs()
 
-    -- 6. Hook Challenge RemoteEvent
     local remotes = ReplicatedStorage:WaitForChild("Remotes", 8)
     local materialRemote = MaterialService:WaitForChild("RemoteEvent", 6) or MaterialService:FindFirstChildOfClass("RemoteEvent")
 
@@ -1726,17 +2041,14 @@ function Emulator.start()
         end
     end
 
-    -- 7. MaterialService Pulse Heartbeat
     if materialRemote then
         startMaterialHeartbeat(materialRemote)
     else
         Emulator.log("WARN", "MATERIAL", "MaterialService.RemoteEvent not found; heartbeat disabled")
     end
 
-    -- 8. Environment Multi-Tenancy Monitor
     monitorEnvironment()
 
-    -- 9. Auto-hook Skin Changer Viewmodel
     task.spawn(function()
         task.wait(1)
         hookClientViewModel()
@@ -1750,9 +2062,6 @@ function Emulator.start()
     return Emulator
 end
 
--- =============================================================================
--- REGISTRATION & BOOTSTRAP
--- =============================================================================
 env.ATOMWARE_EMU_UNLOAD = Emulator.unload
 env.AtomwareEmulator = Emulator
 _G.AtomwareEmulator = Emulator
