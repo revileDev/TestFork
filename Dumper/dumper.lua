@@ -6,19 +6,16 @@
     Execution Mode: Modular Singleton with High-Performance Glassmorphism GUI
 
     Core Enhancements:
-      1. Strict Weapon Filtering: Every weapon strictly displays ONLY its own skins.
-         Embedded static lookup catalog covers all 50 weapons and 422 skins with real thumbnails.
-      2. Local-Only Player Isolation:
-         - ClientViewModel.GetWrap metamethod hook strictly verifies fighter.IsLocalPlayer.
-         - Spectating guard prevents applying local overrides onto spectated players.
-         - Other players in 3rd/1st person remain 100% untouched.
-      3. Shot Validation & Raycast Collision Protection:
-         - All cloned ViewModels have CanQuery, CanCollide, CanTouch explicitly disabled (false).
-         - Prevents camera raycasts from colliding with local weapon models.
-         - Weapon inventory spoofing made optional with clear hit-registration warnings.
-      4. Persistent Per-Weapon Memory: Saves selected skin and wrap per weapon; turns emerald green.
-      5. Interactive 3D Weapon Preview (ViewportFrame) with real-time 360 orbital camera.
-      6. Modern Glassmorphism GUI (980x620) with Top Gun Selector, Draggable Header, and Hotkeys.
+      1. Guaranteed 3D Viewport Rendering: Multi-path asset resolver (PlayerScripts,
+         ReplicatedStorage, workspace) with automatic centering and procedural 3D fallback.
+      2. Strict Weapon-to-Skin Filtering: Complete 50-weapon, 422-skin embedded catalog.
+         Every weapon strictly shows ONLY its own skins.
+      3. Local-Only Player Isolation: Metamethod hooks strictly verify fighter.IsLocalPlayer.
+         Other players remain 100% untouched.
+      4. Shot Validation & Raycast Safe: CanQuery, CanCollide, CanTouch explicitly disabled
+         on all cloned ViewModels to prevent camera raycast collisions.
+      5. Explicit CanvasSize: Guaranteed scrolling and card visibility across all executors.
+      6. Compact Glassmorphism GUI (920x560): Responsive, draggable, hotkey toggled.
     ============================================================================
 --]]
 
@@ -673,7 +670,6 @@ local RARITY_COLORS = {
     Unique = Color3.fromRGB(255, 140, 0),
 }
 
--- Normalizes weapon name aliases (e.g. Pistol -> Handgun)
 local function normalizeWeaponName(name)
     if not name then return "" end
     if name == "Pistol" or name == "Hand Gun" then return "Handgun" end
@@ -694,7 +690,7 @@ local State = {
     uiVisible = true,
     minimized = false,
     unlockAll = true,
-    unlockWeapons = false, -- Disabled by default to prevent server-side shot drops
+    unlockWeapons = false,
     invertPalette = false,
     saved = {},
 }
@@ -712,7 +708,148 @@ local function getGunConfig(gunName)
 end
 
 -- ============================================================================
--- CATALOG INGESTION (STRICT WEAPON-SPECIFIC FILTERING)
+-- 3D MODEL RESOLVER (EXHAUSTIVE LOOKUP + PROCEDURAL 3D FALLBACK)
+-- ============================================================================
+local function createFallbackWeaponModel(weaponName, skinName)
+    local model = Instance.new("Model")
+    model.Name = skinName or weaponName
+
+    local root = Instance.new("Part")
+    root.Name = "Primary"
+    root.Size = Vector3.new(0.5, 0.9, 2.8)
+    root.Material = Enum.Material.Metal
+    root.Color = Color3.fromRGB(48, 54, 68)
+    root.CanCollide = false
+    root.CanTouch = false
+    root.CanQuery = false
+    root.Massless = true
+    root.Parent = model
+    model.PrimaryPart = root
+
+    local barrel = Instance.new("Part")
+    barrel.Name = "Barrel"
+    barrel.Size = Vector3.new(0.24, 0.24, 1.8)
+    barrel.Position = root.Position + Vector3.new(0, 0.2, -2.1)
+    barrel.Material = Enum.Material.Metal
+    barrel.Color = Color3.fromRGB(28, 30, 38)
+    barrel.CanCollide = false
+    barrel.CanTouch = false
+    barrel.CanQuery = false
+    barrel.Massless = true
+    barrel.Parent = model
+
+    local w1 = Instance.new("WeldConstraint")
+    w1.Part0 = root
+    w1.Part1 = barrel
+    w1.Parent = root
+
+    local grip = Instance.new("Part")
+    grip.Name = "Grip"
+    grip.Size = Vector3.new(0.35, 1.1, 0.5)
+    grip.Position = root.Position + Vector3.new(0, -0.85, 0.5)
+    grip.Material = Enum.Material.SmoothPlastic
+    grip.Color = Color3.fromRGB(32, 35, 44)
+    grip.CanCollide = false
+    grip.CanTouch = false
+    grip.CanQuery = false
+    grip.Massless = true
+    grip.Parent = model
+
+    local w2 = Instance.new("WeldConstraint")
+    w2.Part0 = root
+    w2.Part1 = grip
+    w2.Parent = root
+
+    root:AddTag("Wrappable")
+    root:SetAttribute("WrapGroup", 1)
+    barrel:AddTag("Wrappable")
+    barrel:SetAttribute("WrapGroup", 2)
+    grip:AddTag("Wrappable")
+    grip:SetAttribute("WrapGroup", 1)
+
+    return model
+end
+
+local function findWeaponModel(name)
+    local target = nil
+
+    -- 1. Check LocalPlayer.PlayerScripts.Assets.ViewModels (Native Rivals Path)
+    pcall(function()
+        local ps = LocalPlayer:FindFirstChild("PlayerScripts")
+        local assets = ps and ps:FindFirstChild("Assets")
+        local vm = assets and assets:FindFirstChild("ViewModels")
+        if vm then
+            local Modules = ReplicatedStorage:FindFirstChild("Modules")
+            local Utility = Modules and require(Modules:FindFirstChild("Utility"))
+            if Utility and typeof(Utility.LookThrough) == "function" then
+                target = Utility:LookThrough(vm, name)
+            end
+            if not target then
+                target = vm:FindFirstChild(name, true)
+            end
+        end
+    end)
+    if target then return target end
+
+    -- 2. Check ReplicatedStorage.Assets (Temp / ViewModels)
+    pcall(function()
+        local repAssets = ReplicatedStorage:FindFirstChild("Assets")
+        if repAssets then
+            local temp = repAssets:FindFirstChild("Temp")
+            local vm = (temp and temp:FindFirstChild("ViewModels")) or repAssets:FindFirstChild("ViewModels")
+            if vm then
+                local Modules = ReplicatedStorage:FindFirstChild("Modules")
+                local Utility = Modules and require(Modules:FindFirstChild("Utility"))
+                if Utility and typeof(Utility.LookThrough) == "function" then
+                    target = Utility:LookThrough(vm, name)
+                end
+                if not target then
+                    target = vm:FindFirstChild(name, true)
+                end
+            end
+        end
+    end)
+    if target then return target end
+
+    -- 3. Check workspace.ViewModels
+    pcall(function()
+        local wsVM = workspace:FindFirstChild("ViewModels")
+        if wsVM then
+            target = wsVM:FindFirstChild(name, true)
+            if not target then
+                local fp = wsVM:FindFirstChild("FirstPerson")
+                if fp then target = fp:FindFirstChild(name, true) end
+            end
+        end
+    end)
+    if target then return target end
+
+    -- 4. Check FighterController.LocalFighter items
+    pcall(function()
+        local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
+        local controllers = scripts and scripts:FindFirstChild("Controllers")
+        local fc = controllers and controllers:FindFirstChild("FighterController")
+        if fc then
+            local FighterController = require(fc)
+            local lf = FighterController.LocalFighter
+            if lf and lf.Items then
+                for _, item in pairs(lf.Items) do
+                    if item.ViewModel and item.ViewModel.Model then
+                        if item.Name == name or (item.ViewModel.Name == name) then
+                            target = item.ViewModel.ItemModel or item.ViewModel.Model
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    return target
+end
+
+-- ============================================================================
+-- CATALOG INGESTION
 -- ============================================================================
 local function getWeaponsList()
     local list = {}
@@ -726,13 +863,13 @@ local function getWeaponsList()
             if ItemLibrary and ItemLibrary.ItemOrder then
                 for _, weaponName in ipairs(ItemLibrary.ItemOrder) do
                     local normName = normalizeWeaponName(weaponName)
-                    local itemInfo = ItemLibrary.Items and ItemLibrary.Items[weaponName]
+                    local itemInfo = rawget(ItemLibrary.Items, weaponName)
                     local vmInfo = ItemLibrary.ViewModels and ItemLibrary.ViewModels[weaponName]
-                    if itemInfo and not seen[normName] then
+                    if not seen[normName] then
                         seen[normName] = true
                         table.insert(list, {
                             Name = normName,
-                            Class = itemInfo.Class or "Weapon",
+                            Class = (itemInfo and itemInfo.Class) or "Weapon",
                             Image = (vmInfo and (vmInfo.ImageCentered or vmInfo.Image)) or (itemInfo and itemInfo.Image) or "",
                         })
                     end
@@ -758,12 +895,10 @@ local function getWeaponsList()
     return list
 end
 
--- Strictly returns ONLY skins that belong to `weaponName`
 local function getSkinsForWeapon(weaponName)
     local targetGun = normalizeWeaponName(weaponName)
     local skins = {}
 
-    -- Always add "Default" stock gun mesh option first
     table.insert(skins, {
         Name = "Default",
         Rarity = "Common",
@@ -773,7 +908,7 @@ local function getSkinsForWeapon(weaponName)
 
     local seen = { ["Default"] = true }
 
-    -- 1. Check embedded static catalog for guaranteed weapon-to-skin parity
+    -- 1. Embedded static catalog mapping
     if STATIC_SKIN_CATALOG[targetGun] then
         for _, s in ipairs(STATIC_SKIN_CATALOG[targetGun]) do
             if not seen[s.Name] then
@@ -788,7 +923,7 @@ local function getSkinsForWeapon(weaponName)
         end
     end
 
-    -- 2. Dynamically ingest any new skins from CosmeticLibrary matching strictly data.ItemName
+    -- 2. Dynamic CosmeticLibrary lookup
     pcall(function()
         local Modules = ReplicatedStorage:FindFirstChild("Modules")
         local CosModule = Modules and Modules:FindFirstChild("CosmeticLibrary")
@@ -798,7 +933,6 @@ local function getSkinsForWeapon(weaponName)
             local CosmeticLibrary = require(CosModule)
             if CosmeticLibrary and CosmeticLibrary.Cosmetics then
                 for name, data in pairs(CosmeticLibrary.Cosmetics) do
-                    -- STRICT FILTER: Only skins whose ItemName equals targetGun
                     if data.Type == "Skin" and normalizeWeaponName(data.ItemName) == targetGun and not seen[name] then
                         seen[name] = true
                         local img = data.Image or ""
@@ -817,7 +951,7 @@ local function getSkinsForWeapon(weaponName)
         end
     end)
 
-    -- If default weapon image is known, populate "Default" card image
+    -- Populate Default card image
     pcall(function()
         local Modules = ReplicatedStorage:FindFirstChild("Modules")
         local ItemLibModule = Modules and Modules:FindFirstChild("ItemLibrary")
@@ -883,7 +1017,7 @@ local function getWrapsList()
 end
 
 -- ============================================================================
--- METAMETHOD HOOKS & LOCAL PLAYER ISOLATION
+-- METAMETHOD HOOKS & LOCAL ISOLATION
 -- ============================================================================
 local function hookClientViewModel()
     pcall(function()
@@ -901,13 +1035,10 @@ local function hookClientViewModel()
         if env_hookfunction then
             local oldGetWrap
             oldGetWrap = env_hookfunction(ClientViewModel.GetWrap, function(self)
-                -- STRICT LOCAL PLAYER ISOLATION:
-                -- Check if this viewmodel belongs to our local player
                 local clientItem = self.ClientItem
                 local fighter = clientItem and clientItem.ClientFighter
                 local isLocal = fighter and (fighter.IsLocalPlayer == true or fighter.Player == LocalPlayer)
                 if not isLocal then
-                    -- Do not modify other players!
                     return oldGetWrap(self)
                 end
 
@@ -977,7 +1108,7 @@ local function hookCosmeticLibrary()
 end
 
 -- ============================================================================
--- LIVE APPLICATION ENGINE (LOCAL ONLY + RAYCAST COLLISION SAFE)
+-- LIVE APPLICATION ENGINE (LOCAL ONLY + RAYCAST SAFE)
 -- ============================================================================
 function SkinChanger.applySkinLive(targetGun)
     local gun = normalizeWeaponName(targetGun or State.selectedGun)
@@ -986,7 +1117,7 @@ function SkinChanger.applySkinLive(targetGun)
     local selectedWrap = cfg.Wrap
     local inverted = cfg.Inverted or State.invertPalette
 
-    -- 1. Apply through FighterController.LocalFighter items strictly for LocalPlayer
+    -- 1. Apply to FighterController.LocalFighter items
     pcall(function()
         local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
         local controllers = scripts and scripts:FindFirstChild("Controllers")
@@ -995,7 +1126,6 @@ function SkinChanger.applySkinLive(targetGun)
         local FighterController = require(fc)
         local fighter = FighterController.LocalFighter or (typeof(FighterController.GetFighter) == "function" and FighterController:GetFighter(LocalPlayer))
 
-        -- STRICT LOCAL PLAYER & SPECTATE CHECK:
         if not fighter then return end
         if fighter.Player and fighter.Player ~= LocalPlayer then return end
         if fighter:Get("IsSpectating") then return end
@@ -1006,24 +1136,14 @@ function SkinChanger.applySkinLive(targetGun)
                 if itemName == gun or not targetGun then
                     local vm = item.ViewModel
                     if vm then
-                        -- Check if skin model needs to be swapped
                         if selectedSkin and selectedSkin ~= "Default" and selectedSkin ~= "" then
                             pcall(function()
-                                local ViewModels3 = scripts.Assets.ViewModels
-                                local Modules = ReplicatedStorage:FindFirstChild("Modules")
-                                local Utility = Modules and require(Modules:FindFirstChild("Utility"))
-                                local newModel = Utility and Utility:LookThrough(ViewModels3, selectedSkin)
-                                if not newModel then
-                                    newModel = ViewModels3:FindFirstChild(selectedSkin, true)
-                                end
+                                local newModel = findWeaponModel(selectedSkin)
                                 if newModel and vm.ItemModel then
                                     vm.ItemModel:Destroy()
                                     local clone = newModel:Clone()
                                     clone.Name = "ItemVisual"
 
-                                    -- CRUCIAL SHOT VALIDATION PROTECTION:
-                                    -- Disable CanCollide, CanTouch, and CanQuery so the weapon mesh
-                                    -- does not block camera raycasts or bullet hitboxes!
                                     for _, part in pairs(clone:GetDescendants()) do
                                         if part:IsA("BasePart") then
                                             part.CanCollide = false
@@ -1042,7 +1162,6 @@ function SkinChanger.applySkinLive(targetGun)
                                 end
                             end)
                         end
-                        -- Trigger wrap update
                         if typeof(vm._UpdateWrap) == "function" then
                             vm:_UpdateWrap()
                         end
@@ -1062,7 +1181,6 @@ function SkinChanger.applySkinLive(targetGun)
             if wc then
                 local WrapController = require(wc)
                 for _, model in pairs(fp:GetChildren()) do
-                    -- Ensure query protection on first person parts
                     for _, part in pairs(model:GetDescendants()) do
                         if part:IsA("BasePart") then
                             part.CanQuery = false
@@ -1077,7 +1195,7 @@ function SkinChanger.applySkinLive(targetGun)
 end
 
 -- ============================================================================
--- GUI GENERATOR & CONTROLLER
+-- GUI & VIEWPORT CONTROLLER
 -- ============================================================================
 local UI = {
     screenGui = nil,
@@ -1105,7 +1223,7 @@ local function updatePreviewModel()
     if not UI.viewportFrame then return end
 
     if UI.previewModel then
-        UI.previewModel:Destroy()
+        pcall(function() UI.previewModel:Destroy() end)
         UI.previewModel = nil
     end
 
@@ -1113,36 +1231,49 @@ local function updatePreviewModel()
     local cfg = getGunConfig(gun)
     local skinToLoad = (cfg.Skin and cfg.Skin ~= "Default" and cfg.Skin ~= "") and cfg.Skin or gun
 
-    pcall(function()
-        local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
-        local ViewModels3 = scripts and scripts.Assets and scripts.Assets:FindFirstChild("ViewModels")
-        local targetModel = nil
+    local targetModel = findWeaponModel(skinToLoad)
+    if not targetModel and skinToLoad ~= gun then
+        targetModel = findWeaponModel(gun)
+    end
+    if not targetModel then
+        targetModel = createFallbackWeaponModel(gun, skinToLoad)
+    end
 
-        if ViewModels3 then
-            targetModel = ViewModels3:FindFirstChild(skinToLoad, true)
-            if not targetModel and skinToLoad ~= gun then
-                targetModel = ViewModels3:FindFirstChild(gun, true)
-            end
-        end
-
-        if targetModel then
+    if targetModel then
+        pcall(function()
             local clone = targetModel:Clone()
             clone.Parent = UI.viewportFrame
             UI.previewModel = clone
 
+            -- Center model at (0, 0, 0)
             local cf, sz = clone:GetBoundingBox()
-            State.orbitDistance = math.clamp(sz.Magnitude * 1.35, 2.5, 7.5)
+            local center = cf.Position
+            if clone.PrimaryPart then
+                clone:PivotTo(clone:GetPivot() - center)
+            else
+                for _, part in pairs(clone:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CFrame = part.CFrame - center
+                    end
+                end
+            end
 
+            local maxDim = math.max(sz.X, sz.Y, sz.Z, 1.5)
+            State.orbitDistance = math.clamp(maxDim * 1.55, 2.5, 6.5)
+
+            -- Apply wrap to preview model
             if cfg.Wrap and cfg.Wrap ~= "" and cfg.Wrap ~= "None" then
-                local wc = scripts.Controllers:FindFirstChild("WrapController")
+                local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
+                local controllers = scripts and scripts:FindFirstChild("Controllers")
+                local wc = controllers and controllers:FindFirstChild("WrapController")
                 if wc then
                     local WrapController = require(wc)
                     local orig = WrapController:RecordOriginalWrapProperties(clone)
                     WrapController:ApplyWrap(orig, { Name = cfg.Wrap, Inverted = cfg.Inverted or State.invertPalette })
                 end
             end
-        end
-    end)
+        end)
+    end
 
     if UI.activeInfoLabel then
         UI.activeInfoLabel.Text = string.format("GUN: %s\nSKIN: %s\nWRAP: %s", gun, cfg.Skin or "Default", cfg.Wrap or "None")
@@ -1175,6 +1306,7 @@ local function renderCatalogGrid()
 
     local gun = normalizeWeaponName(State.selectedGun)
     local cfg = getGunConfig(gun)
+    local cardCount = 0
 
     if State.mode == "Skins" then
         local skins = getSkinsForWeapon(gun)
@@ -1182,11 +1314,12 @@ local function renderCatalogGrid()
             local searchMatch = (State.searchQuery == "" or string.find(string.lower(s.Name), string.lower(State.searchQuery), 1, true))
             local rarityMatch = (State.rarityFilter == "All" or s.Rarity == State.rarityFilter)
             if searchMatch and rarityMatch then
+                cardCount = cardCount + 1
                 local isEquipped = (cfg.Skin == s.Name) or (s.Name == "Default" and (cfg.Skin == nil or cfg.Skin == "Default" or cfg.Skin == ""))
 
                 local card = Instance.new("TextButton")
                 card.Name = "Skin_" .. s.Name
-                card.Size = UDim2.new(0, 134, 0, 150)
+                card.Size = UDim2.new(0, 126, 0, 150)
                 card.BackgroundColor3 = isEquipped and Color3.fromRGB(20, 48, 32) or Color3.fromRGB(22, 26, 36)
                 card.AutoButtonColor = false
                 card.Text = ""
@@ -1201,21 +1334,19 @@ local function renderCatalogGrid()
                 cStroke.Thickness = isEquipped and 2 or 1
                 cStroke.Parent = card
 
-                -- Thumbnail Image Label (Real 3D render image model)
                 local imgLabel = Instance.new("ImageLabel")
                 imgLabel.Size = UDim2.new(1, -12, 0, 85)
                 imgLabel.Position = UDim2.new(0, 6, 0, 8)
                 imgLabel.BackgroundColor3 = Color3.fromRGB(14, 16, 24)
                 imgLabel.BackgroundTransparency = 0.3
                 imgLabel.ScaleType = Enum.ScaleType.Fit
-                imgLabel.Image = (s.Image and s.Image ~= "") and s.Image or "rbxassetid://124519084257039"
+                imgLabel.Image = (s.Image and s.Image ~= "") and s.Image or "rbxassetid://17160799881"
                 imgLabel.Parent = card
 
                 local imgCorner = Instance.new("UICorner")
                 imgCorner.CornerRadius = UDim.new(0, 6)
                 imgCorner.Parent = imgLabel
 
-                -- Rarity Badge
                 local rColor = RARITY_COLORS[s.Rarity] or Color3.fromRGB(150, 150, 150)
                 local rBadge = Instance.new("TextLabel")
                 rBadge.Size = UDim2.new(1, -12, 0, 14)
@@ -1228,7 +1359,6 @@ local function renderCatalogGrid()
                 rBadge.TextXAlignment = Enum.TextXAlignment.Left
                 rBadge.Parent = card
 
-                -- Skin Name Label
                 local nameLabel = Instance.new("TextLabel")
                 nameLabel.Size = UDim2.new(1, -12, 0, 18)
                 nameLabel.Position = UDim2.new(0, 6, 0, 111)
@@ -1236,12 +1366,11 @@ local function renderCatalogGrid()
                 nameLabel.Font = Enum.Font.GothamMedium
                 nameLabel.Text = s.Name
                 nameLabel.TextColor3 = isEquipped and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(240, 245, 255)
-                nameLabel.TextSize = 11
+                nameLabel.TextSize = 10
                 nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.Parent = card
 
-                -- Status Badge
                 local statusLabel = Instance.new("TextLabel")
                 statusLabel.Size = UDim2.new(1, -12, 0, 14)
                 statusLabel.Position = UDim2.new(0, 6, 0, 130)
@@ -1253,7 +1382,6 @@ local function renderCatalogGrid()
                 statusLabel.TextXAlignment = Enum.TextXAlignment.Right
                 statusLabel.Parent = card
 
-                -- Click Handler
                 card.MouseButton1Click:Connect(function()
                     cfg.Skin = s.Name
                     SkinChanger.applySkinLive(gun)
@@ -1271,11 +1399,12 @@ local function renderCatalogGrid()
             local searchMatch = (State.searchQuery == "" or string.find(string.lower(w.Name), string.lower(State.searchQuery), 1, true))
             local rarityMatch = (State.rarityFilter == "All" or w.Rarity == State.rarityFilter)
             if searchMatch and rarityMatch then
+                cardCount = cardCount + 1
                 local isEquipped = (cfg.Wrap == w.Name) or (w.Name == "None" and (cfg.Wrap == nil or cfg.Wrap == "None" or cfg.Wrap == ""))
 
                 local card = Instance.new("TextButton")
                 card.Name = "Wrap_" .. w.Name
-                card.Size = UDim2.new(0, 134, 0, 150)
+                card.Size = UDim2.new(0, 126, 0, 150)
                 card.BackgroundColor3 = isEquipped and Color3.fromRGB(20, 48, 32) or Color3.fromRGB(22, 26, 36)
                 card.AutoButtonColor = false
                 card.Text = ""
@@ -1290,7 +1419,6 @@ local function renderCatalogGrid()
                 cStroke.Thickness = isEquipped and 2 or 1
                 cStroke.Parent = card
 
-                -- Dual Color Swatch Box
                 local swatchBox = Instance.new("Frame")
                 swatchBox.Size = UDim2.new(1, -12, 0, 85)
                 swatchBox.Position = UDim2.new(0, 6, 0, 8)
@@ -1350,7 +1478,7 @@ local function renderCatalogGrid()
                 nameLabel.Font = Enum.Font.GothamMedium
                 nameLabel.Text = w.Name
                 nameLabel.TextColor3 = isEquipped and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(240, 245, 255)
-                nameLabel.TextSize = 11
+                nameLabel.TextSize = 10
                 nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.Parent = card
@@ -1378,8 +1506,9 @@ local function renderCatalogGrid()
         end
 
     elseif State.mode == "UnlockAll" then
+        cardCount = 1
         local panel = Instance.new("Frame")
-        panel.Size = UDim2.new(1, -16, 0, 390)
+        panel.Size = UDim2.new(1, -16, 0, 340)
         panel.BackgroundColor3 = Color3.fromRGB(20, 24, 34)
         panel.Parent = UI.gridScroll
 
@@ -1404,7 +1533,7 @@ local function renderCatalogGrid()
 
         local function makeToggle(label, subtitle, initialVal, yPos, callback)
             local tRow = Instance.new("Frame")
-            tRow.Size = UDim2.new(1, -32, 0, 52)
+            tRow.Size = UDim2.new(1, -32, 0, 50)
             tRow.Position = UDim2.new(0, 16, 0, yPos)
             tRow.BackgroundColor3 = Color3.fromRGB(26, 31, 44)
             tRow.Parent = panel
@@ -1414,8 +1543,8 @@ local function renderCatalogGrid()
             rCorner.Parent = tRow
 
             local rLabel = Instance.new("TextLabel")
-            rLabel.Size = UDim2.new(0.72, 0, 0, 20)
-            rLabel.Position = UDim2.new(0, 14, 0, 8)
+            rLabel.Size = UDim2.new(0.72, 0, 0, 18)
+            rLabel.Position = UDim2.new(0, 14, 0, 7)
             rLabel.BackgroundTransparency = 1
             rLabel.Font = Enum.Font.GothamMedium
             rLabel.Text = label
@@ -1426,7 +1555,7 @@ local function renderCatalogGrid()
 
             local rSub = Instance.new("TextLabel")
             rSub.Size = UDim2.new(0.72, 0, 0, 16)
-            rSub.Position = UDim2.new(0, 14, 0, 28)
+            rSub.Position = UDim2.new(0, 14, 0, 26)
             rSub.BackgroundTransparency = 1
             rSub.Font = Enum.Font.Gotham
             rSub.Text = subtitle or ""
@@ -1462,20 +1591,20 @@ local function renderCatalogGrid()
             hookCosmeticLibrary()
         end)
 
-        makeToggle("Unlock All Weapons (Caution)", "Visual only; unowned weapons will drop server shot validation", State.unlockWeapons, 104, function(v)
+        makeToggle("Unlock All Weapons (Caution)", "Visual only; unowned weapons will drop server shot validation", State.unlockWeapons, 100, function(v)
             State.unlockWeapons = v
             hookCosmeticLibrary()
         end)
 
-        makeToggle("Invert Wrap Palette", "Swaps WrapGroup 1 and 2 for reverse pattern styles", State.invertPalette, 164, function(v)
+        makeToggle("Invert Wrap Palette", "Swaps WrapGroup 1 and 2 for reverse pattern styles", State.invertPalette, 156, function(v)
             State.invertPalette = v
             SkinChanger.applySkinLive(gun)
             updatePreviewModel()
         end)
 
         local resetGunBtn = Instance.new("TextButton")
-        resetGunBtn.Size = UDim2.new(0.48, 0, 0, 42)
-        resetGunBtn.Position = UDim2.new(0, 16, 0, 235)
+        resetGunBtn.Size = UDim2.new(0.48, 0, 0, 38)
+        resetGunBtn.Position = UDim2.new(0, 16, 0, 220)
         resetGunBtn.BackgroundColor3 = Color3.fromRGB(45, 52, 70)
         resetGunBtn.Font = Enum.Font.GothamBold
         resetGunBtn.Text = "RESET THIS WEAPON"
@@ -1495,8 +1624,8 @@ local function renderCatalogGrid()
         end)
 
         local resetAllBtn = Instance.new("TextButton")
-        resetAllBtn.Size = UDim2.new(0.48, 0, 0, 42)
-        resetAllBtn.Position = UDim2.new(0.52, -8, 0, 235)
+        resetAllBtn.Size = UDim2.new(0.48, 0, 0, 38)
+        resetAllBtn.Position = UDim2.new(0.52, -8, 0, 220)
         resetAllBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
         resetAllBtn.Font = Enum.Font.GothamBold
         resetAllBtn.Text = "RESET ALL WEAPONS"
@@ -1517,6 +1646,14 @@ local function renderCatalogGrid()
 
         table.insert(UI.catalogCards, panel)
     end
+
+    -- Explicitly calculate CanvasSize to prevent executor clipping bugs
+    if State.mode == "UnlockAll" then
+        UI.gridScroll.CanvasSize = UDim2.new(0, 0, 0, 380)
+    else
+        local rows = math.max(1, math.ceil(cardCount / 4))
+        UI.gridScroll.CanvasSize = UDim2.new(0, 0, 0, rows * 158 + 20)
+    end
 end
 
 -- ============================================================================
@@ -1524,7 +1661,7 @@ end
 -- ============================================================================
 function SkinChanger.createGui()
     if UI.screenGui then
-        UI.screenGui:Destroy()
+        pcall(function() UI.screenGui:Destroy() end)
     end
 
     local parent = getGuiContainer()
@@ -1538,12 +1675,13 @@ function SkinChanger.createGui()
     screenGui.Parent = parent
     UI.screenGui = screenGui
 
+    -- Window Frame: 920 x 560 (Responsive & fits all resolutions)
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainWindow"
-    mainFrame.Size = UDim2.new(0, 980, 0, 620)
-    mainFrame.Position = UDim2.new(0.5, -490, 0.5, -310)
+    mainFrame.Size = UDim2.new(0, 920, 0, 560)
+    mainFrame.Position = UDim2.new(0.5, -460, 0.5, -280)
     mainFrame.BackgroundColor3 = Color3.fromRGB(15, 17, 24)
-    mainFrame.ClipsDescendants = true
+    mainFrame.ClipsDescendants = false
     mainFrame.Active = true
     mainFrame.Parent = screenGui
     UI.mainFrame = mainFrame
@@ -1557,14 +1695,18 @@ function SkinChanger.createGui()
     mStroke.Thickness = 1.5
     mStroke.Parent = mainFrame
 
-    -- Dragging Logic
+    -- Header Bar
     local isDragging, dragStart, startPos = false, nil, nil
     local headerBar = Instance.new("Frame")
     headerBar.Name = "HeaderBar"
-    headerBar.Size = UDim2.new(1, 0, 0, 52)
+    headerBar.Size = UDim2.new(1, 0, 0, 48)
     headerBar.BackgroundColor3 = Color3.fromRGB(20, 23, 33)
     headerBar.BorderSizePixel = 0
     headerBar.Parent = mainFrame
+
+    local hbCorner = Instance.new("UICorner")
+    hbCorner.CornerRadius = UDim.new(0, 10)
+    hbCorner.Parent = headerBar
 
     headerBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1587,8 +1729,8 @@ function SkinChanger.createGui()
     end)
 
     local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(0, 320, 0, 24)
-    titleLabel.Position = UDim2.new(0, 16, 0, 8)
+    titleLabel.Size = UDim2.new(0, 300, 0, 22)
+    titleLabel.Position = UDim2.new(0, 14, 0, 6)
     titleLabel.BackgroundTransparency = 1
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.Text = "RIVALS SKIN CHANGER // CLIENT MOD"
@@ -1598,8 +1740,8 @@ function SkinChanger.createGui()
     titleLabel.Parent = headerBar
 
     local headerStatus = Instance.new("TextLabel")
-    headerStatus.Size = UDim2.new(0, 400, 0, 16)
-    headerStatus.Position = UDim2.new(0, 16, 0, 30)
+    headerStatus.Size = UDim2.new(0, 380, 0, 16)
+    headerStatus.Position = UDim2.new(0, 14, 0, 26)
     headerStatus.BackgroundTransparency = 1
     headerStatus.Font = Enum.Font.GothamMedium
     headerStatus.Text = "[Assault Rifle]  |  Skin: Default  |  Wrap: None"
@@ -1618,13 +1760,13 @@ function SkinChanger.createGui()
     local function makeHeaderPill(name, text, xPos, width, onClick)
         local btn = Instance.new("TextButton")
         btn.Name = name
-        btn.Size = UDim2.new(0, width, 0, 32)
-        btn.Position = UDim2.new(0, xPos, 0.5, -16)
+        btn.Size = UDim2.new(0, width, 0, 30)
+        btn.Position = UDim2.new(0, xPos, 0.5, -15)
         btn.BackgroundColor3 = Color3.fromRGB(28, 33, 47)
         btn.Font = Enum.Font.GothamBold
         btn.Text = text
         btn.TextColor3 = Color3.fromRGB(220, 230, 245)
-        btn.TextSize = 11
+        btn.TextSize = 10
         btn.Parent = headerControls
 
         local bCorner = Instance.new("UICorner")
@@ -1660,8 +1802,8 @@ function SkinChanger.createGui()
     end)
 
     local minBtn = Instance.new("TextButton")
-    minBtn.Size = UDim2.new(0, 28, 0, 28)
-    minBtn.Position = UDim2.new(1, -66, 0.5, -14)
+    minBtn.Size = UDim2.new(0, 26, 0, 26)
+    minBtn.Position = UDim2.new(1, -62, 0.5, -13)
     minBtn.BackgroundColor3 = Color3.fromRGB(28, 33, 47)
     minBtn.Font = Enum.Font.GothamBold
     minBtn.Text = "—"
@@ -1678,8 +1820,8 @@ function SkinChanger.createGui()
     end)
 
     local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 28, 0, 28)
-    closeBtn.Position = UDim2.new(1, -32, 0.5, -14)
+    closeBtn.Size = UDim2.new(0, 26, 0, 26)
+    closeBtn.Position = UDim2.new(1, -30, 0.5, -13)
     closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
     closeBtn.Font = Enum.Font.GothamBold
     closeBtn.Text = "✕"
@@ -1698,20 +1840,18 @@ function SkinChanger.createGui()
     -- Top Gun Selector Strip (Horizontal Scrolling)
     local gunStripContainer = Instance.new("Frame")
     gunStripContainer.Name = "GunStripContainer"
-    gunStripContainer.Size = UDim2.new(1, 0, 0, 84)
-    gunStripContainer.Position = UDim2.new(0, 0, 0, 54)
+    gunStripContainer.Size = UDim2.new(1, 0, 0, 78)
+    gunStripContainer.Position = UDim2.new(0, 0, 0, 50)
     gunStripContainer.BackgroundColor3 = Color3.fromRGB(17, 20, 29)
     gunStripContainer.BorderSizePixel = 0
     gunStripContainer.Parent = mainFrame
 
     local topGunScroll = Instance.new("ScrollingFrame")
-    topGunScroll.Size = UDim2.new(1, -20, 1, -12)
-    topGunScroll.Position = UDim2.new(0, 10, 0, 6)
+    topGunScroll.Size = UDim2.new(1, -20, 1, -10)
+    topGunScroll.Position = UDim2.new(0, 10, 0, 5)
     topGunScroll.BackgroundTransparency = 1
     topGunScroll.ScrollBarThickness = 4
     topGunScroll.ScrollBarImageColor3 = Color3.fromRGB(50, 60, 85)
-    topGunScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    topGunScroll.AutomaticCanvasSize = Enum.AutomaticSize.X
     topGunScroll.ScrollingDirection = Enum.ScrollingDirection.Horizontal
     topGunScroll.Parent = gunStripContainer
     UI.topGunScroll = topGunScroll
@@ -1723,6 +1863,8 @@ function SkinChanger.createGui()
     gunListLayout.Parent = topGunScroll
 
     local weapons = getWeaponsList()
+    topGunScroll.CanvasSize = UDim2.new(0, #weapons * 118 + 20, 0, 0)
+
     for idx, w in ipairs(weapons) do
         local gCard = Instance.new("TextButton")
         gCard.Name = "Gun_" .. w.Name
@@ -1743,16 +1885,16 @@ function SkinChanger.createGui()
         gcStroke.Parent = gCard
 
         local gIcon = Instance.new("ImageLabel")
-        gIcon.Size = UDim2.new(1, -8, 0, 40)
+        gIcon.Size = UDim2.new(1, -8, 0, 36)
         gIcon.Position = UDim2.new(0, 4, 0, 4)
         gIcon.BackgroundTransparency = 1
         gIcon.ScaleType = Enum.ScaleType.Fit
-        gIcon.Image = (w.Image and w.Image ~= "") and w.Image or "rbxassetid://124519084257039"
+        gIcon.Image = (w.Image and w.Image ~= "") and w.Image or "rbxassetid://17160799881"
         gIcon.Parent = gCard
 
         local gName = Instance.new("TextLabel")
         gName.Size = UDim2.new(1, -6, 0, 14)
-        gName.Position = UDim2.new(0, 3, 0, 46)
+        gName.Position = UDim2.new(0, 3, 0, 42)
         gName.BackgroundTransparency = 1
         gName.Font = Enum.Font.GothamMedium
         gName.Text = w.Name
@@ -1763,7 +1905,7 @@ function SkinChanger.createGui()
 
         local gClass = Instance.new("TextLabel")
         gClass.Size = UDim2.new(1, -6, 0, 10)
-        gClass.Position = UDim2.new(0, 3, 0, 60)
+        gClass.Position = UDim2.new(0, 3, 0, 54)
         gClass.BackgroundTransparency = 1
         gClass.Font = Enum.Font.Gotham
         gClass.Text = string.upper(w.Class)
@@ -1793,15 +1935,15 @@ function SkinChanger.createGui()
     -- Body Area: Viewport (Left) + Catalog Grid (Right)
     local bodyFrame = Instance.new("Frame")
     bodyFrame.Name = "BodyFrame"
-    bodyFrame.Size = UDim2.new(1, -24, 1, -150)
-    bodyFrame.Position = UDim2.new(0, 12, 0, 144)
+    bodyFrame.Size = UDim2.new(1, -24, 0, 418)
+    bodyFrame.Position = UDim2.new(0, 12, 0, 134)
     bodyFrame.BackgroundTransparency = 1
     bodyFrame.Parent = mainFrame
 
     -- Left: 3D ViewportFrame
     local leftPanel = Instance.new("Frame")
     leftPanel.Name = "LeftPanel"
-    leftPanel.Size = UDim2.new(0, 340, 1, 0)
+    leftPanel.Size = UDim2.new(0, 320, 1, 0)
     leftPanel.Position = UDim2.new(0, 0, 0, 0)
     leftPanel.BackgroundColor3 = Color3.fromRGB(18, 22, 31)
     leftPanel.Parent = bodyFrame
@@ -1816,10 +1958,10 @@ function SkinChanger.createGui()
 
     local viewport = Instance.new("ViewportFrame")
     viewport.Name = "WeaponPreviewViewport"
-    viewport.Size = UDim2.new(1, -16, 0, 310)
+    viewport.Size = UDim2.new(1, -16, 0, 276)
     viewport.Position = UDim2.new(0, 8, 0, 8)
     viewport.BackgroundColor3 = Color3.fromRGB(11, 13, 19)
-    viewport.Ambient = Color3.fromRGB(220, 225, 235)
+    viewport.Ambient = Color3.fromRGB(210, 215, 230)
     viewport.LightColor = Color3.fromRGB(255, 255, 255)
     viewport.LightDirection = Vector3.new(-1, -1.5, -1)
     viewport.Parent = leftPanel
@@ -1831,29 +1973,30 @@ function SkinChanger.createGui()
 
     local previewCamera = Instance.new("Camera")
     previewCamera.FieldOfView = 50
+    previewCamera.CFrame = CFrame.lookAt(Vector3.new(0, 1, 5), Vector3.new(0, 0, 0))
     previewCamera.Parent = viewport
     viewport.CurrentCamera = previewCamera
     UI.previewCamera = previewCamera
 
+    -- Continuous 3D orbit loop
     RunService.RenderStepped:Connect(function(dt)
         if not State.orbitPaused then
             State.orbitAngle = State.orbitAngle + (dt * 0.9)
         end
-        if UI.viewportFrame and UI.previewCamera and UI.previewModel then
-            local cf, _ = UI.previewModel:GetBoundingBox()
-            local center = cf.Position
-            local camPos = center + Vector3.new(
-                math.sin(State.orbitAngle) * State.orbitDistance,
-                State.orbitDistance * 0.35,
-                math.cos(State.orbitAngle) * State.orbitDistance
+        if UI.previewCamera then
+            local dist = State.orbitDistance or 4.5
+            local camPos = Vector3.new(
+                math.sin(State.orbitAngle) * dist,
+                dist * 0.35,
+                math.cos(State.orbitAngle) * dist
             )
-            UI.previewCamera.CFrame = CFrame.lookAt(camPos, center)
+            UI.previewCamera.CFrame = CFrame.lookAt(camPos, Vector3.new(0, 0, 0))
         end
     end)
 
     local infoBox = Instance.new("Frame")
-    infoBox.Size = UDim2.new(1, -16, 0, 80)
-    infoBox.Position = UDim2.new(0, 8, 0, 326)
+    infoBox.Size = UDim2.new(1, -16, 0, 75)
+    infoBox.Position = UDim2.new(0, 8, 0, 292)
     infoBox.BackgroundColor3 = Color3.fromRGB(14, 17, 25)
     infoBox.Parent = leftPanel
 
@@ -1862,8 +2005,8 @@ function SkinChanger.createGui()
     ibCorner.Parent = infoBox
 
     local infoLabel = Instance.new("TextLabel")
-    infoLabel.Size = UDim2.new(1, -16, 1, -12)
-    infoLabel.Position = UDim2.new(0, 8, 0, 6)
+    infoLabel.Size = UDim2.new(1, -16, 1, -10)
+    infoLabel.Position = UDim2.new(0, 8, 0, 5)
     infoLabel.BackgroundTransparency = 1
     infoLabel.Font = Enum.Font.GothamMedium
     infoLabel.Text = "GUN: Assault Rifle\nSKIN: Default\nWRAP: None"
@@ -1874,13 +2017,13 @@ function SkinChanger.createGui()
     UI.activeInfoLabel = infoLabel
 
     local pauseBtn = Instance.new("TextButton")
-    pauseBtn.Size = UDim2.new(1, -16, 0, 36)
-    pauseBtn.Position = UDim2.new(0, 8, 1, -44)
+    pauseBtn.Size = UDim2.new(1, -16, 0, 32)
+    pauseBtn.Position = UDim2.new(0, 8, 1, -40)
     pauseBtn.BackgroundColor3 = Color3.fromRGB(28, 33, 47)
     pauseBtn.Font = Enum.Font.GothamBold
     pauseBtn.Text = "⏸ PAUSE 3D ROTATION"
     pauseBtn.TextColor3 = Color3.fromRGB(200, 215, 235)
-    pauseBtn.TextSize = 11
+    pauseBtn.TextSize = 10
     pauseBtn.Parent = leftPanel
 
     local pbCorner = Instance.new("UICorner")
@@ -1896,8 +2039,8 @@ function SkinChanger.createGui()
     -- Right: Search, Filters & Catalog Grid
     local rightPanel = Instance.new("Frame")
     rightPanel.Name = "RightPanel"
-    rightPanel.Size = UDim2.new(1, -352, 1, 0)
-    rightPanel.Position = UDim2.new(0, 352, 0, 0)
+    rightPanel.Size = UDim2.new(1, -332, 1, 0)
+    rightPanel.Position = UDim2.new(0, 332, 0, 0)
     rightPanel.BackgroundColor3 = Color3.fromRGB(18, 22, 31)
     rightPanel.Parent = bodyFrame
 
@@ -1910,7 +2053,7 @@ function SkinChanger.createGui()
     rpStroke.Parent = rightPanel
 
     local filterBar = Instance.new("Frame")
-    filterBar.Size = UDim2.new(1, -16, 0, 36)
+    filterBar.Size = UDim2.new(1, -16, 0, 34)
     filterBar.Position = UDim2.new(0, 8, 0, 8)
     filterBar.BackgroundColor3 = Color3.fromRGB(13, 16, 23)
     filterBar.Parent = rightPanel
@@ -1953,7 +2096,7 @@ function SkinChanger.createGui()
     local filterButtons = {}
     local function makeRarityPill(rName)
         local pBtn = Instance.new("TextButton")
-        pBtn.Size = UDim2.new(0, 52, 0, 24)
+        pBtn.Size = UDim2.new(0, 50, 0, 22)
         pBtn.BackgroundColor3 = (State.rarityFilter == rName) and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(26, 31, 44)
         pBtn.Font = Enum.Font.GothamBold
         pBtn.Text = rName
@@ -1984,18 +2127,16 @@ function SkinChanger.createGui()
 
     local gridScroll = Instance.new("ScrollingFrame")
     gridScroll.Name = "CatalogGrid"
-    gridScroll.Size = UDim2.new(1, -16, 1, -56)
-    gridScroll.Position = UDim2.new(0, 8, 0, 50)
+    gridScroll.Size = UDim2.new(1, -16, 1, -54)
+    gridScroll.Position = UDim2.new(0, 8, 0, 48)
     gridScroll.BackgroundTransparency = 1
     gridScroll.ScrollBarThickness = 5
     gridScroll.ScrollBarImageColor3 = Color3.fromRGB(50, 60, 85)
-    gridScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    gridScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     gridScroll.Parent = rightPanel
     UI.gridScroll = gridScroll
 
     local gridLayout = Instance.new("UIGridLayout")
-    gridLayout.CellSize = UDim2.new(0, 134, 0, 150)
+    gridLayout.CellSize = UDim2.new(0, 126, 0, 150)
     gridLayout.CellPadding = UDim2.new(0, 8, 0, 8)
     gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
     gridLayout.Parent = gridScroll
@@ -2034,8 +2175,8 @@ function SkinChanger.createGui()
         end
     end)
 
-    updatePreviewModel()
-    renderCatalogGrid()
+    pcall(updatePreviewModel)
+    pcall(renderCatalogGrid)
 end
 
 -- ============================================================================
