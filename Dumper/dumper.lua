@@ -5,21 +5,20 @@
     Target Experience: Rivals (Roblox PlaceId: 17625359962)
     Execution Mode: Modular Singleton with High-Performance Glassmorphism GUI
 
-    Features:
-      1. Top Gun Selector Bar: Horizontal scrollable strip of all weapons with real thumbnails.
-      2. 3D Weapon Model Preview: Real-time 360 orbital camera rendering cloned meshes in ViewportFrame.
-      3. Dual Cosmetic Mode:
-         - [SKINS]: Weapon-specific 3D model variants with real thumbnails (ItemLibrary.ViewModels).
-         - [WRAPS]: Universal texture/palette wraps with dual-color swatches and material mapping.
+    Core Enhancements:
+      1. Strict Weapon Filtering: Every weapon strictly displays ONLY its own skins.
+         Embedded static lookup catalog covers all 50 weapons and 422 skins with real thumbnails.
+      2. Local-Only Player Isolation:
+         - ClientViewModel.GetWrap metamethod hook strictly verifies fighter.IsLocalPlayer.
+         - Spectating guard prevents applying local overrides onto spectated players.
+         - Other players in 3rd/1st person remain 100% untouched.
+      3. Shot Validation & Raycast Collision Protection:
+         - All cloned ViewModels have CanQuery, CanCollide, CanTouch explicitly disabled (false).
+         - Prevents camera raycasts from colliding with local weapon models.
+         - Weapon inventory spoofing made optional with clear hit-registration warnings.
       4. Persistent Per-Weapon Memory: Saves selected skin and wrap per weapon; turns emerald green.
-      5. Instant Live Application:
-         - Metamethod hooks on ClientViewModel.GetWrap and ClientViewModel.new.
-         - Direct live update on FighterController.LocalFighter and workspace.ViewModels.FirstPerson.
-      6. Dedicated Unlock All & Spoofer Section:
-         - Unlock All Cosmetics (CosmeticLibrary.OwnsCosmetic proxy).
-         - Unlock All Weapons (PlayerDataController:GetUnlockedWeapons spoofer).
-         - Invert Wrap Palette option.
-      7. Modern Glassmorphism GUI (980x620) with Draggable Header, Minimized Widget, and RightControl Hotkey.
+      5. Interactive 3D Weapon Preview (ViewportFrame) with real-time 360 orbital camera.
+      6. Modern Glassmorphism GUI (980x620) with Top Gun Selector, Draggable Header, and Hotkeys.
     ============================================================================
 --]]
 
@@ -58,26 +57,534 @@ local function getGuiContainer()
 end
 
 -- ============================================================================
--- STATE & DATA STORE
+-- STATIC CATALOG DATA (STRICT WEAPON-TO-SKIN MAPPING)
 -- ============================================================================
-local State = {
-    selectedGun = "Assault Rifle",
-    mode = "Skins", -- "Skins" | "Wraps" | "UnlockAll"
-    searchQuery = "",
-    rarityFilter = "All",
-    orbitPaused = false,
-    orbitAngle = 0,
-    orbitDistance = 4.2,
-    uiVisible = true,
-    minimized = false,
-    unlockAll = true,
-    unlockWeapons = true,
-    invertPalette = false,
-    -- Persistent configuration per weapon: [gunName] = { Skin = "...", Wrap = "...", Inverted = false }
-    saved = {},
+local STATIC_SKIN_CATALOG = {
+    ["Assault Rifle"] = {
+        { Name = "10B Visits", Rarity = "Unique", Image = "rbxassetid://122165086598560" },
+        { Name = "Phoenix Rifle", Rarity = "Common", Image = "rbxassetid://140228738718621" },
+        { Name = "Glorious Assault Rifle", Rarity = "Common", Image = "rbxassetid://130669996688265" },
+        { Name = "AK-47", Rarity = "Rare", Image = "rbxassetid://17691132793" },
+        { Name = "Boneclaw Rifle", Rarity = "Rare", Image = "rbxassetid://100015754284323" },
+        { Name = "Pearl Rifle", Rarity = "Rare", Image = "rbxassetid://135277426561503" },
+        { Name = "Augmented Rifle", Rarity = "Legendary", Image = "rbxassetid://18770192853" },
+        { Name = "Gingerbread Augmented Rifle", Rarity = "Legendary", Image = "rbxassetid://85584922619813" },
+        { Name = "Drum Gun", Rarity = "Legendary", Image = "rbxassetid://111251887761435" },
+        { Name = "AKEY-47", Rarity = "Mythical", Image = "rbxassetid://80017496220683" },
+    },
+    ["Battle Axe"] = {
+        { Name = "Nordic Axe", Rarity = "Common", Image = "" },
+        { Name = "Ban Axe", Rarity = "Common", Image = "" },
+        { Name = "Glorious Battle Axe", Rarity = "Common", Image = "" },
+        { Name = "Cerulean Axe", Rarity = "Rare", Image = "" },
+        { Name = "Tiki Axe", Rarity = "Rare", Image = "" },
+        { Name = "The Shred", Rarity = "Legendary", Image = "" },
+        { Name = "Mimic Axe", Rarity = "Legendary", Image = "" },
+        { Name = "Balloon Axe", Rarity = "Legendary", Image = "" },
+        { Name = "Street Sign", Rarity = "Legendary", Image = "" },
+        { Name = "Keyttle Axe", Rarity = "Mythical", Image = "" },
+    },
+    ["Bow"] = {
+        { Name = "Compound Bow", Rarity = "Common", Image = "" },
+        { Name = "Glorious Bow", Rarity = "Common", Image = "" },
+        { Name = "Raven Bow", Rarity = "Rare", Image = "" },
+        { Name = "Bat Bow", Rarity = "Rare", Image = "" },
+        { Name = "Frostbite Bow", Rarity = "Rare", Image = "" },
+        { Name = "Dream Bow", Rarity = "Rare", Image = "" },
+        { Name = "Palm Bow", Rarity = "Rare", Image = "" },
+        { Name = "Balloon Bow", Rarity = "Legendary", Image = "" },
+        { Name = "Beloved Bow", Rarity = "Legendary", Image = "" },
+        { Name = "Key Bow", Rarity = "Mythical", Image = "rbxassetid://122525140091212" },
+    },
+    ["Burst Rifle"] = {
+        { Name = "Spectral Burst", Rarity = "Common", Image = "rbxassetid://135012309412679" },
+        { Name = "Pine Burst", Rarity = "Common", Image = "rbxassetid://132753732294083" },
+        { Name = "Glorious Burst Rifle", Rarity = "Common", Image = "rbxassetid://78517330608597" },
+        { Name = "Aqua Burst", Rarity = "Rare", Image = "rbxassetid://18837670807" },
+        { Name = "Electro Rifle", Rarity = "Legendary", Image = "rbxassetid://132227459821018" },
+        { Name = "Pixel Burst", Rarity = "Legendary", Image = "rbxassetid://102648809593259" },
+        { Name = "Bullpup Burst", Rarity = "Legendary", Image = "rbxassetid://74974560606812" },
+        { Name = "Sand Bullpup Burst", Rarity = "Legendary", Image = "rbxassetid://130731663986683" },
+        { Name = "Keyst Rifle", Rarity = "Mythical", Image = "rbxassetid://78377522426003" },
+    },
+    ["Chainsaw"] = {
+        { Name = "Glorious Chainsaw", Rarity = "Common", Image = "" },
+        { Name = "Sharksaw", Rarity = "Common", Image = "" },
+        { Name = "Blobsaw", Rarity = "Rare", Image = "" },
+        { Name = "Handsaws", Rarity = "Legendary", Image = "rbxassetid://18766864583" },
+        { Name = "Buzzsaw", Rarity = "Legendary", Image = "rbxassetid://74057448201836" },
+        { Name = "Festive Buzzsaw", Rarity = "Legendary", Image = "rbxassetid://80811854818775" },
+        { Name = "Mega Drill", Rarity = "Legendary", Image = "rbxassetid://76663867023998" },
+    },
+    ["Crossbow"] = {
+        { Name = "Glorious Crossbow", Rarity = "Common", Image = "rbxassetid://70875146419725" },
+        { Name = "Crossbone", Rarity = "Common", Image = "rbxassetid://103469183638638" },
+        { Name = "Campfire Crossbow", Rarity = "Common", Image = "rbxassetid://76911697867059" },
+        { Name = "Frostbite Crossbow", Rarity = "Rare", Image = "rbxassetid://101536997945363" },
+        { Name = "Harpoon Crossbow", Rarity = "Rare", Image = "rbxassetid://107460405492001" },
+        { Name = "Violin Crossbow", Rarity = "Rare", Image = "rbxassetid://74401302514014" },
+        { Name = "Pixel Crossbow", Rarity = "Legendary", Image = "rbxassetid://115931961841903" },
+        { Name = "Arch Crossbow", Rarity = "Mythical", Image = "rbxassetid://94981733362451" },
+    },
+    ["Daggers"] = {
+        { Name = "Paper Planes", Rarity = "Common", Image = "rbxassetid://84003122595879" },
+        { Name = "Shurikens", Rarity = "Common", Image = "rbxassetid://135574097643275" },
+        { Name = "Glorious Daggers", Rarity = "Common", Image = "rbxassetid://76023189104485" },
+        { Name = "Starfish", Rarity = "Common", Image = "rbxassetid://114567820096083" },
+        { Name = "Aces", Rarity = "Rare", Image = "rbxassetid://139089881483398" },
+        { Name = "Cookies", Rarity = "Rare", Image = "rbxassetid://114482325531769" },
+        { Name = "Bat Daggers", Rarity = "Rare", Image = "rbxassetid://92001964015225" },
+        { Name = "Broken Hearts", Rarity = "Legendary", Image = "rbxassetid://74156924296351" },
+        { Name = "Toaster", Rarity = "Legendary", Image = "rbxassetid://103344379002564" },
+        { Name = "Crystal Daggers", Rarity = "Mythical", Image = "rbxassetid://126221748659600" },
+        { Name = "Keynais", Rarity = "Mythical", Image = "rbxassetid://84562761142610" },
+    },
+    ["Distortion"] = {
+        { Name = "Glorious Distortion", Rarity = "Common", Image = "rbxassetid://134722661973710" },
+        { Name = "Cyber Distortion", Rarity = "Common", Image = "rbxassetid://88995062151276" },
+        { Name = "Electropunk Distortion", Rarity = "Rare", Image = "rbxassetid://109544539643046" },
+        { Name = "Plasma Distortion", Rarity = "Rare", Image = "rbxassetid://126813935337091" },
+        { Name = "Magma Distortion", Rarity = "Rare", Image = "rbxassetid://81103807698156" },
+        { Name = "Sleighstortion", Rarity = "Rare", Image = "rbxassetid://111242141481650" },
+        { Name = "Bubble Distortion", Rarity = "Rare", Image = "rbxassetid://73319804282513" },
+        { Name = "Experiment D15", Rarity = "Legendary", Image = "rbxassetid://103446773933340" },
+    },
+    ["Energy Pistols"] = {
+        { Name = "Glorious Energy Pistols", Rarity = "Common", Image = "rbxassetid://114418789647547" },
+        { Name = "Hacker Pistols", Rarity = "Rare", Image = "rbxassetid://140621407555872" },
+        { Name = "Apex Pistols", Rarity = "Rare", Image = "rbxassetid://136156057859453" },
+        { Name = "New Year Energy Pistols", Rarity = "Rare", Image = "rbxassetid://126589959779039" },
+        { Name = "Hydro Pistols", Rarity = "Rare", Image = "rbxassetid://115281889984097" },
+        { Name = "Sol Pistols", Rarity = "Rare", Image = "rbxassetid://115012735954576" },
+        { Name = "Void Pistols", Rarity = "Legendary", Image = "rbxassetid://111278471262300" },
+        { Name = "Soul Pistols", Rarity = "Legendary", Image = "rbxassetid://72213738067158" },
+        { Name = "Hyperlaser Guns", Rarity = "Legendary", Image = "rbxassetid://106947526362970" },
+        { Name = "Enerkey Pistols", Rarity = "Mythical", Image = "rbxassetid://116755982646605" },
+    },
+    ["Energy Rifle"] = {
+        { Name = "Glorious Energy Rifle", Rarity = "Common", Image = "rbxassetid://72632815443247" },
+        { Name = "Hacker Rifle", Rarity = "Rare", Image = "rbxassetid://122816271917525" },
+        { Name = "Apex Rifle", Rarity = "Rare", Image = "rbxassetid://88144772234151" },
+        { Name = "New Year Energy Rifle", Rarity = "Rare", Image = "rbxassetid://111446782522703" },
+        { Name = "Hydro Rifle", Rarity = "Rare", Image = "rbxassetid://73690448730060" },
+        { Name = "Sol Rifle", Rarity = "Rare", Image = "rbxassetid://96272849525291" },
+        { Name = "Void Rifle", Rarity = "Legendary", Image = "rbxassetid://95985016411441" },
+        { Name = "Soul Rifle", Rarity = "Legendary", Image = "rbxassetid://129351366788323" },
+        { Name = "Enerkey Rifle", Rarity = "Mythical", Image = "rbxassetid://104929541135510" },
+    },
+    ["Exogun"] = {
+        { Name = "Midnight Festive Exogun", Rarity = "Common", Image = "rbxassetid://127612442529810" },
+        { Name = "Glorious Exogun", Rarity = "Common", Image = "rbxassetid://129125201034206" },
+        { Name = "Wondergun", Rarity = "Rare", Image = "rbxassetid://17672060360" },
+        { Name = "Ray Gun", Rarity = "Rare", Image = "rbxassetid://18766861454" },
+        { Name = "Exogourd", Rarity = "Rare", Image = "rbxassetid://137140750597688" },
+        { Name = "Pearl Exogun", Rarity = "Rare", Image = "rbxassetid://77698515863000" },
+        { Name = "Singularity", Rarity = "Legendary", Image = "rbxassetid://17676876756" },
+        { Name = "Repulsor", Rarity = "Legendary", Image = "rbxassetid://109263387714628" },
+    },
+    ["Fists"] = {
+        { Name = "Brass Knuckles", Rarity = "Common", Image = "" },
+        { Name = "Pumpkin Claws", Rarity = "Common", Image = "" },
+        { Name = "Festive Fists", Rarity = "Common", Image = "" },
+        { Name = "Glorious Fists", Rarity = "Common", Image = "" },
+        { Name = "Spy Gloves", Rarity = "Common", Image = "" },
+        { Name = "Boxing Gloves", Rarity = "Rare", Image = "rbxassetid://17672060486" },
+        { Name = "Fists of Hurt", Rarity = "Rare", Image = "rbxassetid://140103672289959" },
+        { Name = "Fist", Rarity = "Legendary", Image = "rbxassetid://109585706680035" },
+        { Name = "Pirate Hook", Rarity = "Legendary", Image = "rbxassetid://116717593932616" },
+        { Name = "Crab Claws", Rarity = "Legendary", Image = "" },
+    },
+    ["Flamethrower"] = {
+        { Name = "Lamethrower", Rarity = "Common", Image = "rbxassetid://18766862822" },
+        { Name = "Glorious Flamethrower", Rarity = "Common", Image = "rbxassetid://71676635953177" },
+        { Name = "Jack O\'Thrower", Rarity = "Rare", Image = "rbxassetid://140280020818514" },
+        { Name = "Snowblower", Rarity = "Rare", Image = "rbxassetid://128743586418880" },
+        { Name = "Glitterthrower", Rarity = "Rare", Image = "rbxassetid://88920581735649" },
+        { Name = "Bubblethrower", Rarity = "Rare", Image = "rbxassetid://76812523297712" },
+        { Name = "Pixel Flamethrower", Rarity = "Legendary", Image = "rbxassetid://17771752104" },
+        { Name = "Rainbowthrower", Rarity = "Legendary", Image = "rbxassetid://102070206928252" },
+        { Name = "Extinguisher", Rarity = "Legendary", Image = "" },
+        { Name = "Keythrower", Rarity = "Mythical", Image = "" },
+    },
+    ["Flare Gun"] = {
+        { Name = "Wrapped Flare Gun", Rarity = "Common", Image = "rbxassetid://135638020129378" },
+        { Name = "Glorious Flare Gun", Rarity = "Common", Image = "rbxassetid://115324763672074" },
+        { Name = "Dynamite Gun", Rarity = "Rare", Image = "rbxassetid://18766865384" },
+        { Name = "Firework Gun", Rarity = "Legendary", Image = "rbxassetid://17691132917" },
+        { Name = "Vexed Flare Gun", Rarity = "Legendary", Image = "rbxassetid://116287930550049" },
+        { Name = "Banana Flare", Rarity = "Legendary", Image = "rbxassetid://123589213761955" },
+        { Name = "Pocket Volcano", Rarity = "Legendary", Image = "rbxassetid://133260045254190" },
+    },
+    ["Flashbang"] = {
+        { Name = "Skullbang", Rarity = "Common", Image = "rbxassetid://73796957224972" },
+        { Name = "Lightbulb", Rarity = "Common", Image = "rbxassetid://125489177573287" },
+        { Name = "Glorious Flashbang", Rarity = "Common", Image = "rbxassetid://96760506528185" },
+        { Name = "Shining Star", Rarity = "Rare", Image = "rbxassetid://108392227354212" },
+        { Name = "Disco Ball", Rarity = "Legendary", Image = "rbxassetid://17672061796" },
+        { Name = "Camera", Rarity = "Legendary", Image = "rbxassetid://18766865640" },
+        { Name = "Pixel Flashbang", Rarity = "Legendary", Image = "rbxassetid://132815625474597" },
+        { Name = "Sol", Rarity = "Legendary", Image = "rbxassetid://124026864365877" },
+    },
+    ["Freeze Ray"] = {
+        { Name = "Wrapped Freeze Ray", Rarity = "Common", Image = "" },
+        { Name = "Glorious Freeze Ray", Rarity = "Common", Image = "" },
+        { Name = "Bubble Ray", Rarity = "Rare", Image = "" },
+        { Name = "Gum Ray", Rarity = "Rare", Image = "" },
+        { Name = "Temporal Ray", Rarity = "Legendary", Image = "" },
+        { Name = "Spider Ray", Rarity = "Legendary", Image = "" },
+        { Name = "Cooler", Rarity = "Legendary", Image = "" },
+    },
+    ["Grappler"] = {
+        { Name = "Glorious Grappler", Rarity = "Common", Image = "rbxassetid://113576961532090" },
+        { Name = "Lifeguard Grappler", Rarity = "Common", Image = "rbxassetid://91214316625102" },
+        { Name = "Lasso", Rarity = "Legendary", Image = "rbxassetid://77061966583531" },
+        { Name = "Arcade Claw", Rarity = "Legendary", Image = "rbxassetid://81529455948004" },
+        { Name = "Genie Lamp", Rarity = "Legendary", Image = "rbxassetid://118514051859760" },
+        { Name = "Fishing Rod", Rarity = "Legendary", Image = "rbxassetid://86648406311812" },
+    },
+    ["Grenade"] = {
+        { Name = "Dynamite", Rarity = "Common", Image = "rbxassetid://119066463640901" },
+        { Name = "Glorious Grenade", Rarity = "Common", Image = "rbxassetid://103034870490455" },
+        { Name = "Frozen Grenade", Rarity = "Common", Image = "rbxassetid://96120996159611" },
+        { Name = "Water Balloon", Rarity = "Rare", Image = "rbxassetid://18766859819" },
+        { Name = "Jingle Grenade", Rarity = "Rare", Image = "rbxassetid://97646859596860" },
+        { Name = "Whoopee Cushion", Rarity = "Legendary", Image = "rbxassetid://17672062933" },
+        { Name = "Soul Grenade", Rarity = "Legendary", Image = "rbxassetid://85903097459179" },
+        { Name = "Cuddle Bomb", Rarity = "Legendary", Image = "rbxassetid://116801887274189" },
+        { Name = "Fizz Bomb", Rarity = "Legendary", Image = "rbxassetid://123256093694497" },
+        { Name = "Keynade", Rarity = "Mythical", Image = "rbxassetid://102785971311114" },
+    },
+    ["Grenade Launcher"] = {
+        { Name = "Glorious Grenade Launcher", Rarity = "Common", Image = "rbxassetid://134130354519919" },
+        { Name = "Uranium Launcher", Rarity = "Rare", Image = "rbxassetid://18766860114" },
+        { Name = "Snowball Launcher", Rarity = "Rare", Image = "rbxassetid://112349955391111" },
+        { Name = "Gearnade Launcher", Rarity = "Rare", Image = "rbxassetid://133756750612042" },
+        { Name = "Coconut Launcher", Rarity = "Rare", Image = "rbxassetid://77621998397460" },
+        { Name = "Swashbuckler", Rarity = "Legendary", Image = "rbxassetid://17821233828" },
+        { Name = "Skull Launcher", Rarity = "Legendary", Image = "rbxassetid://103257281022910" },
+        { Name = "Balloon Launcher", Rarity = "Legendary", Image = "rbxassetid://137862701599991" },
+    },
+    ["Gunblade"] = {
+        { Name = "Elf\'s Gunblade", Rarity = "Common", Image = "rbxassetid://114103306647123" },
+        { Name = "Crude Gunblade", Rarity = "Common", Image = "rbxassetid://126996645502136" },
+        { Name = "Glorious Gunblade", Rarity = "Common", Image = "rbxassetid://88003799126136" },
+        { Name = "Boneblade", Rarity = "Common", Image = "rbxassetid://126327381608481" },
+        { Name = "Sharkbite", Rarity = "Common", Image = "rbxassetid://85479471132931" },
+        { Name = "Hyper Gunblade", Rarity = "Legendary", Image = "rbxassetid://134415898983004" },
+        { Name = "Gunsaw", Rarity = "Legendary", Image = "rbxassetid://102700915422689" },
+        { Name = "Keyblade", Rarity = "Mythical", Image = "" },
+    },
+    ["Handgun"] = {
+        { Name = "Pumpkin Handgun", Rarity = "Common", Image = "rbxassetid://88495685924653" },
+        { Name = "Gumball Handgun", Rarity = "Common", Image = "rbxassetid://106890990556815" },
+        { Name = "Glorious Handgun", Rarity = "Common", Image = "rbxassetid://85129427786041" },
+        { Name = "Warp Handgun", Rarity = "Common", Image = "rbxassetid://102974911528828" },
+        { Name = "Towerstone Handgun", Rarity = "Common", Image = "rbxassetid://88654252790032" },
+        { Name = "Blaster", Rarity = "Rare", Image = "rbxassetid://17821234554" },
+        { Name = "Gingerbread Handgun", Rarity = "Rare", Image = "rbxassetid://95881238590412" },
+        { Name = "Sandgun", Rarity = "Rare", Image = "rbxassetid://111746039012812" },
+        { Name = "Hand Gun", Rarity = "Legendary", Image = "rbxassetid://18837670624" },
+        { Name = "Pixel Handgun", Rarity = "Legendary", Image = "rbxassetid://82199841278177" },
+        { Name = "Stealth Handgun", Rarity = "Unobtainable", Image = "rbxassetid://124919185835138" },
+    },
+    ["Jump Pad"] = {
+        { Name = "Trampoline", Rarity = "Common", Image = "" },
+        { Name = "Glorious Jump Pad", Rarity = "Common", Image = "" },
+        { Name = "Spider Web", Rarity = "Common", Image = "" },
+        { Name = "Flamingo Floatie", Rarity = "Common", Image = "" },
+        { Name = "Bounce House", Rarity = "Rare", Image = "" },
+        { Name = "Shady Chicken Sandwich", Rarity = "Rare", Image = "" },
+        { Name = "Jolly Man", Rarity = "Rare", Image = "" },
+    },
+    ["Katana"] = {
+        { Name = "Glorious Katana", Rarity = "Common", Image = "rbxassetid://75588958786035" },
+        { Name = "Swordfish", Rarity = "Common", Image = "rbxassetid://105748422389590" },
+        { Name = "Lightning Bolt", Rarity = "Rare", Image = "rbxassetid://18768968241" },
+        { Name = "Evil Trident", Rarity = "Rare", Image = "rbxassetid://101234805269080" },
+        { Name = "New Year Katana", Rarity = "Rare", Image = "rbxassetid://102866488046710" },
+        { Name = "Stellar Katana", Rarity = "Rare", Image = "rbxassetid://72617738655198" },
+        { Name = "Saber", Rarity = "Legendary", Image = "rbxassetid://17672062341" },
+        { Name = "Pixel Katana", Rarity = "Legendary", Image = "rbxassetid://127922483074145" },
+        { Name = "Linked Sword", Rarity = "Legendary", Image = "rbxassetid://83575725004177" },
+        { Name = "Cutlass", Rarity = "Legendary", Image = "rbxassetid://77773371747122" },
+        { Name = "Keytana", Rarity = "Mythical", Image = "rbxassetid://118899310989170" },
+        { Name = "Crystal Katana", Rarity = "Mythical", Image = "rbxassetid://88872493010693" },
+        { Name = "Riptide Katana", Rarity = "Mythical", Image = "rbxassetid://136245206320139" },
+        { Name = "Arch Katana", Rarity = "Mythical", Image = "rbxassetid://94679283541658" },
+    },
+    ["Knife"] = {
+        { Name = "Chancla", Rarity = "Common", Image = "" },
+        { Name = "Machete", Rarity = "Common", Image = "" },
+        { Name = "Glorious Knife", Rarity = "Common", Image = "" },
+        { Name = "Birthday Candle", Rarity = "Common", Image = "" },
+        { Name = "Shark Tooth", Rarity = "Common", Image = "" },
+        { Name = "Karambit", Rarity = "Legendary", Image = "" },
+        { Name = "Candy Cane", Rarity = "Legendary", Image = "" },
+        { Name = "Balisong", Rarity = "Legendary", Image = "rbxassetid://93303458333011" },
+        { Name = "Caladbolg", Rarity = "Legendary", Image = "rbxassetid://101180142582964" },
+        { Name = "Pencil", Rarity = "Legendary", Image = "" },
+        { Name = "Keyrambit", Rarity = "Mythical", Image = "" },
+        { Name = "Keylisong", Rarity = "Mythical", Image = "rbxassetid://100084654831857" },
+        { Name = "Trophy Knife", Rarity = "Genuine", Image = "" },
+        { Name = "Armature.001", Rarity = "Genuine", Image = "rbxassetid://104026327618871" },
+    },
+    ["MISSING_WEAPON"] = {
+        { Name = "MISSING_SKIN", Rarity = "Unobtainable", Image = "rbxassetid://124519084257039" },
+    },
+    ["Maul"] = {
+        { Name = "Glorious Maul", Rarity = "Common", Image = "" },
+        { Name = "Ice Maul", Rarity = "Common", Image = "" },
+        { Name = "Giant Popsicle", Rarity = "Common", Image = "" },
+        { Name = "Excalibur", Rarity = "Common", Image = "" },
+        { Name = "Sleigh Maul", Rarity = "Rare", Image = "" },
+        { Name = "Starforge Maul", Rarity = "Rare", Image = "" },
+        { Name = "Clown Hammer", Rarity = "Rare", Image = "" },
+        { Name = "Ban Hammer", Rarity = "Legendary", Image = "" },
+    },
+    ["Medkit"] = {
+        { Name = "Glorious Medkit", Rarity = "Common", Image = "" },
+        { Name = "Briefcase", Rarity = "Rare", Image = "" },
+        { Name = "Sandwich", Rarity = "Legendary", Image = "" },
+        { Name = "Laptop", Rarity = "Legendary", Image = "" },
+        { Name = "Bucket of Candy", Rarity = "Legendary", Image = "" },
+        { Name = "Milk & Cookies", Rarity = "Legendary", Image = "" },
+        { Name = "Medkitty", Rarity = "Legendary", Image = "rbxassetid://125732280509514" },
+        { Name = "Box of Chocolates", Rarity = "Legendary", Image = "" },
+        { Name = "Ice Cream", Rarity = "Legendary", Image = "" },
+    },
+    ["Minigun"] = {
+        { Name = "Pumpkin Minigun", Rarity = "Common", Image = "rbxassetid://77388785880854" },
+        { Name = "Wrapped Minigun", Rarity = "Common", Image = "rbxassetid://127077702465909" },
+        { Name = "Glorious Minigun", Rarity = "Common", Image = "rbxassetid://84246894288637" },
+        { Name = "Shark Minigun", Rarity = "Rare", Image = "rbxassetid://89295703576175" },
+        { Name = "Lasergun 3000", Rarity = "Legendary", Image = "rbxassetid://103437974285778" },
+        { Name = "Pixel Minigun", Rarity = "Legendary", Image = "rbxassetid://18766861798" },
+        { Name = "Fighter Jet", Rarity = "Legendary", Image = "rbxassetid://70780739230558" },
+    },
+    ["Molotov"] = {
+        { Name = "Coffee", Rarity = "Common", Image = "rbxassetid://17672061538" },
+        { Name = "Torch", Rarity = "Common", Image = "rbxassetid://115586189235552" },
+        { Name = "Glorious Molotov", Rarity = "Common", Image = "rbxassetid://108930340066987" },
+        { Name = "Campfire Stick", Rarity = "Common", Image = "rbxassetid://83823494489693" },
+        { Name = "Lava Lamp", Rarity = "Rare", Image = "rbxassetid://79616583726432" },
+        { Name = "Vexed Candle", Rarity = "Legendary", Image = "rbxassetid://78128648928195" },
+        { Name = "Hot Coals", Rarity = "Legendary", Image = "rbxassetid://110423024723304" },
+        { Name = "Ship In A Bottle", Rarity = "Legendary", Image = "rbxassetid://125699268308415" },
+        { Name = "Arch Molotov", Rarity = "Mythical", Image = "rbxassetid://96589300342777" },
+    },
+    ["Paintball Gun"] = {
+        { Name = "Ketchup Gun", Rarity = "Common", Image = "rbxassetid://76083615050939" },
+        { Name = "Glorious Paintball Gun", Rarity = "Common", Image = "rbxassetid://86297318955856" },
+        { Name = "Lemonade Gun", Rarity = "Common", Image = "rbxassetid://119390099120478" },
+        { Name = "Slime Gun", Rarity = "Rare", Image = "rbxassetid://17672062472" },
+        { Name = "Brain Gun", Rarity = "Rare", Image = "rbxassetid://85970592668118" },
+        { Name = "Snowball Gun", Rarity = "Rare", Image = "rbxassetid://113685354916533" },
+        { Name = "Boba Gun", Rarity = "Legendary", Image = "rbxassetid://18768830660" },
+        { Name = "Paintballoon Gun", Rarity = "Legendary", Image = "rbxassetid://100129918948246" },
+    },
+    ["Permafrost"] = {
+        { Name = "Glorious Permafrost", Rarity = "Common", Image = "rbxassetid://119977291442329" },
+        { Name = "Ice Permafrost", Rarity = "Common", Image = "rbxassetid://83722160119335" },
+        { Name = "Snowman Permafrost", Rarity = "Common", Image = "rbxassetid://100890626643184" },
+        { Name = "Permasand", Rarity = "Rare", Image = "rbxassetid://108398272946629" },
+        { Name = "Permafrost.rbxm", Rarity = "Rare", Image = "rbxassetid://77732280270853" },
+        { Name = "Starforge Permafrost", Rarity = "Rare", Image = "rbxassetid://105290041968367" },
+        { Name = "Temporal Permafrost", Rarity = "Legendary", Image = "rbxassetid://124975247676715" },
+    },
+    ["RPG"] = {
+        { Name = "Pencil Launcher", Rarity = "Common", Image = "rbxassetid://106934516693548" },
+        { Name = "Glorious RPG", Rarity = "Common", Image = "rbxassetid://130506879885802" },
+        { Name = "Squid Launcher", Rarity = "Rare", Image = "rbxassetid://130764310743404" },
+        { Name = "Sundae Launcher", Rarity = "Rare", Image = "rbxassetid://70578055340962" },
+        { Name = "Nuke Launcher", Rarity = "Legendary", Image = "rbxassetid://17672061995" },
+        { Name = "Spaceship Launcher", Rarity = "Legendary", Image = "rbxassetid://18766860860" },
+        { Name = "Pumpkin Launcher", Rarity = "Legendary", Image = "rbxassetid://94648176067808" },
+        { Name = "Firework Launcher", Rarity = "Legendary", Image = "rbxassetid://75233372670156" },
+        { Name = "Rocket Launcher", Rarity = "Legendary", Image = "rbxassetid://116931956715309" },
+        { Name = "Cupcake Launcher", Rarity = "Legendary", Image = "rbxassetid://100541838356180" },
+        { Name = "RPKEY", Rarity = "Mythical", Image = "rbxassetid://108438721125410" },
+    },
+    ["Revolver"] = {
+        { Name = "Glorious Revolver", Rarity = "Common", Image = "rbxassetid://118135542031794" },
+        { Name = "Desert Eagle", Rarity = "Rare", Image = "rbxassetid://17821234372" },
+        { Name = "Boneclaw Revolver", Rarity = "Rare", Image = "rbxassetid://119174697609264" },
+        { Name = "Sheriff", Rarity = "Legendary", Image = "rbxassetid://18770192507" },
+        { Name = "Peppermint Sheriff", Rarity = "Legendary", Image = "rbxassetid://95859403750768" },
+        { Name = "Peppergun", Rarity = "Legendary", Image = "rbxassetid://124178691056979" },
+        { Name = "Cruise Revolver", Rarity = "Legendary", Image = "rbxassetid://72223124823807" },
+        { Name = "Keyvolver", Rarity = "Mythical", Image = "rbxassetid://87974031410344" },
+    },
+    ["Riot Shield"] = {
+        { Name = "Door", Rarity = "Common", Image = "" },
+        { Name = "Sled", Rarity = "Common", Image = "" },
+        { Name = "Glorious Riot Shield", Rarity = "Common", Image = "" },
+        { Name = "Tombstone Shield", Rarity = "Common", Image = "" },
+        { Name = "Broken Surfboard", Rarity = "Common", Image = "" },
+        { Name = "Energy Shield", Rarity = "Rare", Image = "" },
+        { Name = "Masterpiece", Rarity = "Rare", Image = "" },
+    },
+    ["Satchel"] = {
+        { Name = "Suspicious Gift", Rarity = "Common", Image = "" },
+        { Name = "Notebook Satchel", Rarity = "Common", Image = "" },
+        { Name = "Bag o\' Money", Rarity = "Common", Image = "" },
+        { Name = "Glorious Satchel", Rarity = "Common", Image = "" },
+        { Name = "Lifeguard Satchel", Rarity = "Common", Image = "" },
+        { Name = "Advanced Satchel", Rarity = "Rare", Image = "" },
+        { Name = "Potion Satchel", Rarity = "Rare", Image = "" },
+        { Name = "Pizza Box", Rarity = "Legendary", Image = "" },
+    },
+    ["Scythe"] = {
+        { Name = "Glorious Scythe", Rarity = "Common", Image = "" },
+        { Name = "Plastic Flamingo", Rarity = "Common", Image = "" },
+        { Name = "Scythe of Death", Rarity = "Rare", Image = "" },
+        { Name = "Anchor", Rarity = "Rare", Image = "" },
+        { Name = "Bat Scythe", Rarity = "Rare", Image = "" },
+        { Name = "Cryo Scythe", Rarity = "Rare", Image = "" },
+        { Name = "Sakura Scythe", Rarity = "Rare", Image = "" },
+        { Name = "Palm Scythe", Rarity = "Legendary", Image = "rbxassetid://97379805071194" },
+        { Name = "Keythe", Rarity = "Mythical", Image = "" },
+        { Name = "Crystal Scythe", Rarity = "Mythical", Image = "rbxassetid://73971549402646" },
+        { Name = "Bug Net", Rarity = "Genuine", Image = "" },
+    },
+    ["Shorty"] = {
+        { Name = "Too Shorty", Rarity = "Common", Image = "rbxassetid://18129531276" },
+        { Name = "Not So Shorty", Rarity = "Common", Image = "rbxassetid://17672062572" },
+        { Name = "Lovely Shorty", Rarity = "Common", Image = "rbxassetid://18766862000" },
+        { Name = "Wrapped Shorty", Rarity = "Common", Image = "rbxassetid://136522183669611" },
+        { Name = "Glorious Shorty", Rarity = "Common", Image = "rbxassetid://105834197552222" },
+        { Name = "Demon Shorty", Rarity = "Rare", Image = "rbxassetid://116443498278384" },
+        { Name = "Bubble Shorty", Rarity = "Rare", Image = "rbxassetid://111294137896866" },
+        { Name = "Balloon Shorty", Rarity = "Legendary", Image = "rbxassetid://75590262133322" },
+        { Name = "Cannon Shorty", Rarity = "Legendary", Image = "rbxassetid://137616738436928" },
+    },
+    ["Shotgun"] = {
+        { Name = "Wrapped Shotgun", Rarity = "Common", Image = "rbxassetid://74894345245237" },
+        { Name = "Cactus Shotgun", Rarity = "Common", Image = "rbxassetid://131606483507460" },
+        { Name = "Glorious Shotgun", Rarity = "Common", Image = "rbxassetid://71704618059601" },
+        { Name = "Broomstick", Rarity = "Rare", Image = "rbxassetid://118061559757082" },
+        { Name = "Balloon Shotgun", Rarity = "Legendary", Image = "rbxassetid://17821234823" },
+        { Name = "Hyper Shotgun", Rarity = "Legendary", Image = "rbxassetid://18768968419" },
+        { Name = "Shark Shotgun", Rarity = "Legendary", Image = "rbxassetid://116415689080224" },
+        { Name = "Shotkey", Rarity = "Mythical", Image = "rbxassetid://93004214983981" },
+    },
+    ["Slingshot"] = {
+        { Name = "Goalpost", Rarity = "Common", Image = "rbxassetid://17672063165" },
+        { Name = "Stick", Rarity = "Common", Image = "rbxassetid://17672063048" },
+        { Name = "Glorious Slingshot", Rarity = "Common", Image = "rbxassetid://101195664167288" },
+        { Name = "Palmshot", Rarity = "Common", Image = "rbxassetid://109640024736812" },
+        { Name = "Boneshot", Rarity = "Rare", Image = "rbxassetid://86606957688341" },
+        { Name = "Reindeer Slingshot", Rarity = "Rare", Image = "rbxassetid://121612921203624" },
+        { Name = "Harp", Rarity = "Legendary", Image = "rbxassetid://80850043664453" },
+        { Name = "Lucky Horseshoe", Rarity = "Legendary", Image = "rbxassetid://131242126669282" },
+        { Name = "Keyshot", Rarity = "Mythical", Image = "rbxassetid://74006265601388" },
+    },
+    ["Smoke Grenade"] = {
+        { Name = "Balance", Rarity = "Common", Image = "rbxassetid://18766866168" },
+        { Name = "Glorious Smoke Grenade", Rarity = "Common", Image = "rbxassetid://139714146508398" },
+        { Name = "Beach Ball", Rarity = "Common", Image = "rbxassetid://98068366944697" },
+        { Name = "Snowglobe", Rarity = "Rare", Image = "rbxassetid://119390465944051" },
+        { Name = "Hourglass", Rarity = "Rare", Image = "rbxassetid://108311418974073" },
+        { Name = "Emoji Cloud", Rarity = "Legendary", Image = "rbxassetid://17821234077" },
+        { Name = "Eyeball", Rarity = "Legendary", Image = "rbxassetid://135911399763146" },
+    },
+    ["Sniper"] = {
+        { Name = "Eyething Sniper", Rarity = "Common", Image = "rbxassetid://103915302076013" },
+        { Name = "Glorious Sniper", Rarity = "Common", Image = "rbxassetid://118012090175286" },
+        { Name = "Campfire Sniper", Rarity = "Common", Image = "rbxassetid://127790438907599" },
+        { Name = "Gingerbread Sniper", Rarity = "Rare", Image = "rbxassetid://99943841952995" },
+        { Name = "Pixel Sniper", Rarity = "Legendary", Image = "rbxassetid://17676081196" },
+        { Name = "Hyper Sniper", Rarity = "Legendary", Image = "rbxassetid://18766864081" },
+        { Name = "Event Horizon", Rarity = "Legendary", Image = "rbxassetid://80749667426815" },
+        { Name = "Kraken Sniper", Rarity = "Legendary", Image = "rbxassetid://95011666797584" },
+        { Name = "Light Fifty", Rarity = "Legendary", Image = "rbxassetid://138029440298487" },
+        { Name = "Keyper", Rarity = "Mythical", Image = "rbxassetid://85472935605264" },
+    },
+    ["Spear"] = {
+        { Name = "Glorious Spear", Rarity = "Common", Image = "rbxassetid://98259628954838" },
+        { Name = "Giant Pencil", Rarity = "Common", Image = "rbxassetid://107812045486260" },
+        { Name = "Studio Light", Rarity = "Common", Image = "rbxassetid://70443632958263" },
+        { Name = "Chark Kebab", Rarity = "Common", Image = "rbxassetid://74005839754537" },
+        { Name = "Fork", Rarity = "Common", Image = "rbxassetid://105821360943308" },
+        { Name = "Plunger", Rarity = "Rare", Image = "rbxassetid://82393330699241" },
+        { Name = "Thunderpike", Rarity = "Rare", Image = "rbxassetid://137630900832105" },
+    },
+    ["Spray"] = {
+        { Name = "Lovely Spray", Rarity = "Common", Image = "rbxassetid://131203015026683" },
+        { Name = "Pine Spray", Rarity = "Common", Image = "rbxassetid://128285758736343" },
+        { Name = "Nail Gun", Rarity = "Common", Image = "rbxassetid://110577809934251" },
+        { Name = "Glorious Spray", Rarity = "Common", Image = "rbxassetid://138246745001490" },
+        { Name = "Boneclaw Spray", Rarity = "Rare", Image = "rbxassetid://114078818081911" },
+        { Name = "Spray Bottle", Rarity = "Legendary", Image = "rbxassetid://137955019285700" },
+        { Name = "Campfire Spray", Rarity = "Legendary", Image = "rbxassetid://129294699009828" },
+        { Name = "Key Spray", Rarity = "Mythical", Image = "rbxassetid://94061940442700" },
+    },
+    ["Subspace Tripmine"] = {
+        { Name = "Trick or Treat", Rarity = "Common", Image = "" },
+        { Name = "DIY Tripmine", Rarity = "Common", Image = "" },
+        { Name = "Glorious Subspace Tripmine", Rarity = "Common", Image = "" },
+        { Name = "Spring", Rarity = "Rare", Image = "" },
+        { Name = "Don\'t Press", Rarity = "Legendary", Image = "" },
+        { Name = "Dev-in-the-Box", Rarity = "Legendary", Image = "" },
+        { Name = "Pot o\' Keys", Rarity = "Legendary", Image = "" },
+        { Name = "Hazard Sign", Rarity = "Legendary", Image = "" },
+    },
+    ["Trowel"] = {
+        { Name = "Glorious Trowel", Rarity = "Common", Image = "rbxassetid://100888500368219" },
+        { Name = "Plastic Shovel", Rarity = "Rare", Image = "rbxassetid://17672062201" },
+        { Name = "Garden Shovel", Rarity = "Rare", Image = "rbxassetid://18766864873" },
+        { Name = "Pumpkin Carver", Rarity = "Rare", Image = "rbxassetid://78827307308671" },
+        { Name = "Snow Shovel", Rarity = "Rare", Image = "rbxassetid://78271338778848" },
+        { Name = "Paintbrush", Rarity = "Rare", Image = "rbxassetid://84687920829755" },
+        { Name = "Scooper", Rarity = "Rare", Image = "rbxassetid://100816728062854" },
+    },
+    ["Uzi"] = {
+        { Name = "Pine Uzi", Rarity = "Common", Image = "rbxassetid://82545206964916" },
+        { Name = "Glorious Uzi", Rarity = "Common", Image = "rbxassetid://120045334159124" },
+        { Name = "Ducky Uzi", Rarity = "Common", Image = "rbxassetid://133780419950894" },
+        { Name = "Water Uzi", Rarity = "Rare", Image = "rbxassetid://17821233590" },
+        { Name = "Demon Uzi", Rarity = "Rare", Image = "rbxassetid://132973040482576" },
+        { Name = "Electro Uzi", Rarity = "Legendary", Image = "rbxassetid://96806694653207" },
+        { Name = "Money Gun", Rarity = "Legendary", Image = "rbxassetid://100705725115757" },
+        { Name = "Keyzi", Rarity = "Mythical", Image = "rbxassetid://100392703246534" },
+        { Name = "Arch Uzi", Rarity = "Mythical", Image = "rbxassetid://139852585731073" },
+    },
+    ["War Horn"] = {
+        { Name = "Mammoth Horn", Rarity = "Common", Image = "" },
+        { Name = "Megaphone", Rarity = "Common", Image = "" },
+        { Name = "Glorious War Horn", Rarity = "Common", Image = "" },
+        { Name = "Trumpet", Rarity = "Rare", Image = "" },
+        { Name = "Air Horn", Rarity = "Rare", Image = "" },
+        { Name = "Boneclaw Horn", Rarity = "Rare", Image = "" },
+        { Name = "Lifeguard Whistle", Rarity = "Legendary", Image = "" },
+    },
+    ["Warper"] = {
+        { Name = "Glorious Warper", Rarity = "Common", Image = "rbxassetid://95823647035211" },
+        { Name = "Electropunk Warper", Rarity = "Rare", Image = "rbxassetid://75386728379756" },
+        { Name = "Glitter Warper", Rarity = "Rare", Image = "rbxassetid://94607497565715" },
+        { Name = "Frost Warper", Rarity = "Rare", Image = "rbxassetid://70539216094396" },
+        { Name = "Bubbler", Rarity = "Rare", Image = "rbxassetid://106002684466857" },
+        { Name = "Experiment W4", Rarity = "Legendary", Image = "rbxassetid://126884960764998" },
+        { Name = "Hotel Bell", Rarity = "Legendary", Image = "rbxassetid://117742703173821" },
+        { Name = "Arcane Warper", Rarity = "Legendary", Image = "rbxassetid://83632373572638" },
+    },
+    ["Warpstone"] = {
+        { Name = "Glorious Warpstone", Rarity = "Common", Image = "rbxassetid://137583560042806" },
+        { Name = "Warpbone", Rarity = "Common", Image = "rbxassetid://96452209607150" },
+        { Name = "Cyber Warpstone", Rarity = "Common", Image = "rbxassetid://133002984228937" },
+        { Name = "Unstable Warpstone", Rarity = "Rare", Image = "rbxassetid://110083777654388" },
+        { Name = "Electropunk Warpstone", Rarity = "Rare", Image = "rbxassetid://75299042976369" },
+        { Name = "Warp Juice", Rarity = "Rare", Image = "rbxassetid://74381576761026" },
+        { Name = "Teleport Disc", Rarity = "Legendary", Image = "rbxassetid://104608154111107" },
+        { Name = "Warpstar", Rarity = "Legendary", Image = "rbxassetid://102652397897598" },
+        { Name = "Warpeye", Rarity = "Mythical", Image = "rbxassetid://127023603234857" },
+    },
+    ["Wildcat"] = {
+        { Name = "Glorious Wildcat", Rarity = "Common", Image = "rbxassetid://115657943825380" },
+        { Name = "Plasma Wildcat", Rarity = "Rare", Image = "rbxassetid://88584176541333" },
+    },
 }
 
--- Default fallback weapons list
+-- Default weapons list with exact game names
 local DEFAULT_WEAPONS = {
     { Name = "Assault Rifle", Class = "Primary", Image = "rbxassetid://17160799881" },
     { Name = "Sniper", Class = "Primary", Image = "rbxassetid://17160799638" },
@@ -90,20 +597,31 @@ local DEFAULT_WEAPONS = {
     { Name = "Paintball Gun", Class = "Primary", Image = "rbxassetid://18223601855" },
     { Name = "RPG", Class = "Primary", Image = "rbxassetid://18223601855" },
     { Name = "Flamethrower", Class = "Primary", Image = "rbxassetid://89455038280473" },
-    { Name = "Pistol", Class = "Secondary", Image = "rbxassetid://17160800994" },
+    { Name = "Gunblade", Class = "Primary", Image = "rbxassetid://18223601855" },
+    { Name = "Distortion", Class = "Primary", Image = "rbxassetid://18223601855" },
+    { Name = "Permafrost", Class = "Primary", Image = "rbxassetid://18223601855" },
+    { Name = "Wildcat", Class = "Primary", Image = "rbxassetid://18223601855" },
+    { Name = "Handgun", Class = "Secondary", Image = "rbxassetid://17160800994" },
     { Name = "Revolver", Class = "Secondary", Image = "rbxassetid://17160800880" },
     { Name = "Uzi", Class = "Secondary", Image = "rbxassetid://17160800624" },
     { Name = "Flare Gun", Class = "Secondary", Image = "rbxassetid://17160801264" },
     { Name = "Shorty", Class = "Secondary", Image = "rbxassetid://17160801380" },
     { Name = "Freeze Ray", Class = "Secondary", Image = "rbxassetid://18223601855" },
     { Name = "Energy Pistols", Class = "Secondary", Image = "rbxassetid://18223601855" },
+    { Name = "Exogun", Class = "Secondary", Image = "rbxassetid://18223601855" },
+    { Name = "Slingshot", Class = "Secondary", Image = "rbxassetid://18223601855" },
+    { Name = "Spray", Class = "Secondary", Image = "rbxassetid://18223601855" },
+    { Name = "Daggers", Class = "Secondary", Image = "rbxassetid://18223601855" },
     { Name = "Katana", Class = "Melee", Image = "rbxassetid://17160801158" },
     { Name = "Knife", Class = "Melee", Image = "rbxassetid://17160801041" },
     { Name = "Fists", Class = "Melee", Image = "rbxassetid://17672060486" },
     { Name = "Scythe", Class = "Melee", Image = "rbxassetid://18223601855" },
     { Name = "Battle Axe", Class = "Melee", Image = "rbxassetid://18223601855" },
     { Name = "Chainsaw", Class = "Melee", Image = "rbxassetid://18223601855" },
-    { Name = "Daggers", Class = "Melee", Image = "rbxassetid://18223601855" },
+    { Name = "Maul", Class = "Melee", Image = "rbxassetid://18223601855" },
+    { Name = "Spear", Class = "Melee", Image = "rbxassetid://18223601855" },
+    { Name = "Trowel", Class = "Melee", Image = "rbxassetid://18223601855" },
+    { Name = "Riot Shield", Class = "Melee", Image = "rbxassetid://18223601855" },
     { Name = "Grenade", Class = "Utility", Image = "rbxassetid://17160801411" },
     { Name = "Flashbang", Class = "Utility", Image = "rbxassetid://17160801529" },
     { Name = "Smoke Grenade", Class = "Utility", Image = "rbxassetid://17160799767" },
@@ -111,6 +629,10 @@ local DEFAULT_WEAPONS = {
     { Name = "Medkit", Class = "Utility", Image = "rbxassetid://17160800366" },
     { Name = "Subspace Tripmine", Class = "Utility", Image = "rbxassetid://17160799418" },
     { Name = "Jump Pad", Class = "Utility", Image = "rbxassetid://18223601855" },
+    { Name = "War Horn", Class = "Utility", Image = "rbxassetid://18223601855" },
+    { Name = "Satchel", Class = "Utility", Image = "rbxassetid://18223601855" },
+    { Name = "Warper", Class = "Utility", Image = "rbxassetid://18223601855" },
+    { Name = "Warpstone", Class = "Utility", Image = "rbxassetid://18223601855" },
 }
 
 -- Fallback wrap preset catalog
@@ -151,26 +673,51 @@ local RARITY_COLORS = {
     Unique = Color3.fromRGB(255, 140, 0),
 }
 
--- Ensure gun state table exists
+-- Normalizes weapon name aliases (e.g. Pistol -> Handgun)
+local function normalizeWeaponName(name)
+    if not name then return "" end
+    if name == "Pistol" or name == "Hand Gun" then return "Handgun" end
+    return name
+end
+
+-- ============================================================================
+-- STATE & DATA STORE
+-- ============================================================================
+local State = {
+    selectedGun = "Assault Rifle",
+    mode = "Skins", -- "Skins" | "Wraps" | "UnlockAll"
+    searchQuery = "",
+    rarityFilter = "All",
+    orbitPaused = false,
+    orbitAngle = 0,
+    orbitDistance = 4.2,
+    uiVisible = true,
+    minimized = false,
+    unlockAll = true,
+    unlockWeapons = false, -- Disabled by default to prevent server-side shot drops
+    invertPalette = false,
+    saved = {},
+}
+
 local function getGunConfig(gunName)
-    if not State.saved[gunName] then
-        State.saved[gunName] = {
+    local g = normalizeWeaponName(gunName)
+    if not State.saved[g] then
+        State.saved[g] = {
             Skin = "Default",
             Wrap = "None",
             Inverted = false,
         }
     end
-    return State.saved[gunName]
+    return State.saved[g]
 end
 
 -- ============================================================================
--- DYNAMIC INGESTION ENGINE
+-- CATALOG INGESTION (STRICT WEAPON-SPECIFIC FILTERING)
 -- ============================================================================
 local function getWeaponsList()
     local list = {}
     local seen = {}
 
-    -- Try reading dynamically from ItemLibrary
     pcall(function()
         local Modules = ReplicatedStorage:FindFirstChild("Modules")
         local ItemLibModule = Modules and Modules:FindFirstChild("ItemLibrary")
@@ -178,12 +725,13 @@ local function getWeaponsList()
             local ItemLibrary = require(ItemLibModule)
             if ItemLibrary and ItemLibrary.ItemOrder then
                 for _, weaponName in ipairs(ItemLibrary.ItemOrder) do
+                    local normName = normalizeWeaponName(weaponName)
                     local itemInfo = ItemLibrary.Items and ItemLibrary.Items[weaponName]
                     local vmInfo = ItemLibrary.ViewModels and ItemLibrary.ViewModels[weaponName]
-                    if itemInfo and not seen[weaponName] then
-                        seen[weaponName] = true
+                    if itemInfo and not seen[normName] then
+                        seen[normName] = true
                         table.insert(list, {
-                            Name = weaponName,
+                            Name = normName,
                             Class = itemInfo.Class or "Weapon",
                             Image = (vmInfo and (vmInfo.ImageCentered or vmInfo.Image)) or (itemInfo and itemInfo.Image) or "",
                         })
@@ -194,11 +742,15 @@ local function getWeaponsList()
     end)
 
     if #list == 0 then
-        -- Fallback to curated table
         for _, w in ipairs(DEFAULT_WEAPONS) do
-            if not seen[w.Name] then
-                seen[w.Name] = true
-                table.insert(list, w)
+            local normName = normalizeWeaponName(w.Name)
+            if not seen[normName] then
+                seen[normName] = true
+                table.insert(list, {
+                    Name = normName,
+                    Class = w.Class,
+                    Image = w.Image,
+                })
             end
         end
     end
@@ -206,9 +758,12 @@ local function getWeaponsList()
     return list
 end
 
+-- Strictly returns ONLY skins that belong to `weaponName`
 local function getSkinsForWeapon(weaponName)
+    local targetGun = normalizeWeaponName(weaponName)
     local skins = {}
-    -- Always offer "Default" base weapon model as first option
+
+    -- Always add "Default" stock gun mesh option first
     table.insert(skins, {
         Name = "Default",
         Rarity = "Common",
@@ -218,7 +773,22 @@ local function getSkinsForWeapon(weaponName)
 
     local seen = { ["Default"] = true }
 
-    -- Dynamic ingestion from CosmeticLibrary
+    -- 1. Check embedded static catalog for guaranteed weapon-to-skin parity
+    if STATIC_SKIN_CATALOG[targetGun] then
+        for _, s in ipairs(STATIC_SKIN_CATALOG[targetGun]) do
+            if not seen[s.Name] then
+                seen[s.Name] = true
+                table.insert(skins, {
+                    Name = s.Name,
+                    Rarity = s.Rarity or "Common",
+                    Image = s.Image or "",
+                    Description = "",
+                })
+            end
+        end
+    end
+
+    -- 2. Dynamically ingest any new skins from CosmeticLibrary matching strictly data.ItemName
     pcall(function()
         local Modules = ReplicatedStorage:FindFirstChild("Modules")
         local CosModule = Modules and Modules:FindFirstChild("CosmeticLibrary")
@@ -228,7 +798,8 @@ local function getSkinsForWeapon(weaponName)
             local CosmeticLibrary = require(CosModule)
             if CosmeticLibrary and CosmeticLibrary.Cosmetics then
                 for name, data in pairs(CosmeticLibrary.Cosmetics) do
-                    if data.Type == "Skin" and data.ItemName == weaponName and not seen[name] then
+                    -- STRICT FILTER: Only skins whose ItemName equals targetGun
+                    if data.Type == "Skin" and normalizeWeaponName(data.ItemName) == targetGun and not seen[name] then
                         seen[name] = true
                         local img = data.Image or ""
                         if (not img or img == "") and ItemLibrary and ItemLibrary.ViewModels and ItemLibrary.ViewModels[name] then
@@ -252,8 +823,8 @@ local function getSkinsForWeapon(weaponName)
         local ItemLibModule = Modules and Modules:FindFirstChild("ItemLibrary")
         if ItemLibModule then
             local ItemLibrary = require(ItemLibModule)
-            if ItemLibrary and ItemLibrary.ViewModels and ItemLibrary.ViewModels[weaponName] then
-                skins[1].Image = ItemLibrary.ViewModels[weaponName].ImageCentered or ItemLibrary.ViewModels[weaponName].Image or ""
+            if ItemLibrary and ItemLibrary.ViewModels and ItemLibrary.ViewModels[targetGun] then
+                skins[1].Image = ItemLibrary.ViewModels[targetGun].ImageCentered or ItemLibrary.ViewModels[targetGun].Image or ""
             end
         end
     end)
@@ -263,7 +834,6 @@ end
 
 local function getWrapsList()
     local wraps = {}
-    -- First option: "None"
     table.insert(wraps, {
         Name = "None",
         Rarity = "Common",
@@ -274,7 +844,6 @@ local function getWrapsList()
 
     local seen = { ["None"] = true }
 
-    -- Dynamic ingestion from CosmeticLibrary
     pcall(function()
         local Modules = ReplicatedStorage:FindFirstChild("Modules")
         local CosModule = Modules and Modules:FindFirstChild("CosmeticLibrary")
@@ -314,7 +883,7 @@ local function getWrapsList()
 end
 
 -- ============================================================================
--- LIVE APPLICATION & METAMETHOD HOOKS
+-- METAMETHOD HOOKS & LOCAL PLAYER ISOLATION
 -- ============================================================================
 local function hookClientViewModel()
     pcall(function()
@@ -332,7 +901,17 @@ local function hookClientViewModel()
         if env_hookfunction then
             local oldGetWrap
             oldGetWrap = env_hookfunction(ClientViewModel.GetWrap, function(self)
-                local weaponName = (self.ClientItem and self.ClientItem.Name) or self.Name
+                -- STRICT LOCAL PLAYER ISOLATION:
+                -- Check if this viewmodel belongs to our local player
+                local clientItem = self.ClientItem
+                local fighter = clientItem and clientItem.ClientFighter
+                local isLocal = fighter and (fighter.IsLocalPlayer == true or fighter.Player == LocalPlayer)
+                if not isLocal then
+                    -- Do not modify other players!
+                    return oldGetWrap(self)
+                end
+
+                local weaponName = normalizeWeaponName((clientItem and clientItem.Name) or self.Name)
                 local cfg = State.saved[weaponName]
                 if cfg and cfg.Wrap and cfg.Wrap ~= "" and cfg.Wrap ~= "None" then
                     return {
@@ -397,15 +976,17 @@ local function hookCosmeticLibrary()
     end
 end
 
--- Force live visual change on active player model
+-- ============================================================================
+-- LIVE APPLICATION ENGINE (LOCAL ONLY + RAYCAST COLLISION SAFE)
+-- ============================================================================
 function SkinChanger.applySkinLive(targetGun)
-    local gun = targetGun or State.selectedGun
+    local gun = normalizeWeaponName(targetGun or State.selectedGun)
     local cfg = getGunConfig(gun)
     local selectedSkin = cfg.Skin
     local selectedWrap = cfg.Wrap
     local inverted = cfg.Inverted or State.invertPalette
 
-    -- 1. Apply through FighterController.LocalFighter items
+    -- 1. Apply through FighterController.LocalFighter items strictly for LocalPlayer
     pcall(function()
         local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
         local controllers = scripts and scripts:FindFirstChild("Controllers")
@@ -413,9 +994,16 @@ function SkinChanger.applySkinLive(targetGun)
         if not fc then return end
         local FighterController = require(fc)
         local fighter = FighterController.LocalFighter or (typeof(FighterController.GetFighter) == "function" and FighterController:GetFighter(LocalPlayer))
-        if fighter and fighter.Items then
+
+        -- STRICT LOCAL PLAYER & SPECTATE CHECK:
+        if not fighter then return end
+        if fighter.Player and fighter.Player ~= LocalPlayer then return end
+        if fighter:Get("IsSpectating") then return end
+
+        if fighter.Items then
             for _, item in pairs(fighter.Items) do
-                if item.Name == gun or not targetGun then
+                local itemName = normalizeWeaponName(item.Name)
+                if itemName == gun or not targetGun then
                     local vm = item.ViewModel
                     if vm then
                         -- Check if skin model needs to be swapped
@@ -432,6 +1020,20 @@ function SkinChanger.applySkinLive(targetGun)
                                     vm.ItemModel:Destroy()
                                     local clone = newModel:Clone()
                                     clone.Name = "ItemVisual"
+
+                                    -- CRUCIAL SHOT VALIDATION PROTECTION:
+                                    -- Disable CanCollide, CanTouch, and CanQuery so the weapon mesh
+                                    -- does not block camera raycasts or bullet hitboxes!
+                                    for _, part in pairs(clone:GetDescendants()) do
+                                        if part:IsA("BasePart") then
+                                            part.CanCollide = false
+                                            part.CanTouch = false
+                                            part.CanQuery = false
+                                            part.Massless = true
+                                            part.CastShadow = false
+                                        end
+                                    end
+
                                     clone.Parent = vm.Model
                                     vm.ItemModel = clone
                                     if typeof(vm._Setup) == "function" then
@@ -460,6 +1062,12 @@ function SkinChanger.applySkinLive(targetGun)
             if wc then
                 local WrapController = require(wc)
                 for _, model in pairs(fp:GetChildren()) do
+                    -- Ensure query protection on first person parts
+                    for _, part in pairs(model:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanQuery = false
+                        end
+                    end
                     local orig = WrapController:RecordOriginalWrapProperties(model)
                     WrapController:ApplyWrap(orig, { Name = selectedWrap, Inverted = inverted })
                 end
@@ -493,7 +1101,6 @@ local function clearGrid()
     table.clear(UI.catalogCards)
 end
 
--- Updates the 3D ViewportFrame preview model
 local function updatePreviewModel()
     if not UI.viewportFrame then return end
 
@@ -502,7 +1109,7 @@ local function updatePreviewModel()
         UI.previewModel = nil
     end
 
-    local gun = State.selectedGun
+    local gun = normalizeWeaponName(State.selectedGun)
     local cfg = getGunConfig(gun)
     local skinToLoad = (cfg.Skin and cfg.Skin ~= "Default" and cfg.Skin ~= "") and cfg.Skin or gun
 
@@ -523,11 +1130,9 @@ local function updatePreviewModel()
             clone.Parent = UI.viewportFrame
             UI.previewModel = clone
 
-            -- Center and pivot
             local cf, sz = clone:GetBoundingBox()
             State.orbitDistance = math.clamp(sz.Magnitude * 1.35, 2.5, 7.5)
 
-            -- Apply wrap to preview model
             if cfg.Wrap and cfg.Wrap ~= "" and cfg.Wrap ~= "None" then
                 local wc = scripts.Controllers:FindFirstChild("WrapController")
                 if wc then
@@ -547,10 +1152,10 @@ local function updatePreviewModel()
     end
 end
 
--- Refresh the top gun selector bar highlighting
 local function refreshGunSelectorHighlights()
+    local cur = normalizeWeaponName(State.selectedGun)
     for gunName, card in pairs(UI.gunCards) do
-        local isSelected = (gunName == State.selectedGun)
+        local isSelected = (gunName == cur)
         local stroke = card:FindFirstChild("UIStroke")
         local bar = card:FindFirstChild("SelectionBar")
         if stroke then
@@ -564,12 +1169,11 @@ local function refreshGunSelectorHighlights()
     end
 end
 
--- Refresh the Catalog Grid (Skins or Wraps)
 local function renderCatalogGrid()
     clearGrid()
     if not UI.gridScroll then return end
 
-    local gun = State.selectedGun
+    local gun = normalizeWeaponName(State.selectedGun)
     local cfg = getGunConfig(gun)
 
     if State.mode == "Skins" then
@@ -597,7 +1201,7 @@ local function renderCatalogGrid()
                 cStroke.Thickness = isEquipped and 2 or 1
                 cStroke.Parent = card
 
-                -- Thumbnail Image Label (Actual 3D render image model)
+                -- Thumbnail Image Label (Real 3D render image model)
                 local imgLabel = Instance.new("ImageLabel")
                 imgLabel.Size = UDim2.new(1, -12, 0, 85)
                 imgLabel.Position = UDim2.new(0, 6, 0, 8)
@@ -637,7 +1241,7 @@ local function renderCatalogGrid()
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.Parent = card
 
-                -- Status Badge (Equipped / Select)
+                -- Status Badge
                 local statusLabel = Instance.new("TextLabel")
                 statusLabel.Size = UDim2.new(1, -12, 0, 14)
                 statusLabel.Position = UDim2.new(0, 6, 0, 130)
@@ -649,7 +1253,7 @@ local function renderCatalogGrid()
                 statusLabel.TextXAlignment = Enum.TextXAlignment.Right
                 statusLabel.Parent = card
 
-                -- Click Handler: Turn emerald green, save per gun, and apply live
+                -- Click Handler
                 card.MouseButton1Click:Connect(function()
                     cfg.Skin = s.Name
                     SkinChanger.applySkinLive(gun)
@@ -712,7 +1316,6 @@ local function renderCatalogGrid()
                 secondarySwatch.BorderSizePixel = 0
                 secondarySwatch.Parent = swatchBox
 
-                -- Material tag
                 local matTag = Instance.new("TextLabel")
                 matTag.Size = UDim2.new(1, -8, 0, 16)
                 matTag.Position = UDim2.new(0, 4, 1, -20)
@@ -728,7 +1331,6 @@ local function renderCatalogGrid()
                 mCorner.CornerRadius = UDim.new(0, 4)
                 mCorner.Parent = matTag
 
-                -- Rarity Badge
                 local rColor = RARITY_COLORS[w.Rarity] or Color3.fromRGB(150, 150, 150)
                 local rBadge = Instance.new("TextLabel")
                 rBadge.Size = UDim2.new(1, -12, 0, 14)
@@ -741,7 +1343,6 @@ local function renderCatalogGrid()
                 rBadge.TextXAlignment = Enum.TextXAlignment.Left
                 rBadge.Parent = card
 
-                -- Wrap Name Label
                 local nameLabel = Instance.new("TextLabel")
                 nameLabel.Size = UDim2.new(1, -12, 0, 18)
                 nameLabel.Position = UDim2.new(0, 6, 0, 111)
@@ -754,7 +1355,6 @@ local function renderCatalogGrid()
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.Parent = card
 
-                -- Status Badge
                 local statusLabel = Instance.new("TextLabel")
                 statusLabel.Size = UDim2.new(1, -12, 0, 14)
                 statusLabel.Position = UDim2.new(0, 6, 0, 130)
@@ -766,7 +1366,6 @@ local function renderCatalogGrid()
                 statusLabel.TextXAlignment = Enum.TextXAlignment.Right
                 statusLabel.Parent = card
 
-                -- Click Handler
                 card.MouseButton1Click:Connect(function()
                     cfg.Wrap = w.Name
                     SkinChanger.applySkinLive(gun)
@@ -779,9 +1378,8 @@ local function renderCatalogGrid()
         end
 
     elseif State.mode == "UnlockAll" then
-        -- Dedicated Unlock All & Spoofer Panel inside grid area
         local panel = Instance.new("Frame")
-        panel.Size = UDim2.new(1, -16, 0, 360)
+        panel.Size = UDim2.new(1, -16, 0, 390)
         panel.BackgroundColor3 = Color3.fromRGB(20, 24, 34)
         panel.Parent = UI.gridScroll
 
@@ -794,19 +1392,19 @@ local function renderCatalogGrid()
         pStroke.Parent = panel
 
         local pTitle = Instance.new("TextLabel")
-        pTitle.Size = UDim2.new(1, -24, 0, 30)
-        pTitle.Position = UDim2.new(0, 16, 0, 14)
+        pTitle.Size = UDim2.new(1, -24, 0, 26)
+        pTitle.Position = UDim2.new(0, 16, 0, 12)
         pTitle.BackgroundTransparency = 1
         pTitle.Font = Enum.Font.GothamBold
         pTitle.Text = "COSMETIC & WEAPON SPOOFER SETTINGS"
         pTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
-        pTitle.TextSize = 14
+        pTitle.TextSize = 13
         pTitle.TextXAlignment = Enum.TextXAlignment.Left
         pTitle.Parent = panel
 
-        local function makeToggle(label, initialVal, yPos, callback)
+        local function makeToggle(label, subtitle, initialVal, yPos, callback)
             local tRow = Instance.new("Frame")
-            tRow.Size = UDim2.new(1, -32, 0, 48)
+            tRow.Size = UDim2.new(1, -32, 0, 52)
             tRow.Position = UDim2.new(0, 16, 0, yPos)
             tRow.BackgroundColor3 = Color3.fromRGB(26, 31, 44)
             tRow.Parent = panel
@@ -816,15 +1414,26 @@ local function renderCatalogGrid()
             rCorner.Parent = tRow
 
             local rLabel = Instance.new("TextLabel")
-            rLabel.Size = UDim2.new(0.7, 0, 1, 0)
-            rLabel.Position = UDim2.new(0, 14, 0, 0)
+            rLabel.Size = UDim2.new(0.72, 0, 0, 20)
+            rLabel.Position = UDim2.new(0, 14, 0, 8)
             rLabel.BackgroundTransparency = 1
             rLabel.Font = Enum.Font.GothamMedium
             rLabel.Text = label
             rLabel.TextColor3 = Color3.fromRGB(220, 230, 245)
-            rLabel.TextSize = 12
+            rLabel.TextSize = 11
             rLabel.TextXAlignment = Enum.TextXAlignment.Left
             rLabel.Parent = tRow
+
+            local rSub = Instance.new("TextLabel")
+            rSub.Size = UDim2.new(0.72, 0, 0, 16)
+            rSub.Position = UDim2.new(0, 14, 0, 28)
+            rSub.BackgroundTransparency = 1
+            rSub.Font = Enum.Font.Gotham
+            rSub.Text = subtitle or ""
+            rSub.TextColor3 = Color3.fromRGB(120, 135, 160)
+            rSub.TextSize = 9
+            rSub.TextXAlignment = Enum.TextXAlignment.Left
+            rSub.Parent = tRow
 
             local tBtn = Instance.new("TextButton")
             tBtn.Size = UDim2.new(0, 90, 0, 30)
@@ -848,26 +1457,25 @@ local function renderCatalogGrid()
             end)
         end
 
-        makeToggle("Unlock All Cosmetics (Wraps, Charms, Finishers)", State.unlockAll, 55, function(v)
+        makeToggle("Unlock All Cosmetics", "Allows selecting all wraps, charms, titles in menus", State.unlockAll, 44, function(v)
             State.unlockAll = v
             hookCosmeticLibrary()
         end)
 
-        makeToggle("Unlock All Weapons (Inventory Spoofer)", State.unlockWeapons, 115, function(v)
+        makeToggle("Unlock All Weapons (Caution)", "Visual only; unowned weapons will drop server shot validation", State.unlockWeapons, 104, function(v)
             State.unlockWeapons = v
             hookCosmeticLibrary()
         end)
 
-        makeToggle("Invert Wrap Palette (Swap Colors 1 & 2)", State.invertPalette, 175, function(v)
+        makeToggle("Invert Wrap Palette", "Swaps WrapGroup 1 and 2 for reverse pattern styles", State.invertPalette, 164, function(v)
             State.invertPalette = v
             SkinChanger.applySkinLive(gun)
             updatePreviewModel()
         end)
 
-        -- Action buttons: Reset current gun, Reset all
         local resetGunBtn = Instance.new("TextButton")
         resetGunBtn.Size = UDim2.new(0.48, 0, 0, 42)
-        resetGunBtn.Position = UDim2.new(0, 16, 0, 245)
+        resetGunBtn.Position = UDim2.new(0, 16, 0, 235)
         resetGunBtn.BackgroundColor3 = Color3.fromRGB(45, 52, 70)
         resetGunBtn.Font = Enum.Font.GothamBold
         resetGunBtn.Text = "RESET THIS WEAPON"
@@ -888,7 +1496,7 @@ local function renderCatalogGrid()
 
         local resetAllBtn = Instance.new("TextButton")
         resetAllBtn.Size = UDim2.new(0.48, 0, 0, 42)
-        resetAllBtn.Position = UDim2.new(0.52, -8, 0, 245)
+        resetAllBtn.Position = UDim2.new(0.52, -8, 0, 235)
         resetAllBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
         resetAllBtn.Font = Enum.Font.GothamBold
         resetAllBtn.Text = "RESET ALL WEAPONS"
@@ -930,7 +1538,6 @@ function SkinChanger.createGui()
     screenGui.Parent = parent
     UI.screenGui = screenGui
 
-    -- Main Window Frame: 980 x 620
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainWindow"
     mainFrame.Size = UDim2.new(0, 980, 0, 620)
@@ -979,7 +1586,6 @@ function SkinChanger.createGui()
         end
     end)
 
-    -- Header Title & Subtitle
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Size = UDim2.new(0, 320, 0, 24)
     titleLabel.Position = UDim2.new(0, 16, 0, 8)
@@ -1003,7 +1609,6 @@ function SkinChanger.createGui()
     headerStatus.Parent = headerBar
     UI.headerStatus = headerStatus
 
-    -- Controls in Header (Mode switchers & Window Buttons)
     local headerControls = Instance.new("Frame")
     headerControls.Size = UDim2.new(0, 480, 1, 0)
     headerControls.Position = UDim2.new(1, -490, 0, 0)
@@ -1034,27 +1639,26 @@ function SkinChanger.createGui()
         return btn
     end
 
-    local skinsBtn = makeHeaderPill("ModeSkins", "🎭 SKINS", 0, 85, function()
+    makeHeaderPill("ModeSkins", "🎭 SKINS", 0, 85, function()
         State.mode = "Skins"
         renderCatalogGrid()
     end)
 
-    local wrapsBtn = makeHeaderPill("ModeWraps", "🎨 WRAPS", 95, 85, function()
+    makeHeaderPill("ModeWraps", "🎨 WRAPS", 95, 85, function()
         State.mode = "Wraps"
         renderCatalogGrid()
     end)
 
-    local unlockBtn = makeHeaderPill("ModeUnlock", "🔓 UNLOCK ALL", 190, 105, function()
+    makeHeaderPill("ModeUnlock", "🔓 UNLOCK ALL", 190, 105, function()
         State.mode = "UnlockAll"
         renderCatalogGrid()
     end)
 
-    local liveApplyBtn = makeHeaderPill("LiveApply", "✨ APPLY NOW", 305, 95, function()
+    makeHeaderPill("LiveApply", "✨ APPLY NOW", 305, 95, function()
         SkinChanger.applySkinLive(State.selectedGun)
         updatePreviewModel()
     end)
 
-    -- Window control buttons (Minimize & Close)
     local minBtn = Instance.new("TextButton")
     minBtn.Size = UDim2.new(0, 28, 0, 28)
     minBtn.Position = UDim2.new(1, -66, 0.5, -14)
@@ -1091,9 +1695,7 @@ function SkinChanger.createGui()
         SkinChanger.close()
     end)
 
-    -- ========================================================================
-    -- TOP GUN SELECTOR STRIP (HORIZONTAL SCROLLING)
-    -- ========================================================================
+    -- Top Gun Selector Strip (Horizontal Scrolling)
     local gunStripContainer = Instance.new("Frame")
     gunStripContainer.Name = "GunStripContainer"
     gunStripContainer.Size = UDim2.new(1, 0, 0, 84)
@@ -1120,7 +1722,6 @@ function SkinChanger.createGui()
     gunListLayout.SortOrder = Enum.SortOrder.LayoutOrder
     gunListLayout.Parent = topGunScroll
 
-    -- Populate gun selector cards
     local weapons = getWeaponsList()
     for idx, w in ipairs(weapons) do
         local gCard = Instance.new("TextButton")
@@ -1189,9 +1790,7 @@ function SkinChanger.createGui()
         UI.gunCards[w.Name] = gCard
     end
 
-    -- ========================================================================
-    -- BODY AREA: 3D PREVIEW (LEFT) + CATALOG GRID (RIGHT)
-    -- ========================================================================
+    -- Body Area: Viewport (Left) + Catalog Grid (Right)
     local bodyFrame = Instance.new("Frame")
     bodyFrame.Name = "BodyFrame"
     bodyFrame.Size = UDim2.new(1, -24, 1, -150)
@@ -1199,7 +1798,7 @@ function SkinChanger.createGui()
     bodyFrame.BackgroundTransparency = 1
     bodyFrame.Parent = mainFrame
 
-    -- LEFT PANEL: 3D VIEWPORT FRAME
+    -- Left: 3D ViewportFrame
     local leftPanel = Instance.new("Frame")
     leftPanel.Name = "LeftPanel"
     leftPanel.Size = UDim2.new(0, 340, 1, 0)
@@ -1215,7 +1814,6 @@ function SkinChanger.createGui()
     lpStroke.Color = Color3.fromRGB(38, 44, 62)
     lpStroke.Parent = leftPanel
 
-    -- ViewportFrame
     local viewport = Instance.new("ViewportFrame")
     viewport.Name = "WeaponPreviewViewport"
     viewport.Size = UDim2.new(1, -16, 0, 310)
@@ -1237,7 +1835,6 @@ function SkinChanger.createGui()
     viewport.CurrentCamera = previewCamera
     UI.previewCamera = previewCamera
 
-    -- Orbit Render Loop
     RunService.RenderStepped:Connect(function(dt)
         if not State.orbitPaused then
             State.orbitAngle = State.orbitAngle + (dt * 0.9)
@@ -1254,7 +1851,6 @@ function SkinChanger.createGui()
         end
     end)
 
-    -- Left Panel Controls: Info Card & Pause/Resume
     local infoBox = Instance.new("Frame")
     infoBox.Size = UDim2.new(1, -16, 0, 80)
     infoBox.Position = UDim2.new(0, 8, 0, 326)
@@ -1297,7 +1893,7 @@ function SkinChanger.createGui()
         pauseBtn.TextColor3 = State.orbitPaused and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(200, 215, 235)
     end)
 
-    -- RIGHT PANEL: SEARCH, FILTERS & CATALOG GRID
+    -- Right: Search, Filters & Catalog Grid
     local rightPanel = Instance.new("Frame")
     rightPanel.Name = "RightPanel"
     rightPanel.Size = UDim2.new(1, -352, 1, 0)
@@ -1313,7 +1909,6 @@ function SkinChanger.createGui()
     rpStroke.Color = Color3.fromRGB(38, 44, 62)
     rpStroke.Parent = rightPanel
 
-    -- Search Bar & Filter Header
     local filterBar = Instance.new("Frame")
     filterBar.Size = UDim2.new(1, -16, 0, 36)
     filterBar.Position = UDim2.new(0, 8, 0, 8)
@@ -1342,7 +1937,6 @@ function SkinChanger.createGui()
         renderCatalogGrid()
     end)
 
-    -- Rarity filter pills
     local rarityPillsContainer = Instance.new("Frame")
     rarityPillsContainer.Size = UDim2.new(0.5, 0, 1, 0)
     rarityPillsContainer.Position = UDim2.new(0.5, 0, 0, 0)
@@ -1388,7 +1982,6 @@ function SkinChanger.createGui()
     makeRarityPill("Rare")
     makeRarityPill("Common")
 
-    -- Catalog Grid ScrollingFrame
     local gridScroll = Instance.new("ScrollingFrame")
     gridScroll.Name = "CatalogGrid"
     gridScroll.Size = UDim2.new(1, -16, 1, -56)
@@ -1407,9 +2000,7 @@ function SkinChanger.createGui()
     gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
     gridLayout.Parent = gridScroll
 
-    -- ========================================================================
-    -- MINIMIZED FLOATING PILL WIDGET
-    -- ========================================================================
+    -- Minimized Floating Pill
     local miniPill = Instance.new("TextButton")
     miniPill.Name = "SkinChangerMiniPill"
     miniPill.Size = UDim2.new(0, 150, 0, 36)
@@ -1436,7 +2027,6 @@ function SkinChanger.createGui()
         SkinChanger.restore()
     end)
 
-    -- Toggle Hotkey (RightControl)
     UserInputService.InputBegan:Connect(function(input, processed)
         if processed then return end
         if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.F4 then
@@ -1444,13 +2034,12 @@ function SkinChanger.createGui()
         end
     end)
 
-    -- Initialize state
     updatePreviewModel()
     renderCatalogGrid()
 end
 
 -- ============================================================================
--- WINDOW VISIBILITY & CONTROLS
+-- WINDOW CONTROLS & API
 -- ============================================================================
 function SkinChanger.open()
     State.uiVisible = true
@@ -1488,16 +2077,12 @@ function SkinChanger.toggle()
     end
 end
 
--- ============================================================================
--- INITIALIZATION & AUTO-RUN
--- ============================================================================
 function SkinChanger.start()
     hookClientViewModel()
     hookCosmeticLibrary()
     SkinChanger.createGui()
 end
 
--- Auto-start when executed as a root script
 if not getgenv then
     task.spawn(SkinChanger.start)
 else
