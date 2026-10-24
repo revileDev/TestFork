@@ -152,23 +152,23 @@ if _G.AtomwareConfig then _G.AtomwareConfig:AttachUI(ScreenGui, "Desktop PC") en
 
 local activeDropdownCloser = nil
 
--- Full-screen click blocker backdrop to prevent clicks passing to background/game while UI is open
-local ClickBlocker = Instance.new("TextButton")
+-- Fullscreen click-blocker backdrop: sinks clicks when UI is open so game/background cannot be clicked
+local ClickBlocker = Instance.new("Frame")
 ClickBlocker.Name = "AtomwareClickBlocker"
 ClickBlocker.Size = UDim2.new(1, 0, 1, 0)
 ClickBlocker.Position = UDim2.new(0, 0, 0, 0)
 ClickBlocker.BackgroundTransparency = 1
-ClickBlocker.Text = ""
-ClickBlocker.AutoButtonColor = false
+ClickBlocker.BorderSizePixel = 0
 ClickBlocker.Active = true
-ClickBlocker.Modal = true
 ClickBlocker.ZIndex = 1
 ClickBlocker.Visible = true
 ClickBlocker.Parent = ScreenGui
 
-trackConnection(ClickBlocker.MouseButton1Click:Connect(function()
-    if activeDropdownCloser then
-        activeDropdownCloser()
+trackConnection(ClickBlocker.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if activeDropdownCloser then
+            activeDropdownCloser()
+        end
     end
 end))
 
@@ -275,9 +275,6 @@ trackConnection(Header.InputBegan:Connect(function(input)
         dragging = true
         dragStart = input.Position
         startPos = MainFrame.Position
-        if AtomwareWindow then AtomwareWindow.uiDragging = true end
-        local bridge = rawget(_G, "__atomware_rivals_bridge")
-        if bridge and bridge.library then bridge.library.uiDragging = true end
     end
 end))
 
@@ -296,9 +293,6 @@ end))
 trackConnection(UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = false
-        if AtomwareWindow then AtomwareWindow.uiDragging = false end
-        local bridge = rawget(_G, "__atomware_rivals_bridge")
-        if bridge and bridge.library then bridge.library.uiDragging = false end
     end
 end))
 
@@ -310,23 +304,10 @@ local function setMenuVisible(visible)
     MainFrame.Active = MenuOpen
     ClickBlocker.Visible = MenuOpen
     ClickBlocker.Active = MenuOpen
-    ClickBlocker.Modal = MenuOpen
-
     if AtomwareWindow then
         AtomwareWindow.open = MenuOpen
     end
-    local bridge = rawget(_G, "__atomware_rivals_bridge")
-    if bridge and bridge.library then
-        bridge.library.open = MenuOpen
-    end
     _G.AtomwareMenuOpen = MenuOpen
-
-    if MenuOpen then
-        pcall(function()
-            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-            UserInputService.MouseIconEnabled = true
-        end)
-    end
 end
 
 trackConnection(CloseBtn.MouseButton1Click:Connect(function()
@@ -558,14 +539,9 @@ local function wrapSection(card, body, title)
         body = body,
         text = title,
         options = {},
-        controls = {},
     }
 
     function section:AddToggle(data)
-        local ctrlKey = "toggle:" .. string.lower(data.flag or data.text or "")
-        if ctrlKey ~= "toggle:" and section.controls[ctrlKey] then
-            return section.controls[ctrlKey]
-        end
         local text = data.text or ""
         local state = data.state == true
         local callback = data.callback
@@ -674,15 +650,10 @@ local function wrapSection(card, body, title)
         end
 
         table.insert(section.options, { row = row, obj = toggleObj })
-        if ctrlKey ~= "toggle:" then section.controls[ctrlKey] = toggleObj end
         return toggleObj
     end
 
     function section:AddSlider(data)
-        local ctrlKey = "slider:" .. string.lower(data.flag or data.text or "")
-        if ctrlKey ~= "slider:" and section.controls[ctrlKey] then
-            return section.controls[ctrlKey]
-        end
         local text = data.text or ""
         local min = data.min or 0
         local max = data.max or 100
@@ -776,15 +747,10 @@ local function wrapSection(card, body, title)
         end
 
         table.insert(section.options, { row = row, obj = sliderObj })
-        if ctrlKey ~= "slider:" then section.controls[ctrlKey] = sliderObj end
         return sliderObj
     end
 
     function section:AddList(data)
-        local ctrlKey = "list:" .. string.lower(data.flag or data.text or "")
-        if ctrlKey ~= "list:" and section.controls[ctrlKey] then
-            return section.controls[ctrlKey]
-        end
         local text = data.text or ""
         local values = data.values or {}
         local multi = data.multi == true
@@ -972,7 +938,6 @@ local function wrapSection(card, body, title)
         end
 
         table.insert(section.options, { row = row, obj = listObj })
-        if ctrlKey ~= "list:" then section.controls[ctrlKey] = listObj end
         return listObj
     end
 
@@ -981,10 +946,6 @@ local function wrapSection(card, body, title)
     end
 
     function section:AddBind(data)
-        local ctrlKey = "bind:" .. string.lower(data.flag or data.text or "")
-        if ctrlKey ~= "bind:" and section.controls[ctrlKey] then
-            return section.controls[ctrlKey]
-        end
         local text = data.text or ""
         local bind = data.bind or "None"
         local keycallback = data.keycallback
@@ -1052,7 +1013,6 @@ local function wrapSection(card, body, title)
         end
 
         table.insert(section.options, { row = row, obj = bindObj })
-        if ctrlKey ~= "bind:" then section.controls[ctrlKey] = bindObj end
         return bindObj
     end
 
@@ -1119,10 +1079,6 @@ local function wrapSection(card, body, title)
     end
 
     function section:AddButton(data)
-        local ctrlKey = "button:" .. string.lower(data.text or "")
-        if ctrlKey ~= "button:" and section.controls[ctrlKey] then
-            return section.controls[ctrlKey]
-        end
         local text = data.text or "Button"
         local confirm = data.confirm == true
         local callback = data.callback
@@ -1224,7 +1180,6 @@ local function wrapSection(card, body, title)
         end
 
         table.insert(section.options, { row = row, obj = btnObj })
-        if ctrlKey ~= "button:" then section.controls[ctrlKey] = btnObj end
         return btnObj
     end
 
@@ -1345,27 +1300,68 @@ end
 function AtomwareWindow:AddTab(rawName, order)
     local lower = string.lower(rawName or "")
     if lower == "extras" then
-        local dummyTab = {
+        local mockSec = {
+            card = Instance.new("Frame"),
+            body = Instance.new("Frame"),
+            text = "extras",
+            options = {},
+        }
+        setmetatable(mockSec, {
+            __index = function(t, k)
+                return function(...)
+                    local dummy = {
+                        values = {},
+                        selected = nil,
+                        state = false,
+                        value = 0,
+                        text = "",
+                        enabled = true,
+                        count = 1,
+                        scroll = 0,
+                        AddButton = function() return end,
+                        AddColor = function() return { SetColor = function() end } end,
+                        AddValue = function() end,
+                        SetValues = function() end,
+                        ClearValues = function() end,
+                        SetText = function() end,
+                        SetState = function() end,
+                        SetValue = function() end,
+                        SetColor = function() end,
+                        SetBind = function() end,
+                        SetInput = function() end,
+                        Select = function() end,
+                        UpdateOptions = function() end,
+                    }
+                    setmetatable(dummy, {
+                        __index = function(dt, dk)
+                            return function(...) return dummy end
+                        end
+                    })
+                    return dummy
+                end
+            end
+        })
+        local mockTabObj = {
             name = "Extras",
             sections = {},
-            AddSection = function(selfProxy, text, side, sOrder)
-                return {
-                    AddToggle = function() return { SetState = function() end, AddColor = function() return { SetColor = function() end } end } end,
-                    AddSlider = function() return { SetValue = function() end } end,
-                    AddDropdown = function() return { Select = function() end, ClearValues = function() end, AddValue = function() end } end,
-                    AddList = function() return { Select = function() end, ClearValues = function() end, AddValue = function() end } end,
-                    AddButton = function() return {} end,
-                    AddButtons = function() return {} end,
-                    AddKeybind = function() return {} end,
-                    AddColor = function() return { SetColor = function() end } end,
-                    UpdateOptions = function() end,
-                }
+            AddSection = function(self, text, side, sOrder)
+                return mockSec
             end,
             AddSubTabs = function() end,
             UpdateSections = function() end,
         }
-        self.tabs[rawName] = dummyTab
-        return dummyTab
+        setmetatable(mockTabObj, {
+            __index = function(t, k)
+                if k == "AddSection" then
+                    return function(self, text, side, sOrder)
+                        return mockSec
+                    end
+                end
+                return function(...) return mockTabObj end
+            end
+        })
+        self.tabs[rawName] = mockTabObj
+        return mockTabObj
     end
     if lower == "spoofing" or lower == "spoof" then
         return self:AddTab("misc")
@@ -1401,17 +1397,11 @@ function AtomwareWindow:AddTab(rawName, order)
         name = displayName,
         page = page,
         sections = {},
-        sectionMap = {},
     }
 
     function tabObj:AddSection(text, side, order)
-        local secKey = string.lower(text or "")
-        if tabObj.sectionMap[secKey] then
-            return tabObj.sectionMap[secKey]
-        end
         local card, body = createCard(page, text, side)
         local section = wrapSection(card, body, text)
-        tabObj.sectionMap[secKey] = section
         table.insert(tabObj.sections, section)
         return section
     end
