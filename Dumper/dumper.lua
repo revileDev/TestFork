@@ -138,10 +138,13 @@ local httpRequest = pickFn(
 )
 
 --//==================================================
---// UNIVERSAL DUMPER UI & LIVE LOGGING SYSTEM
+--// UNIVERSAL DUMPER PRO UI & DIAGNOSTIC SUITE
 --//==================================================
 local DumperUI = nil
 local UIConnections = {}
+local ScriptRows = {}
+local RemoteRows = {}
+local RawLogRows = {}
 
 local function trackUIConn(conn)
 	if typeof(conn) == "RBXScriptConnection" then
@@ -178,23 +181,27 @@ local function createDumperUI()
 	local FONT_MONO = Enum.Font.RobotoMono
 
 	local THEME = {
-		Bg = Color3.fromRGB(17, 20, 28),
-		Header = Color3.fromRGB(23, 27, 38),
-		Border = Color3.fromRGB(38, 45, 62),
-		CardBg = Color3.fromRGB(24, 29, 41),
-		ConsoleBg = Color3.fromRGB(11, 13, 19),
-		TextPrimary = Color3.fromRGB(245, 247, 252),
-		TextMuted = Color3.fromRGB(130, 142, 168),
-		AccentCyan = Color3.fromRGB(0, 185, 235),
-		AccentGreen = Color3.fromRGB(60, 220, 130),
+		Bg = Color3.fromRGB(15, 18, 26),
+		Header = Color3.fromRGB(20, 24, 34),
+		Nav = Color3.fromRGB(18, 22, 30),
+		Border = Color3.fromRGB(34, 40, 56),
+		CardBg = Color3.fromRGB(22, 27, 38),
+		CardHover = Color3.fromRGB(28, 34, 48),
+		ConsoleBg = Color3.fromRGB(10, 12, 17),
+		TextPrimary = Color3.fromRGB(245, 248, 255),
+		TextSecondary = Color3.fromRGB(175, 185, 205),
+		TextMuted = Color3.fromRGB(115, 128, 155),
+		AccentCyan = Color3.fromRGB(0, 195, 245),
+		AccentGreen = Color3.fromRGB(55, 225, 135),
 		AccentOrange = Color3.fromRGB(250, 175, 45),
 		AccentRed = Color3.fromRGB(240, 75, 85),
 		AccentBlue = Color3.fromRGB(80, 145, 255),
+		AccentPurple = Color3.fromRGB(165, 95, 255),
 	}
 
 	local function corner(inst, r)
 		local c = Instance.new("UICorner")
-		c.CornerRadius = UDim.new(0, r)
+		c.CornerRadius = UDim.new(0, r or 6)
 		c.Parent = inst
 		return c
 	end
@@ -208,11 +215,11 @@ local function createDumperUI()
 		return s
 	end
 
-	-- Main Frame
+	-- Main Window Frame
 	local MainFrame = Instance.new("Frame")
 	MainFrame.Name = "MainFrame"
-	MainFrame.Size = UDim2.fromOffset(560, 395)
-	MainFrame.Position = UDim2.new(0.5, -280, 0.5, -197)
+	MainFrame.Size = UDim2.fromOffset(620, 440)
+	MainFrame.Position = UDim2.new(0.5, -310, 0.5, -220)
 	MainFrame.BackgroundColor3 = THEME.Bg
 	MainFrame.BorderSizePixel = 0
 	MainFrame.ClipsDescendants = true
@@ -221,7 +228,7 @@ local function createDumperUI()
 	corner(MainFrame, 8)
 	stroke(MainFrame, THEME.Border, 1.5)
 
-	-- Header
+	-- Top Header Bar
 	local Header = Instance.new("Frame")
 	Header.Name = "Header"
 	Header.Size = UDim2.new(1, 0, 0, 42)
@@ -229,53 +236,53 @@ local function createDumperUI()
 	Header.BorderSizePixel = 0
 	Header.Parent = MainFrame
 
-	local HeaderBottomLine = Instance.new("Frame")
-	HeaderBottomLine.Size = UDim2.new(1, 0, 0, 1)
-	HeaderBottomLine.Position = UDim2.new(0, 0, 1, -1)
-	HeaderBottomLine.BackgroundColor3 = THEME.Border
-	HeaderBottomLine.BorderSizePixel = 0
-	HeaderBottomLine.Parent = Header
+	local HeaderLine = Instance.new("Frame")
+	HeaderLine.Size = UDim2.new(1, 0, 0, 1)
+	HeaderLine.Position = UDim2.new(0, 0, 1, -1)
+	HeaderLine.BackgroundColor3 = THEME.Border
+	HeaderLine.BorderSizePixel = 0
+	HeaderLine.Parent = Header
 
-	local TitleLabel = Instance.new("TextLabel")
-	TitleLabel.Text = "UNIVERSAL DUMPER"
-	TitleLabel.Font = FONT_BOLD
-	TitleLabel.TextSize = 13
-	TitleLabel.TextColor3 = THEME.TextPrimary
-	TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	TitleLabel.BackgroundTransparency = 1
-	TitleLabel.Position = UDim2.new(0, 14, 0, 0)
-	TitleLabel.Size = UDim2.new(0, 150, 1, 0)
-	TitleLabel.Parent = Header
+	local Title = Instance.new("TextLabel")
+	Title.Text = "UNIVERSAL PLACE DUMPER PRO"
+	Title.Font = FONT_BOLD
+	Title.TextSize = 13
+	Title.TextColor3 = THEME.TextPrimary
+	Title.TextXAlignment = Enum.TextXAlignment.Left
+	Title.BackgroundTransparency = 1
+	Title.Position = UDim2.new(0, 14, 0, 0)
+	Title.Size = UDim2.new(0, 230, 1, 0)
+	Title.Parent = Header
 
-	local VersionLabel = Instance.new("TextLabel")
-	VersionLabel.Text = "v" .. VERSION
-	VersionLabel.Font = FONT_REG
-	VersionLabel.TextSize = 11
-	VersionLabel.TextColor3 = THEME.TextMuted
-	VersionLabel.TextXAlignment = Enum.TextXAlignment.Left
-	VersionLabel.BackgroundTransparency = 1
-	VersionLabel.Position = UDim2.new(0, 168, 0, 0)
-	VersionLabel.Size = UDim2.new(0, 50, 1, 0)
-	VersionLabel.Parent = Header
+	local VersionPill = Instance.new("TextLabel")
+	VersionPill.Text = "v" .. VERSION
+	VersionPill.Font = FONT_REG
+	VersionPill.TextSize = 10
+	VersionPill.TextColor3 = THEME.AccentCyan
+	VersionPill.BackgroundColor3 = Color3.fromRGB(20, 40, 60)
+	VersionPill.Size = UDim2.fromOffset(45, 18)
+	VersionPill.Position = UDim2.new(0, 245, 0.5, -9)
+	VersionPill.Parent = Header
+	corner(VersionPill, 4)
 
-	local LiveStatusDot = Instance.new("Frame")
-	LiveStatusDot.Size = UDim2.fromOffset(8, 8)
-	LiveStatusDot.Position = UDim2.new(0, 222, 0.5, -4)
-	LiveStatusDot.BackgroundColor3 = THEME.AccentGreen
-	LiveStatusDot.BorderSizePixel = 0
-	LiveStatusDot.Parent = Header
-	corner(LiveStatusDot, 4)
+	local StatusDot = Instance.new("Frame")
+	StatusDot.Size = UDim2.fromOffset(8, 8)
+	StatusDot.Position = UDim2.new(0, 302, 0.5, -4)
+	StatusDot.BackgroundColor3 = THEME.AccentGreen
+	StatusDot.BorderSizePixel = 0
+	StatusDot.Parent = Header
+	corner(StatusDot, 4)
 
-	local LiveStatusText = Instance.new("TextLabel")
-	LiveStatusText.Text = "DUMPING"
-	LiveStatusText.Font = FONT_BOLD
-	LiveStatusText.TextSize = 10
-	LiveStatusText.TextColor3 = THEME.AccentGreen
-	LiveStatusText.TextXAlignment = Enum.TextXAlignment.Left
-	LiveStatusText.BackgroundTransparency = 1
-	LiveStatusText.Position = UDim2.new(0, 235, 0, 0)
-	LiveStatusText.Size = UDim2.new(0, 100, 1, 0)
-	LiveStatusText.Parent = Header
+	local StatusText = Instance.new("TextLabel")
+	StatusText.Text = "RUNNING"
+	StatusText.Font = FONT_BOLD
+	StatusText.TextSize = 10
+	StatusText.TextColor3 = THEME.AccentGreen
+	StatusText.TextXAlignment = Enum.TextXAlignment.Left
+	StatusText.BackgroundTransparency = 1
+	StatusText.Position = UDim2.new(0, 315, 0, 0)
+	StatusText.Size = UDim2.new(0, 80, 1, 0)
+	StatusText.Parent = Header
 
 	-- Header Controls: Unload & Minimize
 	local UnloadBtn = Instance.new("TextButton")
@@ -305,7 +312,7 @@ local function createDumperUI()
 	corner(MinimizeBtn, 5)
 	stroke(MinimizeBtn, THEME.Border, 1)
 
-	-- Draggable Logic
+	-- Window Dragging Logic
 	local dragging, dragStart, startPos
 	trackUIConn(Header.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -328,72 +335,147 @@ local function createDumperUI()
 		end
 	end))
 
-	-- Body Container
-	local BodyFrame = Instance.new("Frame")
-	BodyFrame.Name = "BodyFrame"
-	BodyFrame.Size = UDim2.new(1, 0, 1, -42)
-	BodyFrame.Position = UDim2.new(0, 0, 0, 42)
-	BodyFrame.BackgroundTransparency = 1
-	BodyFrame.Parent = MainFrame
+	-- Navigation Tab Bar
+	local NavFrame = Instance.new("Frame")
+	NavFrame.Name = "NavFrame"
+	NavFrame.Size = UDim2.new(1, 0, 0, 34)
+	NavFrame.Position = UDim2.new(0, 0, 0, 42)
+	NavFrame.BackgroundColor3 = THEME.Nav
+	NavFrame.BorderSizePixel = 0
+	NavFrame.Parent = MainFrame
 
-	-- Toggle Minimize
+	local NavBottomLine = Instance.new("Frame")
+	NavBottomLine.Size = UDim2.new(1, 0, 0, 1)
+	NavBottomLine.Position = UDim2.new(0, 0, 1, -1)
+	NavBottomLine.BackgroundColor3 = THEME.Border
+	NavBottomLine.BorderSizePixel = 0
+	NavBottomLine.Parent = NavFrame
+
+	local BodyContainer = Instance.new("Frame")
+	BodyContainer.Name = "BodyContainer"
+	BodyContainer.Size = UDim2.new(1, 0, 1, -76)
+	BodyContainer.Position = UDim2.new(0, 0, 0, 76)
+	BodyContainer.BackgroundTransparency = 1
+	BodyContainer.Parent = MainFrame
+
+	-- Tab Management
+	local tabs = {}
+	local activeTab = nil
+	local tabButtons = {}
+
+	local function switchTab(name)
+		for tabName, page in pairs(tabs) do
+			page.Visible = (tabName == name)
+		end
+		for tabName, btn in pairs(tabButtons) do
+			if tabName == name then
+				btn.TextColor3 = THEME.TextPrimary
+				btn.BackgroundColor3 = THEME.CardBg
+			else
+				btn.TextColor3 = THEME.TextMuted
+				btn.BackgroundColor3 = THEME.Nav
+			end
+		end
+		activeTab = name
+	end
+
+	local function addTabButton(name, text, xPos, width)
+		local btn = Instance.new("TextButton")
+		btn.Name = "Tab_" .. name
+		btn.Size = UDim2.fromOffset(width, 28)
+		btn.Position = UDim2.new(0, xPos, 0.5, -14)
+		btn.BackgroundColor3 = THEME.Nav
+		btn.Text = text
+		btn.Font = FONT_BOLD
+		btn.TextSize = 11
+		btn.TextColor3 = THEME.TextMuted
+		btn.AutoButtonColor = true
+		btn.Parent = NavFrame
+		corner(btn, 5)
+
+		trackUIConn(btn.MouseButton1Click:Connect(function()
+			switchTab(name)
+		end))
+		tabButtons[name] = btn
+		return btn
+	end
+
+	local btnWidth = 116
+	addTabButton("Dashboard", "📊 Dashboard", 10, btnWidth)
+	addTabButton("Terminal", "📜 Terminal", 10 + (btnWidth + 6), btnWidth)
+	addTabButton("Scripts", "🔍 Scripts", 10 + (btnWidth + 6) * 2, btnWidth)
+	addTabButton("Remotes", "📡 Remotes", 10 + (btnWidth + 6) * 3, btnWidth)
+	addTabButton("Settings", "⚙️ Settings", 10 + (btnWidth + 6) * 4, btnWidth)
+
+	-- Minimize toggle logic
 	local isMinimized = false
 	trackUIConn(MinimizeBtn.MouseButton1Click:Connect(function()
 		isMinimized = not isMinimized
 		if isMinimized then
-			MainFrame.Size = UDim2.fromOffset(560, 42)
-			BodyFrame.Visible = false
+			MainFrame.Size = UDim2.fromOffset(620, 42)
+			NavFrame.Visible = false
+			BodyContainer.Visible = false
 			MinimizeBtn.Text = "+"
 		else
-			MainFrame.Size = UDim2.fromOffset(560, 395)
-			BodyFrame.Visible = true
+			MainFrame.Size = UDim2.fromOffset(620, 440)
+			NavFrame.Visible = true
+			BodyContainer.Visible = true
 			MinimizeBtn.Text = "—"
 		end
 	end))
 
-	-- Progress Bar Section
+	--==================================================
+	-- 1. TAB: DASHBOARD
+	--==================================================
+	local PageDashboard = Instance.new("Frame")
+	PageDashboard.Name = "Page_Dashboard"
+	PageDashboard.Size = UDim2.new(1, 0, 1, 0)
+	PageDashboard.BackgroundTransparency = 1
+	PageDashboard.Parent = BodyContainer
+	tabs["Dashboard"] = PageDashboard
+
+	-- Progress Box
 	local ProgressSection = Instance.new("Frame")
 	ProgressSection.Name = "ProgressSection"
-	ProgressSection.Size = UDim2.new(1, -28, 0, 40)
+	ProgressSection.Size = UDim2.new(1, -28, 0, 48)
 	ProgressSection.Position = UDim2.new(0, 14, 0, 10)
-	ProgressSection.BackgroundTransparency = 1
-	ProgressSection.Parent = BodyFrame
+	ProgressSection.BackgroundColor3 = THEME.CardBg
+	ProgressSection.BorderSizePixel = 0
+	ProgressSection.Parent = PageDashboard
+	corner(ProgressSection, 6)
+	stroke(ProgressSection, THEME.Border, 1)
 
 	local PhasePill = Instance.new("TextLabel")
-	PhasePill.Name = "PhasePill"
 	PhasePill.Text = "PHASE: BOOT"
 	PhasePill.Font = FONT_BOLD
 	PhasePill.TextSize = 10
 	PhasePill.TextColor3 = THEME.AccentCyan
 	PhasePill.TextXAlignment = Enum.TextXAlignment.Left
 	PhasePill.BackgroundTransparency = 1
-	PhasePill.Size = UDim2.new(0.6, 0, 0, 14)
-	PhasePill.Position = UDim2.new(0, 0, 0, 0)
+	PhasePill.Size = UDim2.new(0.6, 0, 0, 16)
+	PhasePill.Position = UDim2.new(0, 10, 0, 6)
 	PhasePill.Parent = ProgressSection
 
 	local ProgressPercent = Instance.new("TextLabel")
-	ProgressPercent.Name = "ProgressPercent"
 	ProgressPercent.Text = "0%"
 	ProgressPercent.Font = FONT_BOLD
 	ProgressPercent.TextSize = 11
 	ProgressPercent.TextColor3 = THEME.TextPrimary
 	ProgressPercent.TextXAlignment = Enum.TextXAlignment.Right
 	ProgressPercent.BackgroundTransparency = 1
-	ProgressPercent.Size = UDim2.new(0.4, 0, 0, 14)
-	ProgressPercent.Position = UDim2.new(0.6, 0, 0, 0)
+	ProgressPercent.Size = UDim2.new(0.4, 0, 0, 16)
+	ProgressPercent.Position = UDim2.new(0.6, -10, 0, 6)
 	ProgressPercent.Parent = ProgressSection
 
 	local BarBack = Instance.new("Frame")
-	BarBack.Name = "BarBack"
-	BarBack.Size = UDim2.new(1, 0, 0, 8)
-	BarBack.Position = UDim2.new(0, 0, 0, 18)
-	BarBack.BackgroundColor3 = THEME.CardBg
+	BarBack.Size = UDim2.new(1, -20, 0, 8)
+	BarBack.Position = UDim2.new(0, 10, 0, 24)
+	BarBack.BackgroundColor3 = THEME.ConsoleBg
 	BarBack.BorderSizePixel = 0
 	BarBack.Parent = ProgressSection
 	corner(BarBack, 4)
 
 	local BarFill = Instance.new("Frame")
-	BarFill.Name = "BarFill"
 	BarFill.Size = UDim2.new(0.02, 0, 1, 0)
 	BarFill.BackgroundColor3 = THEME.AccentCyan
 	BarFill.BorderSizePixel = 0
@@ -401,24 +483,22 @@ local function createDumperUI()
 	corner(BarFill, 4)
 
 	local StatusDetail = Instance.new("TextLabel")
-	StatusDetail.Name = "StatusDetail"
-	StatusDetail.Text = "Initializing dump subsystem..."
+	StatusDetail.Text = "Initializing place dumper subsystem..."
 	StatusDetail.Font = FONT_REG
-	StatusDetail.TextSize = 10
+	StatusDetail.TextSize = 9
 	StatusDetail.TextColor3 = THEME.TextMuted
 	StatusDetail.TextXAlignment = Enum.TextXAlignment.Left
 	StatusDetail.BackgroundTransparency = 1
-	StatusDetail.Size = UDim2.new(1, 0, 0, 14)
-	StatusDetail.Position = UDim2.new(0, 0, 0, 28)
+	StatusDetail.Size = UDim2.new(1, -20, 0, 12)
+	StatusDetail.Position = UDim2.new(0, 10, 0, 34)
 	StatusDetail.Parent = ProgressSection
 
-	-- Metrics Grid (4 Stat Cards)
+	-- 4 Metrics Cards
 	local MetricsFrame = Instance.new("Frame")
-	MetricsFrame.Name = "MetricsFrame"
-	MetricsFrame.Size = UDim2.new(1, -28, 0, 48)
-	MetricsFrame.Position = UDim2.new(0, 14, 0, 56)
+	MetricsFrame.Size = UDim2.new(1, -28, 0, 52)
+	MetricsFrame.Position = UDim2.new(0, 14, 0, 64)
 	MetricsFrame.BackgroundTransparency = 1
-	MetricsFrame.Parent = BodyFrame
+	MetricsFrame.Parent = PageDashboard
 
 	local function createCard(name, defaultVal, subText, xOffset, width)
 		local card = Instance.new("Frame")
@@ -442,7 +522,6 @@ local function createDumperUI()
 		tLbl.Parent = card
 
 		local vLbl = Instance.new("TextLabel")
-		vLbl.Name = "Val"
 		vLbl.Text = defaultVal
 		vLbl.Font = FONT_BOLD
 		vLbl.TextSize = 13
@@ -454,120 +533,571 @@ local function createDumperUI()
 		vLbl.Parent = card
 
 		local sLbl = Instance.new("TextLabel")
-		sLbl.Name = "Sub"
 		sLbl.Text = subText
 		sLbl.Font = FONT_REG
 		sLbl.TextSize = 9
 		sLbl.TextColor3 = THEME.TextMuted
 		sLbl.TextXAlignment = Enum.TextXAlignment.Left
 		sLbl.BackgroundTransparency = 1
-		sLbl.Position = UDim2.new(0, 8, 0, 34)
-		sLbl.Size = UDim2.new(1, -16, 0, 10)
+		sLbl.Position = UDim2.new(0, 8, 0, 36)
+		sLbl.Size = UDim2.new(1, -16, 0, 12)
 		sLbl.Parent = card
 
 		return vLbl, sLbl
 	end
 
-	local cardW = math.floor((560 - 28 - 24) / 4)
-	local scriptsVal, scriptsSub = createCard("Scripts", "0 / 0", "0 dumped", 0, cardW)
-	local remotesVal, remotesSub = createCard("Remotes", "0", "0 hooked", (cardW + 8), cardW)
-	local writesVal, writesSub = createCard("Writes", "0 OK", "0 failed", (cardW + 8) * 2, cardW)
-	local timeVal, timeSub = createCard("Elapsed", "00:00", "running", (cardW + 8) * 3, cardW)
+	local cWidth = math.floor((620 - 28 - 24) / 4) -- 142
+	local dashScriptsVal, dashScriptsSub = createCard("Scripts", "0 / 0", "0 dumped", 0, cWidth)
+	local dashRemotesVal, dashRemotesSub = createCard("Remotes", "0", "0 hooked", (cWidth + 8), cWidth)
+	local dashWritesVal, dashWritesSub = createCard("Writes", "0 OK", "0 failed", (cWidth + 8) * 2, cWidth)
+	local dashTimeVal, dashTimeSub = createCard("Elapsed", "00:00", "active", (cWidth + 8) * 3, cWidth)
 
-	-- Live Terminal Console
-	local ConsoleHeader = Instance.new("Frame")
-	ConsoleHeader.Name = "ConsoleHeader"
-	ConsoleHeader.Size = UDim2.new(1, -28, 0, 16)
-	ConsoleHeader.Position = UDim2.new(0, 14, 0, 110)
-	ConsoleHeader.BackgroundTransparency = 1
-	ConsoleHeader.Parent = BodyFrame
+	-- Info & Details Box
+	local InfoCard = Instance.new("Frame")
+	InfoCard.Size = UDim2.new(1, -28, 0, 96)
+	InfoCard.Position = UDim2.new(0, 14, 0, 124)
+	InfoCard.BackgroundColor3 = THEME.CardBg
+	InfoCard.BorderSizePixel = 0
+	InfoCard.Parent = PageDashboard
+	corner(InfoCard, 6)
+	stroke(InfoCard, THEME.Border, 1)
 
-	local ConsoleTitle = Instance.new("TextLabel")
-	ConsoleTitle.Text = "LIVE DUMP LOG"
-	ConsoleTitle.Font = FONT_BOLD
-	ConsoleTitle.TextSize = 10
-	ConsoleTitle.TextColor3 = THEME.TextMuted
-	ConsoleTitle.TextXAlignment = Enum.TextXAlignment.Left
-	ConsoleTitle.BackgroundTransparency = 1
-	ConsoleTitle.Size = UDim2.new(0.5, 0, 1, 0)
-	ConsoleTitle.Parent = ConsoleHeader
+	local function addInfoRow(key, val, yPos)
+		local kLbl = Instance.new("TextLabel")
+		kLbl.Text = key
+		kLbl.Font = FONT_BOLD
+		kLbl.TextSize = 10
+		kLbl.TextColor3 = THEME.TextMuted
+		kLbl.TextXAlignment = Enum.TextXAlignment.Left
+		kLbl.BackgroundTransparency = 1
+		kLbl.Position = UDim2.new(0, 12, 0, yPos)
+		kLbl.Size = UDim2.new(0, 110, 0, 18)
+		kLbl.Parent = InfoCard
 
-	local CopyPathBtn = Instance.new("TextButton")
-	CopyPathBtn.Text = "Copy Path"
-	CopyPathBtn.Font = FONT_REG
-	CopyPathBtn.TextSize = 9
-	CopyPathBtn.TextColor3 = THEME.AccentCyan
-	CopyPathBtn.BackgroundTransparency = 1
-	CopyPathBtn.TextXAlignment = Enum.TextXAlignment.Right
-	CopyPathBtn.Size = UDim2.new(0.5, 0, 1, 0)
-	CopyPathBtn.Position = UDim2.new(0.5, 0, 0, 0)
-	CopyPathBtn.Parent = ConsoleHeader
+		local vLbl = Instance.new("TextLabel")
+		vLbl.Text = val
+		vLbl.Font = FONT_REG
+		vLbl.TextSize = 10
+		vLbl.TextColor3 = THEME.TextSecondary
+		vLbl.TextXAlignment = Enum.TextXAlignment.Left
+		vLbl.BackgroundTransparency = 1
+		vLbl.Position = UDim2.new(0, 125, 0, yPos)
+		vLbl.Size = UDim2.new(1, -137, 0, 18)
+		vLbl.Parent = InfoCard
+		return vLbl
+	end
 
-	local ConsoleFrame = Instance.new("Frame")
-	ConsoleFrame.Name = "ConsoleFrame"
-	ConsoleFrame.Size = UDim2.new(1, -28, 0, 185)
-	ConsoleFrame.Position = UDim2.new(0, 14, 0, 128)
-	ConsoleFrame.BackgroundColor3 = THEME.ConsoleBg
-	ConsoleFrame.BorderSizePixel = 0
-	ConsoleFrame.ClipsDescendants = true
-	ConsoleFrame.Parent = BodyFrame
-	corner(ConsoleFrame, 6)
-	stroke(ConsoleFrame, THEME.Border, 1)
+	local infoPlaceLbl = addInfoRow("Place Target:", tostring(game.PlaceId) .. " (" .. tostring(game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name or "Game") .. ")", 8)
+	local infoUserLbl = addInfoRow("Executor Client:", (identifyexecutor and identifyexecutor() or "Executor") .. " | " .. (LocalPlayer and LocalPlayer.Name or "Player"), 30)
+	local infoOutLbl = addInfoRow("Disk Workspace:", "UniversalDumper/...", 52)
+	local infoWebLbl = addInfoRow("Webhook Sink:", "Active (" .. (Config.postHttp and "Enabled" or "Disabled") .. ")", 74)
 
-	local ConsoleScroll = Instance.new("ScrollingFrame")
-	ConsoleScroll.Name = "Scroll"
-	ConsoleScroll.Size = UDim2.new(1, -8, 1, -8)
-	ConsoleScroll.Position = UDim2.new(0, 4, 0, 4)
-	ConsoleScroll.BackgroundTransparency = 1
-	ConsoleScroll.BorderSizePixel = 0
-	ConsoleScroll.ScrollBarThickness = 4
-	ConsoleScroll.ScrollBarImageColor3 = THEME.Border
-	ConsoleScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-	ConsoleScroll.Parent = ConsoleFrame
+	-- Mini Console in Dashboard
+	local MiniConsole = Instance.new("Frame")
+	MiniConsole.Size = UDim2.new(1, -28, 0, 96)
+	MiniConsole.Position = UDim2.new(0, 14, 0, 226)
+	MiniConsole.BackgroundColor3 = THEME.ConsoleBg
+	MiniConsole.BorderSizePixel = 0
+	MiniConsole.ClipsDescendants = true
+	MiniConsole.Parent = PageDashboard
+	corner(MiniConsole, 6)
+	stroke(MiniConsole, THEME.Border, 1)
 
-	local ConsoleLayout = Instance.new("UIListLayout")
-	ConsoleLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	ConsoleLayout.Padding = UDim.new(0, 2)
-	ConsoleLayout.Parent = ConsoleScroll
+	local MiniScroll = Instance.new("ScrollingFrame")
+	MiniScroll.Size = UDim2.new(1, -8, 1, -8)
+	MiniScroll.Position = UDim2.new(0, 4, 0, 4)
+	MiniScroll.BackgroundTransparency = 1
+	MiniScroll.BorderSizePixel = 0
+	MiniScroll.ScrollBarThickness = 3
+	MiniScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	MiniScroll.Parent = MiniConsole
 
-	trackUIConn(ConsoleLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		ConsoleScroll.CanvasSize = UDim2.new(0, 0, 0, ConsoleLayout.AbsoluteContentSize.Y + 4)
-		ConsoleScroll.CanvasPosition = Vector2.new(0, math.max(0, ConsoleLayout.AbsoluteContentSize.Y - ConsoleScroll.AbsoluteSize.Y + 10))
+	local MiniLayout = Instance.new("UIListLayout")
+	MiniLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	MiniLayout.Padding = UDim.new(0, 1)
+	MiniLayout.Parent = MiniScroll
+
+	trackUIConn(MiniLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		MiniScroll.CanvasSize = UDim2.new(0, 0, 0, MiniLayout.AbsoluteContentSize.Y + 4)
+		MiniScroll.CanvasPosition = Vector2.new(0, math.max(0, MiniLayout.AbsoluteContentSize.Y - MiniScroll.AbsoluteSize.Y + 8))
 	end))
 
-	-- Footer / Webhook Bar
-	local Footer = Instance.new("Frame")
-	Footer.Name = "Footer"
-	Footer.Size = UDim2.new(1, -28, 0, 24)
-	Footer.Position = UDim2.new(0, 14, 0, 320)
-	Footer.BackgroundTransparency = 1
-	Footer.Parent = BodyFrame
+	-- Bottom Quick Action Bar
+	local DashFooter = Instance.new("Frame")
+	DashFooter.Size = UDim2.new(1, -28, 0, 26)
+	DashFooter.Position = UDim2.new(0, 14, 0, 328)
+	DashFooter.BackgroundTransparency = 1
+	DashFooter.Parent = PageDashboard
 
-	local DiskPathLabel = Instance.new("TextLabel")
-	DiskPathLabel.Name = "DiskPath"
-	DiskPathLabel.Text = "📁 Output: Initializing..."
-	DiskPathLabel.Font = FONT_REG
-	DiskPathLabel.TextSize = 10
-	DiskPathLabel.TextColor3 = THEME.TextMuted
-	DiskPathLabel.TextXAlignment = Enum.TextXAlignment.Left
-	DiskPathLabel.BackgroundTransparency = 1
-	DiskPathLabel.Size = UDim2.new(0.65, 0, 1, 0)
-	DiskPathLabel.Position = UDim2.new(0, 0, 0, 0)
-	DiskPathLabel.Parent = Footer
+	local DispatchNowBtn = Instance.new("TextButton")
+	DispatchNowBtn.Size = UDim2.fromOffset(130, 24)
+	DispatchNowBtn.Position = UDim2.new(0, 0, 0, 0)
+	DispatchNowBtn.BackgroundColor3 = THEME.CardBg
+	DispatchNowBtn.Text = "🚀 Dispatch Webhook"
+	DispatchNowBtn.Font = FONT_BOLD
+	DispatchNowBtn.TextSize = 10
+	DispatchNowBtn.TextColor3 = THEME.AccentCyan
+	DispatchNowBtn.AutoButtonColor = true
+	DispatchNowBtn.Parent = DashFooter
+	corner(DispatchNowBtn, 4)
+	stroke(DispatchNowBtn, THEME.Border, 1)
 
-	local WebhookStatusPill = Instance.new("TextLabel")
-	WebhookStatusPill.Name = "WebhookStatus"
-	WebhookStatusPill.Text = "Webhook: Standby"
-	WebhookStatusPill.Font = FONT_BOLD
-	WebhookStatusPill.TextSize = 10
-	WebhookStatusPill.TextColor3 = THEME.AccentOrange
-	WebhookStatusPill.TextXAlignment = Enum.TextXAlignment.Right
-	WebhookStatusPill.BackgroundTransparency = 1
-	WebhookStatusPill.Size = UDim2.new(0.35, 0, 1, 0)
-	WebhookStatusPill.Position = UDim2.new(0.65, 0, 0, 0)
-	WebhookStatusPill.Parent = Footer
+	local CopyPathBtn = Instance.new("TextButton")
+	CopyPathBtn.Size = UDim2.fromOffset(110, 24)
+	CopyPathBtn.Position = UDim2.new(0, 138, 0, 0)
+	CopyPathBtn.BackgroundColor3 = THEME.CardBg
+	CopyPathBtn.Text = "📋 Copy Path"
+	CopyPathBtn.Font = FONT_BOLD
+	CopyPathBtn.TextSize = 10
+	CopyPathBtn.TextColor3 = THEME.TextSecondary
+	CopyPathBtn.AutoButtonColor = true
+	CopyPathBtn.Parent = DashFooter
+	corner(CopyPathBtn, 4)
+	stroke(CopyPathBtn, THEME.Border, 1)
 
-	-- Copy path button action
+	local WebhookStatusBadge = Instance.new("TextLabel")
+	WebhookStatusBadge.Text = "Webhook: Standby"
+	WebhookStatusBadge.Font = FONT_BOLD
+	WebhookStatusBadge.TextSize = 10
+	WebhookStatusBadge.TextColor3 = THEME.AccentOrange
+	WebhookStatusBadge.TextXAlignment = Enum.TextXAlignment.Right
+	WebhookStatusBadge.BackgroundTransparency = 1
+	WebhookStatusBadge.Size = UDim2.new(0.5, 0, 1, 0)
+	WebhookStatusBadge.Position = UDim2.new(0.5, 0, 0, 0)
+	WebhookStatusBadge.Parent = DashFooter
+
+	--==================================================
+	-- 2. TAB: FULL TERMINAL
+	--==================================================
+	local PageTerminal = Instance.new("Frame")
+	PageTerminal.Name = "Page_Terminal"
+	PageTerminal.Size = UDim2.new(1, 0, 1, 0)
+	PageTerminal.BackgroundTransparency = 1
+	PageTerminal.Visible = false
+	PageTerminal.Parent = BodyContainer
+	tabs["Terminal"] = PageTerminal
+
+	local TermHeader = Instance.new("Frame")
+	TermHeader.Size = UDim2.new(1, -28, 0, 28)
+	TermHeader.Position = UDim2.new(0, 14, 0, 8)
+	TermHeader.BackgroundTransparency = 1
+	TermHeader.Parent = PageTerminal
+
+	local FilterBox = Instance.new("TextBox")
+	FilterBox.Size = UDim2.new(0, 200, 0, 24)
+	FilterBox.Position = UDim2.new(0, 0, 0, 2)
+	FilterBox.BackgroundColor3 = THEME.CardBg
+	FilterBox.Text = ""
+	FilterBox.PlaceholderText = "Search logs..."
+	FilterBox.PlaceholderColor3 = THEME.TextMuted
+	FilterBox.Font = FONT_REG
+	FilterBox.TextSize = 10
+	FilterBox.TextColor3 = THEME.TextPrimary
+	FilterBox.TextXAlignment = Enum.TextXAlignment.Left
+	FilterBox.Parent = TermHeader
+	corner(FilterBox, 4)
+	stroke(FilterBox, THEME.Border, 1)
+
+	local ClearLogsBtn = Instance.new("TextButton")
+	ClearLogsBtn.Size = UDim2.fromOffset(60, 24)
+	ClearLogsBtn.Position = UDim2.new(1, -60, 0, 2)
+	ClearLogsBtn.BackgroundColor3 = THEME.CardBg
+	ClearLogsBtn.Text = "Clear"
+	ClearLogsBtn.Font = FONT_BOLD
+	ClearLogsBtn.TextSize = 10
+	ClearLogsBtn.TextColor3 = THEME.TextMuted
+	ClearLogsBtn.Parent = TermHeader
+	corner(ClearLogsBtn, 4)
+	stroke(ClearLogsBtn, THEME.Border, 1)
+
+	local TermFrame = Instance.new("Frame")
+	TermFrame.Size = UDim2.new(1, -28, 1, -44)
+	TermFrame.Position = UDim2.new(0, 14, 0, 38)
+	TermFrame.BackgroundColor3 = THEME.ConsoleBg
+	TermFrame.BorderSizePixel = 0
+	TermFrame.ClipsDescendants = true
+	TermFrame.Parent = PageTerminal
+	corner(TermFrame, 6)
+	stroke(TermFrame, THEME.Border, 1)
+
+	local TermScroll = Instance.new("ScrollingFrame")
+	TermScroll.Size = UDim2.new(1, -8, 1, -8)
+	TermScroll.Position = UDim2.new(0, 4, 0, 4)
+	TermScroll.BackgroundTransparency = 1
+	TermScroll.BorderSizePixel = 0
+	TermScroll.ScrollBarThickness = 5
+	TermScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	TermScroll.Parent = TermFrame
+
+	local TermLayout = Instance.new("UIListLayout")
+	TermLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	TermLayout.Padding = UDim.new(0, 2)
+	TermLayout.Parent = TermScroll
+
+	trackUIConn(TermLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		TermScroll.CanvasSize = UDim2.new(0, 0, 0, TermLayout.AbsoluteContentSize.Y + 6)
+		TermScroll.CanvasPosition = Vector2.new(0, math.max(0, TermLayout.AbsoluteContentSize.Y - TermScroll.AbsoluteSize.Y + 12))
+	end))
+
+	--==================================================
+	-- 3. TAB: SCRIPT EXPLORER
+	--==================================================
+	local PageScripts = Instance.new("Frame")
+	PageScripts.Name = "Page_Scripts"
+	PageScripts.Size = UDim2.new(1, 0, 1, 0)
+	PageScripts.BackgroundTransparency = 1
+	PageScripts.Visible = false
+	PageScripts.Parent = BodyContainer
+	tabs["Scripts"] = PageScripts
+
+	local ScriptHeader = Instance.new("Frame")
+	ScriptHeader.Size = UDim2.new(1, -28, 0, 28)
+	ScriptHeader.Position = UDim2.new(0, 14, 0, 8)
+	ScriptHeader.BackgroundTransparency = 1
+	ScriptHeader.Parent = PageScripts
+
+	local ScriptSearch = Instance.new("TextBox")
+	ScriptSearch.Size = UDim2.new(0, 240, 0, 24)
+	ScriptSearch.Position = UDim2.new(0, 0, 0, 2)
+	ScriptSearch.BackgroundColor3 = THEME.CardBg
+	ScriptSearch.Text = ""
+	ScriptSearch.PlaceholderText = "Filter scripts by path or name..."
+	ScriptSearch.PlaceholderColor3 = THEME.TextMuted
+	ScriptSearch.Font = FONT_REG
+	ScriptSearch.TextSize = 10
+	ScriptSearch.TextColor3 = THEME.TextPrimary
+	ScriptSearch.TextXAlignment = Enum.TextXAlignment.Left
+	ScriptSearch.Parent = ScriptHeader
+	corner(ScriptSearch, 4)
+	stroke(ScriptSearch, THEME.Border, 1)
+
+	local ScriptCountBadge = Instance.new("TextLabel")
+	ScriptCountBadge.Text = "0 scripts collected"
+	ScriptCountBadge.Font = FONT_BOLD
+	ScriptCountBadge.TextSize = 10
+	ScriptCountBadge.TextColor3 = THEME.AccentCyan
+	ScriptCountBadge.TextXAlignment = Enum.TextXAlignment.Right
+	ScriptCountBadge.BackgroundTransparency = 1
+	ScriptCountBadge.Size = UDim2.new(0.5, 0, 1, 0)
+	ScriptCountBadge.Position = UDim2.new(0.5, 0, 0, 0)
+	ScriptCountBadge.Parent = ScriptHeader
+
+	local ScriptListFrame = Instance.new("Frame")
+	ScriptListFrame.Size = UDim2.new(1, -28, 1, -44)
+	ScriptListFrame.Position = UDim2.new(0, 14, 0, 38)
+	ScriptListFrame.BackgroundColor3 = THEME.CardBg
+	ScriptListFrame.BorderSizePixel = 0
+	ScriptListFrame.ClipsDescendants = true
+	ScriptListFrame.Parent = PageScripts
+	corner(ScriptListFrame, 6)
+	stroke(ScriptListFrame, THEME.Border, 1)
+
+	local ScriptScroll = Instance.new("ScrollingFrame")
+	ScriptScroll.Size = UDim2.new(1, -8, 1, -8)
+	ScriptScroll.Position = UDim2.new(0, 4, 0, 4)
+	ScriptScroll.BackgroundTransparency = 1
+	ScriptScroll.BorderSizePixel = 0
+	ScriptScroll.ScrollBarThickness = 5
+	ScriptScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	ScriptScroll.Parent = ScriptListFrame
+
+	local ScriptLayout = Instance.new("UIListLayout")
+	ScriptLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	ScriptLayout.Padding = UDim.new(0, 4)
+	ScriptLayout.Parent = ScriptScroll
+
+	trackUIConn(ScriptLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		ScriptScroll.CanvasSize = UDim2.new(0, 0, 0, ScriptLayout.AbsoluteContentSize.Y + 6)
+	end))
+
+	-- Script search filter
+	trackUIConn(ScriptSearch:GetPropertyChangedSignal("Text"):Connect(function()
+		local query = string.lower(ScriptSearch.Text)
+		for _, row in ipairs(ScriptRows) do
+			if query == "" or string.find(string.lower(row.path), query, 1, true) then
+				row.frame.Visible = true
+			else
+				row.frame.Visible = false
+			end
+		end
+	end))
+
+	--==================================================
+	-- 4. TAB: REMOTE MONITOR
+	--==================================================
+	local PageRemotes = Instance.new("Frame")
+	PageRemotes.Name = "Page_Remotes"
+	PageRemotes.Size = UDim2.new(1, 0, 1, 0)
+	PageRemotes.BackgroundTransparency = 1
+	PageRemotes.Visible = false
+	PageRemotes.Parent = BodyContainer
+	tabs["Remotes"] = PageRemotes
+
+	local RemoteHeader = Instance.new("Frame")
+	RemoteHeader.Size = UDim2.new(1, -28, 0, 28)
+	RemoteHeader.Position = UDim2.new(0, 14, 0, 8)
+	RemoteHeader.BackgroundTransparency = 1
+	RemoteHeader.Parent = PageRemotes
+
+	local RemoteSearch = Instance.new("TextBox")
+	RemoteSearch.Size = UDim2.new(0, 240, 0, 24)
+	RemoteSearch.Position = UDim2.new(0, 0, 0, 2)
+	RemoteSearch.BackgroundColor3 = THEME.CardBg
+	RemoteSearch.Text = ""
+	RemoteSearch.PlaceholderText = "Filter remotes & bindables..."
+	RemoteSearch.PlaceholderColor3 = THEME.TextMuted
+	RemoteSearch.Font = FONT_REG
+	RemoteSearch.TextSize = 10
+	RemoteSearch.TextColor3 = THEME.TextPrimary
+	RemoteSearch.TextXAlignment = Enum.TextXAlignment.Left
+	RemoteSearch.Parent = RemoteHeader
+	corner(RemoteSearch, 4)
+	stroke(RemoteSearch, THEME.Border, 1)
+
+	local RemoteCountBadge = Instance.new("TextLabel")
+	RemoteCountBadge.Text = "0 remotes tracked"
+	RemoteCountBadge.Font = FONT_BOLD
+	RemoteCountBadge.TextSize = 10
+	RemoteCountBadge.TextColor3 = THEME.AccentCyan
+	RemoteCountBadge.TextXAlignment = Enum.TextXAlignment.Right
+	RemoteCountBadge.BackgroundTransparency = 1
+	RemoteCountBadge.Size = UDim2.new(0.5, 0, 1, 0)
+	RemoteCountBadge.Position = UDim2.new(0.5, 0, 0, 0)
+	RemoteCountBadge.Parent = RemoteHeader
+
+	local RemoteListFrame = Instance.new("Frame")
+	RemoteListFrame.Size = UDim2.new(1, -28, 1, -44)
+	RemoteListFrame.Position = UDim2.new(0, 14, 0, 38)
+	RemoteListFrame.BackgroundColor3 = THEME.CardBg
+	RemoteListFrame.BorderSizePixel = 0
+	RemoteListFrame.ClipsDescendants = true
+	RemoteListFrame.Parent = PageRemotes
+	corner(RemoteListFrame, 6)
+	stroke(RemoteListFrame, THEME.Border, 1)
+
+	local RemoteScroll = Instance.new("ScrollingFrame")
+	RemoteScroll.Size = UDim2.new(1, -8, 1, -8)
+	RemoteScroll.Position = UDim2.new(0, 4, 0, 4)
+	RemoteScroll.BackgroundTransparency = 1
+	RemoteScroll.BorderSizePixel = 0
+	RemoteScroll.ScrollBarThickness = 5
+	RemoteScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	RemoteScroll.Parent = RemoteListFrame
+
+	local RemoteLayout = Instance.new("UIListLayout")
+	RemoteLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	RemoteLayout.Padding = UDim.new(0, 4)
+	RemoteLayout.Parent = RemoteScroll
+
+	trackUIConn(RemoteLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		RemoteScroll.CanvasSize = UDim2.new(0, 0, 0, RemoteLayout.AbsoluteContentSize.Y + 6)
+	end))
+
+	trackUIConn(RemoteSearch:GetPropertyChangedSignal("Text"):Connect(function()
+		local query = string.lower(RemoteSearch.Text)
+		for _, row in pairs(RemoteRows) do
+			if query == "" or string.find(string.lower(row.path), query, 1, true) then
+				row.frame.Visible = true
+			else
+				row.frame.Visible = false
+			end
+		end
+	end))
+
+	--==================================================
+	-- 5. TAB: SETTINGS & TOOLS
+	--==================================================
+	local PageSettings = Instance.new("Frame")
+	PageSettings.Name = "Page_Settings"
+	PageSettings.Size = UDim2.new(1, 0, 1, 0)
+	PageSettings.BackgroundTransparency = 1
+	PageSettings.Visible = false
+	PageSettings.Parent = BodyContainer
+	tabs["Settings"] = PageSettings
+
+	local SettingsScroll = Instance.new("ScrollingFrame")
+	SettingsScroll.Size = UDim2.new(1, -28, 1, -16)
+	SettingsScroll.Position = UDim2.new(0, 14, 0, 8)
+	SettingsScroll.BackgroundTransparency = 1
+	SettingsScroll.BorderSizePixel = 0
+	SettingsScroll.ScrollBarThickness = 5
+	SettingsScroll.Parent = PageSettings
+
+	local SettingsLayout = Instance.new("UIListLayout")
+	SettingsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	SettingsLayout.Padding = UDim.new(0, 8)
+	SettingsLayout.Parent = SettingsScroll
+
+	trackUIConn(SettingsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		SettingsScroll.CanvasSize = UDim2.new(0, 0, 0, SettingsLayout.AbsoluteContentSize.Y + 10)
+	end))
+
+	local function createSectionTitle(text)
+		local lbl = Instance.new("TextLabel")
+		lbl.Text = string.upper(text)
+		lbl.Font = FONT_BOLD
+		lbl.TextSize = 10
+		lbl.TextColor3 = THEME.AccentCyan
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.BackgroundTransparency = 1
+		lbl.Size = UDim2.new(1, 0, 0, 16)
+		lbl.Parent = SettingsScroll
+		return lbl
+	end
+
+	local function createToggle(title, desc, initialVal, onToggle)
+		local frame = Instance.new("Frame")
+		frame.Size = UDim2.new(1, 0, 0, 42)
+		frame.BackgroundColor3 = THEME.CardBg
+		frame.BorderSizePixel = 0
+		frame.Parent = SettingsScroll
+		corner(frame, 6)
+		stroke(frame, THEME.Border, 1)
+
+		local tLbl = Instance.new("TextLabel")
+		tLbl.Text = title
+		tLbl.Font = FONT_BOLD
+		tLbl.TextSize = 11
+		tLbl.TextColor3 = THEME.TextPrimary
+		tLbl.TextXAlignment = Enum.TextXAlignment.Left
+		tLbl.BackgroundTransparency = 1
+		tLbl.Position = UDim2.new(0, 12, 0, 6)
+		tLbl.Size = UDim2.new(0.7, 0, 0, 14)
+		tLbl.Parent = frame
+
+		local dLbl = Instance.new("TextLabel")
+		dLbl.Text = desc
+		dLbl.Font = FONT_REG
+		dLbl.TextSize = 9
+		dLbl.TextColor3 = THEME.TextMuted
+		dLbl.TextXAlignment = Enum.TextXAlignment.Left
+		dLbl.BackgroundTransparency = 1
+		dLbl.Position = UDim2.new(0, 12, 0, 22)
+		dLbl.Size = UDim2.new(0.7, 0, 0, 14)
+		dLbl.Parent = frame
+
+		local tBtn = Instance.new("TextButton")
+		tBtn.Size = UDim2.fromOffset(48, 22)
+		tBtn.Position = UDim2.new(1, -60, 0.5, -11)
+		tBtn.BackgroundColor3 = initialVal and THEME.AccentGreen or THEME.ConsoleBg
+		tBtn.Text = initialVal and "ON" or "OFF"
+		tBtn.Font = FONT_BOLD
+		tBtn.TextSize = 10
+		tBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		tBtn.Parent = frame
+		corner(tBtn, 4)
+
+		local state = initialVal
+		trackUIConn(tBtn.MouseButton1Click:Connect(function()
+			state = not state
+			tBtn.BackgroundColor3 = state and THEME.AccentGreen or THEME.ConsoleBg
+			tBtn.Text = state and "ON" or "OFF"
+			pcall(onToggle, state)
+		end))
+		return frame
+	end
+
+	createSectionTitle("Dumper Features")
+	createToggle("Decompile Scripts", "Decompile bytecode using executor decompiler", Config.decompile, function(v) Config.decompile = v end)
+	createToggle("Include Bytecode", "Save raw luau bytecode alongside sources", Config.includeBytecode, function(v) Config.includeBytecode = v end)
+	createToggle("Anonymize Player Name", "Replace username with generic placeholder", Config.replaceUsername, function(v) Config.replaceUsername = v end)
+	createToggle("Disable 3D Rendering", "Speed up dump on low-end devices", Config.disableRender, function(v)
+		Config.disableRender = v
+		pcall(function() RunService:Set3dRenderingEnabled(not v) end)
+	end)
+
+	createSectionTitle("Webhook Integration")
+	local WebhookCard = Instance.new("Frame")
+	WebhookCard.Size = UDim2.new(1, 0, 0, 74)
+	WebhookCard.BackgroundColor3 = THEME.CardBg
+	WebhookCard.BorderSizePixel = 0
+	WebhookCard.Parent = SettingsScroll
+	corner(WebhookCard, 6)
+	stroke(WebhookCard, THEME.Border, 1)
+
+	local wLbl = Instance.new("TextLabel")
+	wLbl.Text = "Discord Webhook URL"
+	wLbl.Font = FONT_BOLD
+	wLbl.TextSize = 11
+	wLbl.TextColor3 = THEME.TextPrimary
+	wLbl.TextXAlignment = Enum.TextXAlignment.Left
+	wLbl.BackgroundTransparency = 1
+	wLbl.Position = UDim2.new(0, 12, 0, 8)
+	wLbl.Size = UDim2.new(1, -24, 0, 14)
+	wLbl.Parent = WebhookCard
+
+	local WebhookInput = Instance.new("TextBox")
+	WebhookInput.Size = UDim2.new(1, -130, 0, 26)
+	WebhookInput.Position = UDim2.new(0, 12, 0, 32)
+	WebhookInput.BackgroundColor3 = THEME.ConsoleBg
+	WebhookInput.Text = Config.webhookUrl or ""
+	WebhookInput.Font = FONT_MONO
+	WebhookInput.TextSize = 9
+	WebhookInput.TextColor3 = THEME.TextSecondary
+	WebhookInput.TextXAlignment = Enum.TextXAlignment.Left
+	WebhookInput.ClearTextOnFocus = false
+	WebhookInput.Parent = WebhookCard
+	corner(WebhookInput, 4)
+	stroke(WebhookInput, THEME.Border, 1)
+
+	trackUIConn(WebhookInput:GetPropertyChangedSignal("Text"):Connect(function()
+		Config.webhookUrl = WebhookInput.Text
+		Config.httpSink = WebhookInput.Text
+	end))
+
+	local TestPingBtn = Instance.new("TextButton")
+	TestPingBtn.Size = UDim2.fromOffset(96, 26)
+	TestPingBtn.Position = UDim2.new(1, -108, 0, 32)
+	TestPingBtn.BackgroundColor3 = THEME.AccentBlue
+	TestPingBtn.Text = "Ping Webhook"
+	TestPingBtn.Font = FONT_BOLD
+	TestPingBtn.TextSize = 10
+	TestPingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	TestPingBtn.Parent = WebhookCard
+	corner(TestPingBtn, 4)
+
+	trackUIConn(TestPingBtn.MouseButton1Click:Connect(function()
+		TestPingBtn.Text = "Pinging..."
+		task.spawn(function()
+			if not httpRequest then
+				TestPingBtn.Text = "No HTTP API"
+				task.wait(1.5)
+				TestPingBtn.Text = "Ping Webhook"
+				return
+			end
+			local payload = HttpService:JSONEncode({
+				content = "🔔 **Universal Dumper** — Test Ping received successfully!",
+				embeds = {
+					{
+						title = "Webhook Verification",
+						description = "The executor successfully verified HTTP connectivity.",
+						color = 65280,
+						fields = {
+							{ name = "Place ID", value = tostring(game.PlaceId), inline = true },
+							{ name = "Executor", value = identifyexecutor and identifyexecutor() or "Unknown", inline = true }
+						}
+					}
+				}
+			})
+			local ok, resp = pcall(function()
+				return httpRequest({
+					Url = Config.webhookUrl,
+					Method = "POST",
+					Headers = { ["Content-Type"] = "application/json" },
+					Body = payload
+				})
+			end)
+			if ok and type(resp) == "table" and (resp.StatusCode == 200 or resp.StatusCode == 204) then
+				TestPingBtn.Text = "Success (200)"
+			else
+				TestPingBtn.Text = "Failed"
+			end
+			task.wait(2)
+			TestPingBtn.Text = "Ping Webhook"
+		end)
+	end))
+
+	-- Wire Copy Path Button in Dashboard
 	trackUIConn(CopyPathBtn.MouseButton1Click:Connect(function()
 		local p = DISK_ROOT .. (OUT ~= "" and OUT:gsub("/", "\\") or "UniversalDumper")
 		local setclip = (typeof(setclipboard) == "function" and setclipboard) or (typeof(toclipboard) == "function" and toclipboard)
@@ -575,14 +1105,37 @@ local function createDumperUI()
 			pcall(setclip, p)
 			CopyPathBtn.Text = "Copied!"
 			task.delay(1.5, function()
-				if CopyPathBtn and CopyPathBtn.Parent then
-					CopyPathBtn.Text = "Copy Path"
-				end
+				if CopyPathBtn and CopyPathBtn.Parent then CopyPathBtn.Text = "📋 Copy Path" end
 			end)
 		end
 	end))
 
-	-- Timer update loop
+	-- Wire Dispatch Now Button
+	trackUIConn(DispatchNowBtn.MouseButton1Click:Connect(function()
+		DispatchNowBtn.Text = "Dispatching..."
+		task.spawn(function()
+			local list = collectAllScripts and collectAllScripts() or {}
+			dispatchDumpToWebhook(list)
+			DispatchNowBtn.Text = "Dispatched!"
+			task.wait(2)
+			DispatchNowBtn.Text = "🚀 Dispatch Webhook"
+		end)
+	end))
+
+	-- Wire Unload Button
+	trackUIConn(UnloadBtn.MouseButton1Click:Connect(function()
+		StatusText.Text = "UNLOADING"
+		StatusText.TextColor3 = THEME.AccentRed
+		StatusDot.BackgroundColor3 = THEME.AccentRed
+		task.wait(0.1)
+		if type(env.UNIVERSAL_DUMP_UNLOAD) == "function" then
+			pcall(env.UNIVERSAL_DUMP_UNLOAD)
+		else
+			ScreenGui:Destroy()
+		end
+	end))
+
+	-- Live Timer Loop
 	local startTime = os.time()
 	local timerRunning = true
 	task.spawn(function()
@@ -590,24 +1143,17 @@ local function createDumperUI()
 			local elapsed = os.time() - startTime
 			local m = math.floor(elapsed / 60)
 			local s = elapsed % 60
-			timeVal.Text = string.format("%02d:%02d", m, s)
+			dashTimeVal.Text = string.format("%02d:%02d", m, s)
 			task.wait(1)
 		end
 	end)
 
-	-- Log row insertion
-	local logCount = 0
+	-- Log Insertion
+	local logCounter = 0
 	local function addConsoleLog(kind, phase, text)
-		logCount = logCount + 1
-		local lbl = Instance.new("TextLabel")
-		lbl.Name = "Log_" .. tostring(logCount)
-		lbl.Size = UDim2.new(1, -4, 0, 16)
-		lbl.BackgroundTransparency = 1
-		lbl.Font = FONT_MONO
-		lbl.TextSize = 10
-		lbl.TextXAlignment = Enum.TextXAlignment.Left
-		lbl.TextYAlignment = Enum.TextYAlignment.Center
-		lbl.LayoutOrder = logCount
+		logCounter = logCounter + 1
+		local formatted = string.format("[%s] [%s] %s", os.date("%H:%M:%S"), string.upper(kind), text)
+		table.insert(RawLogRows, formatted)
 
 		local prefixColor = THEME.TextPrimary
 		if kind == "boot" or kind == "info" then
@@ -622,15 +1168,164 @@ local function createDumperUI()
 			prefixColor = THEME.AccentRed
 		end
 
-		lbl.TextColor3 = prefixColor
-		lbl.Text = string.format("[%s] [%s] %s", os.date("%H:%M:%S"), string.upper(kind), text)
-		lbl.Parent = ConsoleScroll
+		-- Add to Full Terminal
+		local tLbl = Instance.new("TextLabel")
+		tLbl.Name = "Log_" .. tostring(logCounter)
+		tLbl.Size = UDim2.new(1, -4, 0, 16)
+		tLbl.BackgroundTransparency = 1
+		tLbl.Font = FONT_MONO
+		tLbl.TextSize = 10
+		tLbl.TextColor3 = prefixColor
+		tLbl.TextXAlignment = Enum.TextXAlignment.Left
+		tLbl.Text = formatted
+		tLbl.LayoutOrder = logCounter
+		tLbl.Parent = TermScroll
 
-		-- Trim older entries from DOM if exceeding 250 to ensure buttery performance
-		if logCount > 250 then
-			local old = ConsoleScroll:FindFirstChild("Log_" .. tostring(logCount - 250))
-			if old then old:Destroy() end
+		-- Add to Mini Console (keep max 100 for speed)
+		local mLbl = Instance.new("TextLabel")
+		mLbl.Name = "Mini_" .. tostring(logCounter)
+		mLbl.Size = UDim2.new(1, -4, 0, 14)
+		mLbl.BackgroundTransparency = 1
+		mLbl.Font = FONT_MONO
+		mLbl.TextSize = 9
+		mLbl.TextColor3 = prefixColor
+		mLbl.TextXAlignment = Enum.TextXAlignment.Left
+		mLbl.Text = formatted
+		mLbl.LayoutOrder = logCounter
+		mLbl.Parent = MiniScroll
+
+		if logCounter > 300 then
+			local oldT = TermScroll:FindFirstChild("Log_" .. tostring(logCounter - 300))
+			if oldT then oldT:Destroy() end
 		end
+		if logCounter > 100 then
+			local oldM = MiniScroll:FindFirstChild("Mini_" .. tostring(logCounter - 100))
+			if oldM then oldM:Destroy() end
+		end
+	end
+
+	-- Script Tracker
+	local scriptCount = 0
+	local function recordScript(item)
+		if not item or not item.path then return end
+		scriptCount = scriptCount + 1
+		ScriptCountBadge.Text = string.format("%d scripts collected", scriptCount)
+
+		local card = Instance.new("Frame")
+		card.Size = UDim2.new(1, -6, 0, 36)
+		card.BackgroundColor3 = THEME.Bg
+		card.BorderSizePixel = 0
+		card.LayoutOrder = scriptCount
+		card.Parent = ScriptScroll
+		corner(card, 5)
+		stroke(card, THEME.Border, 1)
+
+		local nameLbl = Instance.new("TextLabel")
+		nameLbl.Text = item.path
+		nameLbl.Font = FONT_BOLD
+		nameLbl.TextSize = 10
+		nameLbl.TextColor3 = THEME.TextPrimary
+		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nameLbl.BackgroundTransparency = 1
+		nameLbl.Position = UDim2.new(0, 10, 0, 4)
+		nameLbl.Size = UDim2.new(1, -110, 0, 14)
+		nameLbl.Parent = card
+
+		local metaLbl = Instance.new("TextLabel")
+		metaLbl.Text = string.format("%s | %d bytes | syntax: %s", tostring(item.class or "Script"), item.bytecodeSize or 0, tostring(item.syntax or "valid"))
+		metaLbl.Font = FONT_REG
+		metaLbl.TextSize = 9
+		metaLbl.TextColor3 = THEME.TextMuted
+		metaLbl.TextXAlignment = Enum.TextXAlignment.Left
+		metaLbl.BackgroundTransparency = 1
+		metaLbl.Position = UDim2.new(0, 10, 0, 18)
+		metaLbl.Size = UDim2.new(1, -110, 0, 14)
+		metaLbl.Parent = card
+
+		local statusPill = Instance.new("TextLabel")
+		local sCol = THEME.AccentGreen
+		local st = string.lower(item.status or "dumped")
+		if st == "bytecode" then
+			sCol = THEME.AccentCyan
+		elseif st == "timeout" then
+			sCol = THEME.AccentOrange
+		elseif st == "failed" then
+			sCol = THEME.AccentRed
+		end
+
+		statusPill.Text = string.upper(item.status or "OK")
+		statusPill.Font = FONT_BOLD
+		statusPill.TextSize = 9
+		statusPill.TextColor3 = sCol
+		statusPill.BackgroundColor3 = THEME.ConsoleBg
+		statusPill.Size = UDim2.fromOffset(70, 20)
+		statusPill.Position = UDim2.new(1, -80, 0.5, -10)
+		statusPill.Parent = card
+		corner(statusPill, 4)
+		stroke(statusPill, sCol, 1)
+
+		table.insert(ScriptRows, { path = item.path, frame = card })
+	end
+
+	-- Remote Tracker
+	local remoteCount = 0
+	local function recordRemote(path, className, dir, argTypes)
+		local existing = RemoteRows[path]
+		if existing then
+			existing.calls = (existing.calls or 0) + 1
+			existing.callLbl.Text = string.format("Calls: %d", existing.calls)
+			return
+		end
+
+		remoteCount = remoteCount + 1
+		RemoteCountBadge.Text = string.format("%d remotes tracked", remoteCount)
+
+		local card = Instance.new("Frame")
+		card.Size = UDim2.new(1, -6, 0, 36)
+		card.BackgroundColor3 = THEME.Bg
+		card.BorderSizePixel = 0
+		card.LayoutOrder = remoteCount
+		card.Parent = RemoteScroll
+		corner(card, 5)
+		stroke(card, THEME.Border, 1)
+
+		local nameLbl = Instance.new("TextLabel")
+		nameLbl.Text = tostring(path)
+		nameLbl.Font = FONT_BOLD
+		nameLbl.TextSize = 10
+		nameLbl.TextColor3 = THEME.TextPrimary
+		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nameLbl.BackgroundTransparency = 1
+		nameLbl.Position = UDim2.new(0, 10, 0, 4)
+		nameLbl.Size = UDim2.new(1, -120, 0, 14)
+		nameLbl.Parent = card
+
+		local channel = (className and string.find(className, "Bindable")) and "BINDABLE" or "NETWORK"
+		local chCol = (channel == "BINDABLE") and THEME.AccentPurple or THEME.AccentBlue
+		local metaLbl = Instance.new("TextLabel")
+		metaLbl.Text = string.format("[%s] %s | dir: %s", channel, tostring(className or "Remote"), tostring(dir or "ANY"))
+		metaLbl.Font = FONT_REG
+		metaLbl.TextSize = 9
+		metaLbl.TextColor3 = chCol
+		metaLbl.TextXAlignment = Enum.TextXAlignment.Left
+		metaLbl.BackgroundTransparency = 1
+		metaLbl.Position = UDim2.new(0, 10, 0, 18)
+		metaLbl.Size = UDim2.new(1, -120, 0, 14)
+		metaLbl.Parent = card
+
+		local callLbl = Instance.new("TextLabel")
+		callLbl.Text = "Calls: 1"
+		callLbl.Font = FONT_BOLD
+		callLbl.TextSize = 9
+		callLbl.TextColor3 = THEME.TextSecondary
+		callLbl.BackgroundColor3 = THEME.ConsoleBg
+		callLbl.Size = UDim2.fromOffset(70, 20)
+		callLbl.Position = UDim2.new(1, -80, 0.5, -10)
+		callLbl.Parent = card
+		corner(callLbl, 4)
+		stroke(callLbl, THEME.Border, 1)
+
+		RemoteRows[path] = { path = path, frame = card, calls = 1, callLbl = callLbl }
 	end
 
 	-- Progress calculation
@@ -663,43 +1358,35 @@ local function createDumperUI()
 		StatusDetail.Text = text or ""
 
 		if pct >= 100 then
-			LiveStatusDot.BackgroundColor3 = THEME.AccentGreen
-			LiveStatusText.Text = "COMPLETE"
-			LiveStatusText.TextColor3 = THEME.AccentGreen
+			StatusDot.BackgroundColor3 = THEME.AccentGreen
+			StatusText.Text = "COMPLETE"
+			StatusText.TextColor3 = THEME.AccentGreen
 			BarFill.BackgroundColor3 = THEME.AccentGreen
 		end
 	end
 
 	local function updateStats(sFound, sDumped, sFail, rHooked, wOk, wFail, outPath)
-		scriptsVal.Text = string.format("%d / %d", sDumped or 0, sFound or 0)
-		scriptsSub.Text = string.format("%d failed", sFail or 0)
-		remotesVal.Text = tostring(rHooked or 0)
-		writesVal.Text = string.format("%d OK", wOk or 0)
-		writesSub.Text = string.format("%d errors", wFail or 0)
+		dashScriptsVal.Text = string.format("%d / %d", sDumped or 0, sFound or 0)
+		dashScriptsSub.Text = string.format("%d failed", sFail or 0)
+		dashRemotesVal.Text = tostring(rHooked or 0)
+		dashWritesVal.Text = string.format("%d OK", wOk or 0)
+		dashWritesSub.Text = string.format("%d errors", wFail or 0)
 		if outPath and outPath ~= "" then
-			DiskPathLabel.Text = "📁 " .. outPath:gsub("/", "\\")
+			infoOutLbl.Text = outPath:gsub("/", "\\")
 		end
 	end
 
 	local function setWebhookStatus(status, color)
-		WebhookStatusPill.Text = status
-		WebhookStatusPill.TextColor3 = color or THEME.AccentGreen
+		WebhookStatusBadge.Text = status
+		WebhookStatusBadge.TextColor3 = color or THEME.AccentGreen
+		infoWebLbl.Text = status
 	end
-
-	-- Wire Unload button
-	trackUIConn(UnloadBtn.MouseButton1Click:Connect(function()
-		addConsoleLog("warn", "unload", "User requested immediate unload...")
-		task.wait(0.1)
-		if type(env.UNIVERSAL_DUMP_UNLOAD) == "function" then
-			pcall(env.UNIVERSAL_DUMP_UNLOAD)
-		else
-			ScreenGui:Destroy()
-		end
-	end))
 
 	DumperUI = {
 		Gui = ScreenGui,
 		AddLog = addConsoleLog,
+		RecordScript = recordScript,
+		RecordRemote = recordRemote,
 		UpdateProgress = updateProgress,
 		UpdateStats = updateStats,
 		SetWebhookStatus = setWebhookStatus,
@@ -2428,6 +3115,11 @@ dumpOneScript = function(entry)
 			item.syntax = assess.syntax
 			item.syntacticValid = assess.syntacticValid
 			item.confidence = assess.confidence
+			if DumperUI and DumperUI.RecordScript then
+				pcall(function()
+					DumperUI.RecordScript(item)
+				end)
+			end
 			item.reconstructionScore = assess.reconstructionScore
 			item.constantsMatch = assess.constantsMatch
 			item.protoCountMatch = assess.protoCountMatch
@@ -2638,6 +3330,11 @@ ensureRemoteRecord = function(inst)
 		returnSchema = {},
 	}
 	RemoteIndex[path] = rec
+	if DumperUI and DumperUI.RecordRemote then
+		pcall(function()
+			DumperUI.RecordRemote(path, className, "DISCOVER", nil)
+		end)
+	end
 	return rec
 end
 
@@ -2680,6 +3377,11 @@ observeRemoteCall = function(path, className, dir, argTypes)
 		rec.stats.c2s += 1
 	elseif dir == "S2C" then
 		rec.stats.s2c += 1
+	end
+	if DumperUI and DumperUI.RecordRemote then
+		pcall(function()
+			DumperUI.RecordRemote(path, className, dir, argTypes)
+		end)
 	end
 	if type(argTypes) == "table" and #argTypes > 0 then
 		rec.argSchema = argTypes
@@ -4026,11 +4728,31 @@ local function dispatchDumpToWebhook(scriptList)
 	table.insert(bodyParts, 'Content-Disposition: form-data; name="payload_json"\r\n\r\n')
 	table.insert(bodyParts, payloadJson .. "\r\n")
 
+	-- 5. Generate dump_complete_bundle.txt (Master Consolidated Report)
+	local bundleLines = {
+		summaryContent,
+		"\r\n\r\n" .. string.rep("=", 60) .. "\r\n",
+		remotesContent,
+		"\r\n\r\n" .. string.rep("=", 60) .. "\r\n",
+		manifestContent,
+		"\r\n\r\n" .. string.rep("=", 60) .. "\r\n",
+		"============================================================\r\n" ..
+		"                 COMPLETE CHRONOLOGICAL LOGS\r\n" ..
+		"============================================================\r\n" ..
+		logContent
+	}
+	local bundleContent = table.concat(bundleLines, "\r\n")
+
+	pcall(function()
+		writeText("collected_txt/dump_complete_bundle.txt", bundleContent)
+	end)
+
 	local uploadFiles = {
 		{ name = "dump_summary.txt", content = summaryContent },
 		{ name = "dump_log.txt", content = logContent },
 		{ name = "dump_remotes.txt", content = remotesContent },
-		{ name = "dump_manifest.txt", content = manifestContent }
+		{ name = "dump_manifest.txt", content = manifestContent },
+		{ name = "dump_complete_bundle.txt", content = bundleContent }
 	}
 
 	for i, file in ipairs(uploadFiles) do
