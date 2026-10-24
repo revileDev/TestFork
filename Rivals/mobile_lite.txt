@@ -160,6 +160,26 @@ local UIVisible = true
 local isUILocked = false
 local activeDropdownCloser = nil
 
+-- Full-screen click blocker backdrop to prevent clicks passing to background/game while UI is open
+local ClickBlocker = Instance.new("TextButton")
+ClickBlocker.Name = "AtomwareMobileLiteClickBlocker"
+ClickBlocker.Size = UDim2.new(1, 0, 1, 0)
+ClickBlocker.Position = UDim2.new(0, 0, 0, 0)
+ClickBlocker.BackgroundTransparency = 1
+ClickBlocker.Text = ""
+ClickBlocker.AutoButtonColor = false
+ClickBlocker.Active = true
+ClickBlocker.Modal = true
+ClickBlocker.ZIndex = 1
+ClickBlocker.Visible = UIVisible
+ClickBlocker.Parent = ScreenGui
+
+trackConnection(ClickBlocker.MouseButton1Click:Connect(function()
+    if activeDropdownCloser then
+        activeDropdownCloser()
+    end
+end))
+
 --//==================================================
 --// DRAGGABLE MOBILE TOGGLE CONTAINER WITH LOCK BUTTON
 --//==================================================
@@ -170,6 +190,7 @@ ToggleContainer.Size = UDim2.fromOffset(124, 48)
 ToggleContainer.Position = UDim2.new(1, -136, 0.28, 0)
 ToggleContainer.BackgroundTransparency = 1
 ToggleContainer.BorderSizePixel = 0
+ToggleContainer.Active = true
 ToggleContainer.ZIndex = 200
 ToggleContainer.Parent = ScreenGui
 
@@ -266,6 +287,8 @@ MainFrame.Size = UDim2.new(0.96, 0, 0.90, 0)
 MainFrame.BackgroundColor3 = THEME.Background
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
+MainFrame.Active = true
+MainFrame.ZIndex = 10
 MainFrame.Parent = ScreenGui
 corner(MainFrame, 12)
 stroke(MainFrame, THEME.Border, 1.5)
@@ -273,9 +296,21 @@ stroke(MainFrame, THEME.Border, 1.5)
 local function setUIVisible(visible)
     UIVisible = visible
     MainFrame.Visible = UIVisible
+    MainFrame.Active = UIVisible
+    ClickBlocker.Visible = UIVisible
+    ClickBlocker.Active = UIVisible
+    ClickBlocker.Modal = UIVisible
     if UIVisible then
         MainFrame.Size = UDim2.new(0.96, 0, 0.90, 0)
     end
+    if AtomwareMobileWindow then
+        AtomwareMobileWindow.open = UIVisible
+    end
+    local bridge = rawget(_G, "__atomware_rivals_bridge")
+    if bridge and bridge.library then
+        bridge.library.open = UIVisible
+    end
+    _G.AtomwareMenuOpen = UIVisible
 end
 
 trackConnection(MobileToggleBtn.MouseButton1Click:Connect(function()
@@ -833,10 +868,15 @@ local function wrapMobileSection(card, body, title)
         body = body,
         text = title,
         options = {},
+        controls = {},
     }
 
     -- 1. Contained Toggle
     function section:AddToggle(data)
+        local ctrlKey = "toggle:" .. string.lower(data.flag or data.text or "")
+        if ctrlKey ~= "toggle:" and section.controls[ctrlKey] then
+            return section.controls[ctrlKey]
+        end
         local text = data.text or ""
         local state = data.state == true
         local callback = data.callback
@@ -961,11 +1001,16 @@ local function wrapMobileSection(card, body, title)
         end
 
         table.insert(section.options, { row = row, obj = toggleObj })
+        if ctrlKey ~= "toggle:" then section.controls[ctrlKey] = toggleObj end
         return toggleObj
     end
 
     -- 2. Contained Slider
     function section:AddSlider(data)
+        local ctrlKey = "slider:" .. string.lower(data.flag or data.text or "")
+        if ctrlKey ~= "slider:" and section.controls[ctrlKey] then
+            return section.controls[ctrlKey]
+        end
         local text = data.text or ""
         local min = data.min or 0
         local max = data.max or 100
@@ -1064,11 +1109,16 @@ local function wrapMobileSection(card, body, title)
         })
 
         table.insert(section.options, { row = row, obj = sliderObj })
+        if ctrlKey ~= "slider:" then section.controls[ctrlKey] = sliderObj end
         return sliderObj
     end
 
     -- 3. Contained Dropdown (Accordion Expanding Container - Never Overlaps)
     function section:AddList(data)
+        local ctrlKey = "list:" .. string.lower(data.flag or data.text or "")
+        if ctrlKey ~= "list:" and section.controls[ctrlKey] then
+            return section.controls[ctrlKey]
+        end
         local text = data.text or ""
         local values = data.values or {}
         local multi = data.multi == true
@@ -1264,6 +1314,7 @@ local function wrapMobileSection(card, body, title)
         })
 
         table.insert(section.options, { row = row, obj = listObj })
+        if ctrlKey ~= "list:" then section.controls[ctrlKey] = listObj end
         return listObj
     end
 
@@ -1424,6 +1475,10 @@ local function wrapMobileSection(card, body, title)
 
     -- 5. Contained Keybind
     function section:AddBind(data)
+        local ctrlKey = "bind:" .. string.lower(data.flag or data.text or "")
+        if ctrlKey ~= "bind:" and section.controls[ctrlKey] then
+            return section.controls[ctrlKey]
+        end
         local text = data.text or ""
         local bind = data.bind or "None"
         local keycallback = data.keycallback
@@ -1553,6 +1608,7 @@ local function wrapMobileSection(card, body, title)
         end
 
         table.insert(section.options, { row = row, obj = bindObj })
+        if ctrlKey ~= "bind:" then section.controls[ctrlKey] = bindObj end
         return bindObj
     end
 
@@ -1622,6 +1678,10 @@ local function wrapMobileSection(card, body, title)
 
     -- 7. Contained Button & Chained Button Rows
     function section:AddButton(data)
+        local ctrlKey = "button:" .. string.lower(data.text or "")
+        if ctrlKey ~= "button:" and section.controls[ctrlKey] then
+            return section.controls[ctrlKey]
+        end
         local text = data.text or "Button"
         local confirm = data.confirm == true
         local callback = data.callback
@@ -1723,6 +1783,7 @@ local function wrapMobileSection(card, body, title)
         end
 
         table.insert(section.options, { row = row, obj = btnObj })
+        if ctrlKey ~= "button:" then section.controls[ctrlKey] = btnObj end
         return btnObj
     end
 
@@ -1895,13 +1956,19 @@ function AtomwareMobileWindow:CreateRealTab(displayName, icon)
         name = displayName,
         page = page,
         sections = {},
+        sectionMap = {},
     }
 
     function tabObj:AddSection(text, side, order)
+        local secKey = string.lower(text or "")
+        if tabObj.sectionMap[secKey] then
+            return tabObj.sectionMap[secKey]
+        end
         local card, body = createMobileCard(page, text, side)
         local section = wrapMobileSection(card, body, text)
         section.tab = tabObj
         section.parentTab = tabObj
+        tabObj.sectionMap[secKey] = section
         table.insert(tabObj.sections, section)
         return section
     end
