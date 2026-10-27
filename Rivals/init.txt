@@ -578,6 +578,14 @@ _G.AtomwareUnload = function()
     end
     _G.AtomwareChatroomLoaded = nil
     _G.AtomwareUILoaded = nil
+    if _G.AtomwareKiciaLoaded and type(_G.__atomware_kicia_unload) == "function" then
+        pcall(_G.__atomware_kicia_unload)
+    end
+    if _G.AtomwareUELoaded and type(_G.__atomware_ue_unload) == "function" then
+        pcall(_G.__atomware_ue_unload)
+    end
+    _G.AtomwareKiciaLoaded = nil
+    _G.AtomwareUELoaded = nil
     _G.AtomwareFeaturesLoaded = nil
     _G.AtomwareWindow = nil
     _G.AtomwareEvents = nil
@@ -615,6 +623,20 @@ if not loadModule("features.lua") then
     if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
     return
 end
+
+-- 5.1 Load Modular Backend 2 (KiciaHook v3 Engine Extension)
+task.spawn(function()
+    pcall(function()
+        loadModule("backend_kicia.lua")
+    end)
+end)
+
+-- 5.2 Load Modular Backend 3 (Unnamed Enhancements Engine Extension)
+task.spawn(function()
+    pcall(function()
+        loadModule("backend_ue.lua")
+    end)
+end)
 
 -- 6. Verify everything is online (timeout after 15 s)
 local verifyCount = 0

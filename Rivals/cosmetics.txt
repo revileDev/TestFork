@@ -2577,6 +2577,91 @@ local function createCosmetics(): CosmeticsApi
 				end)
 			end
 		end,
+		-- KiciaHook Full Cosmetic Resolver & Preset Extension
+		savePreset = function(self, presetName: string): boolean
+			if not presetName or presetName == "" then return false end
+			local s, w, c, f = self:export()
+			local payload = {
+				name = presetName,
+				timestamp = os.time(),
+				skins = s,
+				wraps = w,
+				charms = c,
+				finishers = f,
+			}
+			local path = "Atomware/Rivals/cosmetic_presets.json"
+			local presets = {}
+			pcall(function()
+				if fsReadfile and isfile and isfile(path) then
+					presets = HttpService:JSONDecode(fsReadfile(path)) or {}
+				end
+			end)
+			presets[presetName] = payload
+			pcall(function()
+				if fsWritefile then
+					fsWritefile(path, HttpService:JSONEncode(presets))
+				end
+			end)
+			return true
+		end,
+		loadPreset = function(self, presetName: string): boolean
+			local path = "Atomware/Rivals/cosmetic_presets.json"
+			local presets = {}
+			local ok = pcall(function()
+				if fsReadfile and isfile and isfile(path) then
+					presets = HttpService:JSONDecode(fsReadfile(path)) or {}
+				end
+			end)
+			if ok and presets[presetName] then
+				local p = presets[presetName]
+				self:load({
+					skins = p.skins or {},
+					wraps = p.wraps or {},
+					charms = p.charms or {},
+					finishers = p.finishers or {},
+				})
+				return true
+			end
+			return false
+		end,
+		exportPresetToClipboard = function(self): string
+			local s, w, c, f = self:export()
+			local payload = {
+				engine = "KiciaHook_v3_Atomware",
+				timestamp = os.time(),
+				skins = s,
+				wraps = w,
+				charms = c,
+				finishers = f,
+			}
+			local json = HttpService:JSONEncode(payload)
+			pcall(function()
+				if setclipboard then
+					setclipboard(json)
+				end
+			end)
+			return json
+		end,
+		importPresetFromClipboard = function(self, jsonStr: string?): boolean
+			local code = jsonStr
+			if not code or code == "" then
+				pcall(function()
+					if getclipboard then code = getclipboard() end
+				end)
+			end
+			if not code or code == "" then return false end
+			local ok, data = pcall(function() return HttpService:JSONDecode(code) end)
+			if ok and type(data) == "table" then
+				self:load({
+					skins = data.skins or {},
+					wraps = data.wraps or {},
+					charms = data.charms or {},
+					finishers = data.finishers or {},
+				})
+				return true
+			end
+			return false
+		end,
 		randomizeAll = function(self)
 			local allWeapons = getWeapons()
 			local allWraps = getWraps()

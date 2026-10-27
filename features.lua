@@ -503,7 +503,17 @@ local function createDrawingKit(bridge: any): any
 		if existing then
 			return existing
 		end
-		local created = bridge.menu:AddTab(name)
+		local lower = string.lower(name)
+		local created: any
+		if lower == "spoof" or lower == "spoofing" then
+			if _G.AtomwareIsLiteMode then
+				created = bridge.menu:AddTab("spoofing")
+			else
+				created = kit.tab("misc")
+			end
+		else
+			created = bridge.menu:AddTab(name)
+		end
 		bridge.tabs[name] = created
 		return created
 	end
@@ -892,6 +902,14 @@ local function createDrawingKit(bridge: any): any
 		return picker
 	end
 
+	function kit.button(section: any, text: string, callback: () -> (), confirm: boolean?): any
+		return section:AddButton({
+			text = text,
+			confirm = confirm == true,
+			callback = callback,
+		})
+	end
+
 	function kit.buttons(section: any, specs: { any }): any
 		local first: any = nil
 		for index, spec in specs do
@@ -1137,6 +1155,7 @@ export type Window = {
 			weaponWireframe = false,
 			armWireframe = false,
 			wireframeOnly = false,
+			noRecoilAnimation = false,
 		},
 		AmbienceTracks = { "city", "forest", "rain", "snow" },
 		HitSounds = {
@@ -1468,6 +1487,17 @@ export type Window = {
 		chamsOccluded: EspColor,
 		chamsOccluded2: EspColor,
 		chamsTransparency: number,
+		elimChams: boolean?,
+		elimChamsColor: EspColor?,
+		elimChamsDuration: number?,
+		elimChamsMaterial: string?,
+		killFlash: boolean?,
+		killFlashColor: EspColor?,
+		killFlashDuration: number?,
+		damageIndicators: boolean?,
+		indicatorColor: EspColor?,
+		indicatorStroke: EspColor?,
+		indicatorDuration: number?,
 		onshot: boolean,
 		onshotShowVisible: boolean,
 		onshotShowOccluded: boolean,
@@ -1544,6 +1574,17 @@ export type Window = {
 		chamsOccluded = Color3.fromRGB(255, 80, 80),
 		chamsOccluded2 = Color3.fromRGB(150, 30, 40),
 		chamsTransparency = 0.35,
+		elimChams = false,
+		elimChamsColor = Color3.fromRGB(255, 60, 60),
+		elimChamsDuration = 1.2,
+		elimChamsMaterial = "Ghost",
+		killFlash = false,
+		killFlashColor = Color3.fromRGB(90, 170, 255),
+		killFlashDuration = 0.6,
+		damageIndicators = false,
+		indicatorColor = Color3.fromRGB(255, 230, 80),
+		indicatorStroke = Color3.fromRGB(15, 15, 15),
+		indicatorDuration = 0.8,
 		onshot = false,
 		onshotShowVisible = true,
 		onshotShowOccluded = true,
@@ -1693,6 +1734,15 @@ export type Window = {
 			chamsOccluded = colorToTable(Esp.chamsOccluded),
 			chamsOccluded2 = colorToTable(Esp.chamsOccluded2),
 			chamsTransparency = Esp.chamsTransparency,
+			elimChams = Esp.elimChams,
+			elimChamsColor = colorToTable(Esp.elimChamsColor),
+			elimChamsDuration = Esp.elimChamsDuration,
+			killFlash = Esp.killFlash,
+			killFlashColor = colorToTable(Esp.killFlashColor),
+			killFlashDuration = Esp.killFlashDuration,
+			damageIndicators = Esp.damageIndicators,
+			indicatorColor = colorToTable(Esp.indicatorColor),
+			indicatorDuration = Esp.indicatorDuration,
 			onshot = Esp.onshot,
 			onshotShowVisible = Esp.onshotShowVisible,
 			onshotShowOccluded = Esp.onshotShowOccluded,
@@ -1807,6 +1857,15 @@ export type Window = {
 		Esp.chamsOccluded = tableToColor(data.chamsOccluded, Esp.chamsOccluded)
 		Esp.chamsOccluded2 = tableToColor(data.chamsOccluded2, Esp.chamsOccluded)
 		if type(data.chamsTransparency) == "number" then Esp.chamsTransparency = math.clamp(data.chamsTransparency, 0, 0.95) end
+		if type(data.elimChams) == "boolean" then Esp.elimChams = data.elimChams end
+		Esp.elimChamsColor = tableToColor(data.elimChamsColor, Esp.elimChamsColor)
+		if type(data.elimChamsDuration) == "number" then Esp.elimChamsDuration = data.elimChamsDuration end
+		if type(data.killFlash) == "boolean" then Esp.killFlash = data.killFlash end
+		Esp.killFlashColor = tableToColor(data.killFlashColor, Esp.killFlashColor)
+		if type(data.killFlashDuration) == "number" then Esp.killFlashDuration = data.killFlashDuration end
+		if type(data.damageIndicators) == "boolean" then Esp.damageIndicators = data.damageIndicators end
+		Esp.indicatorColor = tableToColor(data.indicatorColor, Esp.indicatorColor)
+		if type(data.indicatorDuration) == "number" then Esp.indicatorDuration = data.indicatorDuration end
 		if type(data.onshot) == "boolean" then Esp.onshot = data.onshot end
 		if type(data.onshotShowVisible) == "boolean" then Esp.onshotShowVisible = data.onshotShowVisible end
 		if type(data.onshotShowOccluded) == "boolean" then Esp.onshotShowOccluded = data.onshotShowOccluded end
@@ -1892,6 +1951,12 @@ export type Window = {
 			{ key = "chamsOccluded2" },
 		})
 		local chamsAlpha = kit.number(features, "Chams transparency", state, "chamsTransparency", 0, 0.95, 0.05)
+		local elimChams = kit.flag(features, "Elimination chams", state, "elimChams", { { key = "elimChamsColor" } })
+		local elimDur = kit.number(features, "Elimination duration", state, "elimChamsDuration", 0.2, 5.0, 0.1, { suffix = "s" })
+		local killFlash = kit.flag(features, "Kill flash", state, "killFlash", { { key = "killFlashColor" } })
+		local killFlashDur = kit.number(features, "Kill flash duration", state, "killFlashDuration", 0.1, 3.0, 0.05, { suffix = "s" })
+		local dmgInd = kit.flag(features, "Damage indicators", state, "damageIndicators", { { key = "indicatorColor" } })
+		local dmgIndDur = kit.number(features, "Indicator duration", state, "indicatorDuration", 0.2, 3.0, 0.1, { suffix = "s" })
 		local onshot = kit.flag(features, "Onshot", state, "onshot", nil, function()
 			refreshFeatures()
 		end)
@@ -1959,6 +2024,12 @@ export type Window = {
 				{ chamsVis, on and state.chams },
 				{ chamsOcc, on and state.chams },
 				{ chamsAlpha, on and state.chams },
+				{ elimChams, on and state.chams },
+				{ elimDur, on and state.chams and state.elimChams },
+				{ killFlash, on },
+				{ killFlashDur, on and state.killFlash },
+				{ dmgInd, on },
+				{ dmgIndDur, on and state.damageIndicators },
 				{ onshot, on },
 				{ onshotVis, on and state.onshot },
 				{ onshotOcc, on and state.onshot },
@@ -2287,6 +2358,7 @@ export type Window = {
 			local life = math.clamp(HitFx.fade, 0.08, 2)
 			local tint = HitFx.color
 			local size = 3.2
+			local count = #hitMarks
 			for index = count, 1, -1 do
 				local mark = hitMarks[index]
 				local age = now - mark.born
@@ -4319,7 +4391,7 @@ Bitstream Vera
 				return nil, nil
 			end
 			if not duel then
-				return nil, nil
+				return livingCharacter(player)
 			end
 			if seenDuel ~= duel then
 				seenDuel = duel
@@ -4913,7 +4985,10 @@ Bitstream Vera
 			if string.find(name, "Hitbox", 1, true) or string.find(name, "Physical", 1, true) then
 				return false
 			end
-			return (part :: BasePart).Transparency < 0.95
+			if (part :: BasePart).Transparency < 0.95 then
+				return true
+			end
+			return name == "Head" or name:find("Torso") ~= nil or name:find("Arm") ~= nil or name:find("Leg") ~= nil or name:find("Hand") ~= nil or name:find("Foot") ~= nil
 		end
 
 		local function gradientWeights(character: Model, parts: { BasePart }): { [BasePart]: number }
@@ -5089,7 +5164,7 @@ Bitstream Vera
 		end
 
 		local function onshotLive(): boolean
-			return Esp.master == true and Esp.onshot == true
+			return Esp.onshot == true
 		end
 
 		local function snapshotCharacter(character: Model): OnshotSnap?
@@ -5123,18 +5198,16 @@ Bitstream Vera
 
 		local onshotAnchorPart: BasePart? = nil
 		local function onshotAnchor(): BasePart?
-			local cam = Workspace.CurrentCamera
-			if not cam then
-				return nil
-			end
+			local parent = Workspace:FindFirstChild("Terrain") or Workspace
 			local part = onshotAnchorPart
-			if part and part.Parent == cam then
+			if part and part.Parent == parent then
 				return part
 			end
 			if part then
 				pcall(part.Destroy, part)
 			end
 			local created = Instance.new("Part")
+			created.Name = "__sonata_onshot_anchor"
 			created.Anchored = true
 			created.CanCollide = false
 			created.CanQuery = false
@@ -5143,25 +5216,23 @@ Bitstream Vera
 			created.Transparency = 1
 			created.Size = Vector3.new(0.05, 0.05, 0.05)
 			created.CFrame = CFrame.identity
-			created.Parent = cam
+			created.Parent = parent
 			onshotAnchorPart = created
 			return created
 		end
 
 		local function spawnOnshot(snap: OnshotSnap, now: number)
-			local folder = chamsContainer()
-			if not folder then
+			local anchor = onshotAnchor()
+			if not anchor then
 				return
 			end
 			while #onshots >= ONSHOT_MAX do
 				destroyOnshot(1)
 			end
-			local anchor = onshotAnchor()
-			if not anchor then
-				return
-			end
 			local anchorCf = anchor.CFrame
-			local alpha = math.clamp(Esp.onshotTransparency, 0, 0.95)
+			local alpha = math.clamp(Esp.onshotTransparency or 0.25, 0, 0.95)
+			local topCol = Esp.onshotVisible or Color3.fromRGB(255, 255, 255)
+			local botCol = Esp.onshotVisible2 or Color3.fromRGB(170, 120, 255)
 			local boxes: { BoxHandleAdornment } = table.create(#snap.cframes)
 			for index, cf in snap.cframes do
 				local box = Instance.new("BoxHandleAdornment")
@@ -5170,9 +5241,11 @@ Bitstream Vera
 				box.Size = snap.sizes[index]
 				box.CFrame = anchorCf:ToObjectSpace(cf)
 				box.Transparency = alpha
-				box.Visible = false
+				box.Visible = true
+				local w = snap.weights[index] or 0.5
+				box.Color3 = topCol:Lerp(botCol, w)
 				box.Adornee = anchor
-				box.Parent = folder
+				box.Parent = anchor
 				boxes[index] = box
 			end
 			table.insert(onshots, {
@@ -5181,10 +5254,17 @@ Bitstream Vera
 				probe = snap.probe,
 				born = now,
 				occluded = nil,
-				shown = nil,
+				shown = true,
 				rayAt = -1,
 				paintDirty = true,
 			})
+		end
+		DrawingBridge.spawnOnshot = function(char: Model)
+			if not onshotLive() or not char or not char.Parent then return end
+			local snap = snapshotCharacter(char)
+			if snap then
+				spawnOnshot(snap, os.clock())
+			end
 		end
 
 		local function rageTargetPlayer(): Player?
@@ -5380,11 +5460,13 @@ Bitstream Vera
 		table.insert(ears, UserInputService.InputBegan:Connect(function(input: InputObject)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
 				localShotAt = os.clock()
+				DrawingBridge.localShotAt = localShotAt
 			end
 		end))
 		table.insert(ears, UserInputService.InputEnded:Connect(function(input: InputObject)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
 				localShotAt = os.clock()
+				DrawingBridge.localShotAt = localShotAt
 			end
 		end))
 
@@ -5398,13 +5480,6 @@ Bitstream Vera
 				return
 			end
 			local duel, team = matchEnemies()
-			if not duel then
-				if next(hpTrack) ~= nil or next(pendingDrops) ~= nil then
-					table.clear(hpTrack)
-					table.clear(pendingDrops)
-				end
-				return
-			end
 			local now = os.clock()
 			local firing = now - localShotAt <= ONSHOT_WINDOW
 				or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
@@ -5435,20 +5510,23 @@ Bitstream Vera
 					spawnOnshot(fallback.snap, now)
 				end
 			end
-			for _, player in roster do
-				local character, humanoid = livingEnemy(player, duel, team)
-				local track = hpTrack[player]
-				if character and humanoid then
-					if not track or track.humanoid ~= humanoid then
-						hpTrack[player] = {
-							character = character,
-							humanoid = humanoid,
-							hp = humanoid.Health,
-							shotAt = 0,
-						}
+			local rosterList = if #roster > 0 then roster else Players:GetPlayers()
+			for _, player in rosterList do
+				if player ~= Players.LocalPlayer then
+					local character, humanoid = livingEnemy(player, duel, team)
+					local track = hpTrack[player]
+					if character and humanoid then
+						if not track or track.humanoid ~= humanoid then
+							hpTrack[player] = {
+								character = character,
+								humanoid = humanoid,
+								hp = humanoid.Health,
+								shotAt = 0,
+							}
+						end
+					elseif track then
+						hpTrack[player] = nil
 					end
-				elseif track then
-					hpTrack[player] = nil
 				end
 			end
 			for player in hpTrack do
@@ -5483,6 +5561,7 @@ Bitstream Vera
 			local camPos = camera.CFrame.Position
 			local styleDirty = styleChanged(ONSHOT_STYLE_KEYS, onshotLast)
 			refreshChamsFilter(camera, now)
+			local count = #onshots
 			for index = count, 1, -1 do
 				local shot = onshots[index]
 				local progress = (now - shot.born) / duration
@@ -5509,14 +5588,11 @@ Bitstream Vera
 						shot.paintDirty = false
 					end
 					local fade = alpha + (1 - alpha) * progress * progress
-					local toggleShown = shot.shown ~= show
 					shot.shown = show
 					for _, box in shot.boxes do
+						box.Visible = show
 						if show then
 							box.Transparency = fade
-						end
-						if toggleShown then
-							box.Visible = show
 						end
 					end
 				end
@@ -7470,6 +7546,203 @@ Bitstream Vera
 		end
 	end
 
+	local aimRing: Frame? = nil
+	local silentRing: Frame? = nil
+	local aimStickyPart: BasePart? = nil
+	local silentStickyPart: BasePart? = nil
+	local resolvedAimFov: number = 150
+	local resolvedSilentFov: number = 250
+
+	local unzoomedCamFov = 80
+	local function computeEffectiveFov(baseFov: number, isDynamic: boolean, cam: Camera?): number
+		if not isDynamic or not cam then
+			return baseFov
+		end
+		local camFov = math.clamp(cam.FieldOfView, 1, 130)
+		if camFov >= 68 then
+			unzoomedCamFov = camFov
+		end
+		local baseAngle = unzoomedCamFov or 80
+		local baseRad = math.rad(baseAngle * 0.5)
+		local currentRad = math.rad(camFov * 0.5)
+		local scale = math.tan(baseRad) / math.tan(currentRad)
+		return baseFov * scale
+	end
+
+	local cachedMuzzle: Instance? = nil
+	local lastMuzzleScan = 0
+	local function findMuzzleInstance(): Instance?
+		local now = os.clock()
+		if now - lastMuzzleScan < 0.25 and cachedMuzzle and cachedMuzzle.Parent then
+			return cachedMuzzle
+		end
+		lastMuzzleScan = now
+		cachedMuzzle = nil
+		local function scan(root: Instance?): Instance?
+			if not root then
+				return nil
+			end
+			local direct = root:FindFirstChild("_muzzle", true)
+			if direct then
+				return direct
+			end
+			return nil
+		end
+		local cam = Workspace.CurrentCamera
+		if cam then
+			for _, child in cam:GetChildren() do
+				local found = scan(child)
+				if found then
+					cachedMuzzle = found
+					return found
+				end
+			end
+		end
+		local vms = Workspace:FindFirstChild("ViewModels")
+		if vms then
+			local found = scan(vms)
+			if found then
+				cachedMuzzle = found
+				return found
+			end
+		end
+		return nil
+	end
+
+	local function muzzleWorldPos(): Vector3?
+		local m = findMuzzleInstance()
+		if not m then
+			return nil
+		end
+		if m:IsA("Attachment") then
+			return m.WorldPosition
+		end
+		if m:IsA("BasePart") then
+			return m.Position
+		end
+		local parent = m.Parent
+		if parent and parent:IsA("BasePart") then
+			return parent.Position
+		end
+		return nil
+	end
+
+	local function worldToScreen(cam: Camera, world: Vector3): Vector2?
+		local sp, onScreen = cam:WorldToViewportPoint(world)
+		if sp.Z <= 0 then
+			return nil
+		end
+		if not onScreen and (sp.X < -200 or sp.X > cam.ViewportSize.X + 200 or sp.Y < -200 or sp.Y > cam.ViewportSize.Y + 200) then
+			return nil
+		end
+		return Vector2.new(sp.X, sp.Y)
+	end
+
+	local function resolveFovOriginScreen(mode: string, cam: Camera, lockPart: BasePart?): Vector2
+		local center = cam.ViewportSize * 0.5
+		local origin = normalizeFovOrigin(mode)
+		if origin == "Muzzle" then
+			local wp = muzzleWorldPos()
+			if wp then
+				local screen = worldToScreen(cam, wp)
+				if screen then
+					return screen
+				end
+			end
+			return center
+		elseif origin == "Target" then
+			if lockPart and lockPart.Parent then
+				local screen = worldToScreen(cam, lockPart.Position)
+				if screen then
+					return screen
+				end
+			end
+			return center
+		end
+		return center
+	end
+
+	local function isCombatEnemy(player: Player): boolean
+		local lp = Players.LocalPlayer
+		if not lp or player == lp then
+			return false
+		end
+		local okDuel, duelResult = pcall(function()
+			local _f, _d, spectate = combatControllers()
+			local duel = spectate and spectate.CurrentDuelSubject
+			if not duel then
+				local _, duelCtrl = combatControllers()
+			if duelCtrl and type(duelCtrl.GetDuel) == "function" then
+				duel = duelCtrl:GetDuel(lp)
+			end
+			end
+			if duel and duel.Duelers then
+				local localDueler = duel.GetDueler and duel:GetDueler(lp)
+				local localTeam = localDueler and localDueler:Get("TeamID") or nil
+				for _, dueler in duel.Duelers do
+					if dueler.Player == player then
+						if dueler._is_ally == true then
+							return false
+						end
+						local team = dueler:Get("TeamID")
+						if team ~= nil and localTeam ~= nil then
+							return team ~= localTeam
+						end
+						return true
+					end
+				end
+			end
+			return nil
+		end)
+		if okDuel and duelResult ~= nil then
+			return duelResult
+		end
+		local pTeam = player:GetAttribute("TeamID")
+		local lTeam = lp:GetAttribute("TeamID")
+		if pTeam and lTeam then
+			return pTeam ~= lTeam
+		end
+		local lpTeam = lp.Team
+		local pTeamObj = player.Team
+		if lpTeam ~= nil and pTeamObj ~= nil and lpTeam == pTeamObj then
+			local teamsSvc = game:FindService("Teams")
+			if teamsSvc and #teamsSvc:GetTeams() > 1 then
+				return false
+			end
+		end
+		return true
+	end
+
+	local function readPlayerHealth(player: Player?): number?
+		if not player then
+			return nil
+		end
+		local char = player.Character
+		if not char then
+			return nil
+		end
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum and hum:IsA("Humanoid") then
+			return math.max(0, math.floor(hum.Health + 0.5))
+		end
+		return nil
+	end
+
+	local function playerFromPart(part: BasePart?): Player?
+		if not part or not part.Parent then return nil end
+		local current: Instance? = part
+		while current and current ~= Workspace do
+			if current:IsA("Model") then
+				local p = Players:GetPlayerFromCharacter(current) or Players:FindFirstChild(current.Name)
+				if p and p:IsA("Player") then
+					return p
+				end
+			end
+			current = current.Parent
+		end
+		return nil
+	end
+
 	do
 		local function installLegitRuntime()
 		local fovGui = element("ScreenGui", {
@@ -7539,8 +7812,10 @@ Bitstream Vera
 			strokeGrad.Color = seq
 		end
 
-		local aimRing, aimStroke, aimFillGrad, aimStrokeGrad = makeFovRing("AimFov", Aim.fovColor1, Aim.fovColor2)
-		local silentRing, silentStroke, silentFillGrad, silentStrokeGrad = makeFovRing("SilentFov", Silent.fovColor1, Silent.fovColor2)
+		local aimStroke, aimFillGrad, aimStrokeGrad
+		local silentStroke, silentFillGrad, silentStrokeGrad
+		aimRing, aimStroke, aimFillGrad, aimStrokeGrad = makeFovRing("AimFov", Aim.fovColor1, Aim.fovColor2)
+		silentRing, silentStroke, silentFillGrad, silentStrokeGrad = makeFovRing("SilentFov", Silent.fovColor1, Silent.fovColor2)
 		aimStroke.Name = "Stroke"
 		silentStroke.Name = "Stroke"
 
@@ -7557,7 +7832,7 @@ Bitstream Vera
 		end
 
 		local aimHeld = false
-		local aimStickyPart: BasePart? = nil
+		aimStickyPart = nil
 		local aimReadyAt = 0
 		local aimVelX = 0
 		local aimVelY = 0
@@ -7715,8 +7990,8 @@ Bitstream Vera
 		local _activeWeaponProfile = "Global"
 		local activeWeaponAt = 0
 		local aimItemLib: any = nil
-		local resolvedAimFov = Aim.fov
-		local resolvedSilentFov = Silent.fov
+		resolvedAimFov = Aim.fov
+		resolvedSilentFov = Silent.fov
 		local resolvedSmooth = Aim.smooth
 		local resolvedDeadzone = Aim.deadzone
 		local resolvedHumanize = Aim.humanize
@@ -8115,7 +8390,7 @@ Bitstream Vera
 			return nil
 		end
 
-		local silentStickyPart: BasePart? = nil
+		silentStickyPart = nil
 		local SILENT_STICKY_BIAS = 0.85
 
 		local silentEnemyOf: { [Player]: boolean } = {}
@@ -8938,6 +9213,9 @@ Bitstream Vera
 			local manipActive = Silent.manipulation == true
 			if Silent.enabled then
 				local lock = silentTarget()
+				if (Silent.hitChance or 100) < 100 and math.random(1, 100) > (Silent.hitChance or 100) then
+					lock = nil
+				end
 				if manipActive then
 					if lock then
 						local camPos = cam.CFrame.Position
@@ -12633,7 +12911,7 @@ Bitstream Vera
 
 			local function getGuiParent(): Instance?
 				local ok, res = pcall(function()
-					return (gethui and gethui()) or game:GetService("CoreGui") or (Players.LocalPlayer and Players.LocalPlayer:FindFirstChildOfClass("PlayerGui"))
+					return resolveParent(nil)
 				end)
 				return if ok then res else nil
 			end
@@ -12651,11 +12929,46 @@ Bitstream Vera
 				)
 			end
 
+			local hudFadeTween: any = nil
+			local isFadingOut = false
 			local function setVisible(on: boolean)
 				if not objs or not objs.panel then
 					return
 				end
-				objs.panel.Visible = on
+				local TweenService = game:GetService("TweenService")
+				if on then
+					isFadingOut = false
+					if not objs.panel.Visible then
+						objs.panel.Visible = true
+						objs.panel.GroupTransparency = 1
+						if objs.uiScale then
+							local baseScale = tonumber(Rage.targetHudScale) or 1
+							objs.uiScale.Scale = baseScale * 0.92
+							TweenService:Create(objs.uiScale, TweenInfo.new(0.14, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = baseScale }):Play()
+						end
+					end
+					if hudFadeTween then pcall(hudFadeTween.Cancel, hudFadeTween) end
+					hudFadeTween = TweenService:Create(objs.panel, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { GroupTransparency = 0 })
+					hudFadeTween:Play()
+				else
+					if objs.panel.Visible and not isFadingOut then
+						isFadingOut = true
+						if hudFadeTween then pcall(hudFadeTween.Cancel, hudFadeTween) end
+						if objs.uiScale then
+							local baseScale = tonumber(Rage.targetHudScale) or 1
+							TweenService:Create(objs.uiScale, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = baseScale * 0.94 }):Play()
+						end
+						hudFadeTween = TweenService:Create(objs.panel, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { GroupTransparency = 1 })
+						hudFadeTween:Play()
+						task.delay(0.085, function()
+							if isFadingOut and objs and objs.panel then
+								objs.panel.Visible = false
+								objs.panel.GroupTransparency = 1
+								isFadingOut = false
+							end
+						end)
+					end
+				end
 			end
 
 			local function ensureHud(): boolean
@@ -12679,12 +12992,13 @@ Bitstream Vera
 				screen.DisplayOrder = 1000
 
 				local pos = panelPos()
-				local panel = Instance.new("Frame")
+				local panel = Instance.new("CanvasGroup")
 				panel.Name = "Panel"
 				panel.Size = UDim2.new(0, panelW, 0, panelH)
 				panel.Position = UDim2.new(0, pos.X, 0, pos.Y)
 				panel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 				panel.BackgroundTransparency = 0.06
+				panel.GroupTransparency = 1
 				panel.BorderSizePixel = 0
 				panel.Visible = false
 				panel.Active = true
@@ -13176,62 +13490,58 @@ Bitstream Vera
 					return nil, nil
 				end
 
-				-- 1. In a duel: use livingEnemy
-				local duel, team = matchEnemies()
-				if duel then
-					local c, h = livingEnemy(player, duel, team)
-					if c and c.Parent then
-						return c, h
-					end
-				end
-
-				-- 2. Combat controllers FighterController
-				pcall(function()
-					local fighter = select(1, combatControllers())
-					if fighter and fighter.Objects then
-						for _, obj in fighter.Objects do
-							if obj and obj.Player == player and obj.Entity and obj.Entity.RootPart then
-								local root = obj.Entity.RootPart
-								local char = root.Parent
-								if char and char:IsA("Model") and char.Parent then
-									local hum = obj.Entity.Humanoid or char:FindFirstChildOfClass("Humanoid")
-									return char, hum
-								end
-							end
-						end
-					end
-				end)
-
-				-- 3. Standard livingCharacter
-				local c2, h2 = livingCharacter(player)
-				if c2 and c2.Parent then
-					return c2, h2
-				end
-
-				-- 4. Direct player.Character fallback
+				-- 1. Direct player.Character
 				local char = player.Character
 				if char and char.Parent then
 					local hum = char:FindFirstChildOfClass("Humanoid")
 					return char, hum
 				end
 
+				-- 2. Combat controllers FighterController
+				local ok, c, h = pcall(function()
+					local fighter = select(1, combatControllers())
+					if fighter and fighter.Objects then
+						for _, obj in fighter.Objects do
+							if obj and obj.Player == player and obj.Entity and obj.Entity.RootPart then
+								local root = obj.Entity.RootPart
+								local model = root.Parent
+								if model and model:IsA("Model") and model.Parent then
+									local hum = obj.Entity.Humanoid or model:FindFirstChildOfClass("Humanoid")
+									return model, hum
+								end
+							end
+						end
+					end
+					return nil, nil
+				end)
+				if ok and c then
+					return c, h
+				end
+
+				-- 3. Workspace model named after player
+				local wsChar = Workspace:FindFirstChild(player.Name)
+				if wsChar and wsChar:IsA("Model") and wsChar.Parent then
+					local hum = wsChar:FindFirstChildOfClass("Humanoid")
+					return wsChar, hum
+				end
+
 				return nil, nil
 			end
 
 			local function isCandidateAlive(player: Player, char: Model?, hum: Humanoid?): boolean
+				if not player or not player.Parent then
+					return false
+				end
 				if RageLive and RageLive.targetPlayer == player and RageLive.health and RageLive.health > 0 then
 					return true
 				end
-				if hum and hum.Health and hum.Health > 0 then
-					return true
+				if hum then
+					return hum.Health > 0
 				end
 				if char and char.Parent then
 					local head = char:FindFirstChild("Head") or char:FindFirstChild("HitboxHead")
 					local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
 					if head or root then
-						if hum and hum.Health and hum.Health <= 0 then
-							return false
-						end
 						return true
 					end
 				end
@@ -13239,47 +13549,7 @@ Bitstream Vera
 			end
 
 			local function isCandidateEnemy(player: Player): boolean
-				local lp = Players.LocalPlayer
-				if not lp or player == lp then
-					return false
-				end
-
-				local duel, localTeam = matchEnemies()
-				if duel then
-					local dueler = duel.GetDueler and duel:GetDueler(player)
-					if dueler then
-						if dueler._is_ally == true then
-							return false
-						end
-						local theirTeam = dueler:Get("TeamID")
-						if theirTeam ~= nil and localTeam ~= nil and theirTeam == localTeam then
-							return false
-						end
-						return true
-					end
-				end
-
-				if silentEnemyOf and silentEnemyOf[player] ~= nil then
-					return silentEnemyOf[player] == true
-				end
-
-				if type(isCombatEnemy) == "function" then
-					local ok, isEnemy = pcall(isCombatEnemy, player)
-					if ok and isEnemy ~= nil then
-						return isEnemy == true
-					end
-				end
-
-				local lpTeam = lp.Team
-				local pTeam = player.Team
-				if lpTeam ~= nil and pTeam ~= nil and lpTeam == pTeam then
-					local teamsSvc = game:FindService("Teams")
-					if teamsSvc and #teamsSvc:GetTeams() > 1 then
-						return false
-					end
-				end
-
-				return true
+				return isCombatEnemy(player)
 			end
 
 			local function getCharFovDistSq(char: Model?, fovCenter: Vector2, cam: Camera): (number?, Vector2?)
@@ -13291,7 +13561,7 @@ Bitstream Vera
 					local part = char:FindFirstChild(name)
 					if part and part:IsA("BasePart") then
 						local sp, onScreen = cam:WorldToViewportPoint(part.Position)
-						if onScreen and sp.Z > 0 then
+						if sp.Z > 0 then
 							local sPos = Vector2.new(sp.X, sp.Y)
 							local dx = sPos.X - fovCenter.X
 							local dy = sPos.Y - fovCenter.Y
@@ -13310,7 +13580,7 @@ Bitstream Vera
 				for _, child in ipairs(char:GetChildren()) do
 					if child:IsA("BasePart") then
 						local sp, onScreen = cam:WorldToViewportPoint(child.Position)
-						if onScreen and sp.Z > 0 then
+						if sp.Z > 0 then
 							local sPos = Vector2.new(sp.X, sp.Y)
 							local dx = sPos.X - fovCenter.X
 							local dy = sPos.Y - fovCenter.Y
@@ -13320,13 +13590,13 @@ Bitstream Vera
 								bestPos = sPos
 							end
 						end
-					end
 				end
+			end
 
 				local okPivot, pivotCf = pcall(function() return char:GetPivot() end)
 				if okPivot and pivotCf then
 					local sp, onScreen = cam:WorldToViewportPoint(pivotCf.Position)
-					if onScreen and sp.Z > 0 then
+					if sp.Z > 0 then
 						local sPos = Vector2.new(sp.X, sp.Y)
 						local dx = sPos.X - fovCenter.X
 						local dy = sPos.Y - fovCenter.Y
@@ -13336,7 +13606,7 @@ Bitstream Vera
 							bestPos = sPos
 						end
 					end
-				end
+			end
 
 				return bestSq, bestPos
 			end
@@ -13353,13 +13623,11 @@ Bitstream Vera
 				-- 1. Check sticky candidates first
 				local stickyCandidates = {}
 				if silentStickyPart and silentStickyPart.Parent then
-					local c = silentStickyPart:FindFirstAncestorOfClass("Model")
-					local p = c and Players:GetPlayerFromCharacter(c)
+					local p = playerFromPart(silentStickyPart)
 					if p and p ~= lp then table.insert(stickyCandidates, p) end
 				end
 				if aimStickyPart and aimStickyPart.Parent then
-					local c = aimStickyPart:FindFirstAncestorOfClass("Model")
-					local p = c and Players:GetPlayerFromCharacter(c)
+					local p = playerFromPart(aimStickyPart)
 					if p and p ~= lp then table.insert(stickyCandidates, p) end
 				end
 				if RageLive and RageLive.targetPlayer and RageLive.targetPlayer.Parent and RageLive.targetPlayer ~= lp then
@@ -13371,7 +13639,7 @@ Bitstream Vera
 						local c, hum = resolveCandidateCharacter(cand)
 						if isCandidateAlive(cand, c, hum) then
 							local distSq, _ = getCharFovDistSq(c, fovCenter, cam)
-							if distSq and distSq <= radiusSq then
+							if distSq and distSq <= radiusSq * 1.15 then
 								return cand
 							end
 						end
@@ -13379,10 +13647,6 @@ Bitstream Vera
 				end
 
 				-- 2. Scan all players to find closest enemy inside FOV
-				pcall(function()
-					refreshSilentRoster(os.clock())
-				end)
-
 				local bestPl: Player? = nil
 				local bestDistSq = radiusSq
 
@@ -13480,7 +13744,8 @@ Bitstream Vera
 					char = player.Character
 					hum = char and char:FindFirstChildOfClass("Humanoid")
 				end
-				local hp = (RageLive.targetPlayer == player and RageLive.health) or (hum and hum.Health) or 100
+				local readHp = readPlayerHealth and readPlayerHealth(player)
+				local hp = (RageLive.targetPlayer == player and RageLive.health) or (hum and hum.Health) or readHp or 100
 				local maxHp = (hum and hum.MaxHealth) or 100
 				if maxHp < 1 then maxHp = 100 end
 				setHealthRatio(math.clamp(hp / maxHp, 0, 1), true)
@@ -14244,9 +14509,163 @@ Bitstream Vera
 			end
 
 			Flick.enabled = false
+			Aim.enabled = false
 
-			local rageTab = kit.tab("rage")
-			local rage = rageTab:AddSection("ragebot", 1)
+			local combatTab = kit.tab("combat")
+
+			-- Side 1: Silent Aim & Triggerbot
+local silent = combatTab:AddSection("silent aim", 1)
+			local silentRefresh: () -> ()
+			kit.flag(silent, "enabled", Silent, "enabled", nil, function()
+				if silentRefresh then
+					silentRefresh()
+				end
+			end)
+			kit.flag(silent, "always active", Silent, "alwaysOn")
+			local silentKey = kit.bind(silent, "keybind", function()
+				return Silent.keyName
+			end, function(name: string)
+				Silent.keyName = name
+			end, {
+				label = "silent aim",
+				active = function()
+					return Silent.enabled == true
+				end,
+			})
+			local sAcc = kit.number(silent, "accuracy", Silent, "accuracy", 10, 100, 1, { suffix = "%" })
+			local sHitChance = kit.number(silent, "hit chance", Silent, "hitChance", 1, 100, 1, { suffix = "%" })
+			local sAngleManip = kit.flag(silent, "bullet angle manipulation", Silent, "angleManipulation")
+			local sVis = kit.flag(silent, "visible check", Silent, "visibleCheck", nil, function()
+				Silent.flags.visible = Silent.visibleCheck == true
+			end)
+			local sDraw = kit.flag(silent, "draw fov", Silent, "drawFov", { { key = "fovColor1" }, { key = "fovColor2" } }, function()
+				if silentRefresh then
+					silentRefresh()
+				end
+			end)
+			Silent.dynamicFov = false
+			local sTargetAim = kit.flag(silent, "target aimbot target", Silent, "targetAimTarget")
+			local sFovOrigin = kit.choice(silent, "fov position", { "Center", "Muzzle", "Target" }, function()
+				return normalizeFovOrigin(Silent.fovOrigin)
+			end, function(value: string)
+				Silent.fovOrigin = normalizeFovOrigin(value)
+			end)
+			local sFovOp = kit.number(silent, "fov opacity", Silent, "fovOpacity", 0, 100, 1, { scale = 100, suffix = "%" })
+			local sSpin = kit.flag(silent, "spin fov", Silent, "spinFov", nil, function()
+				if silentRefresh then
+					silentRefresh()
+				end
+			end)
+			local sSpinSp = kit.number(silent, "spin speed", Silent, "spinSpeed", 0, 360, 1)
+			local function applySilentFov(value: number)
+				local clamped = math.clamp(value, 20, 600)
+				Silent.fov = clamped
+				resolvedSilentFov = clamped
+				local row = editingProfileRow()
+				if row then
+					row["silentFov"] = clamped
+				end
+				lastProfileItem = nil
+				if refreshWeaponProfile then
+					pcall(refreshWeaponProfile)
+				end
+			end
+			local sFovGet = function()
+				local row = editingProfileRow()
+				return profileNumber(row, "silentFov", Silent.fov, 20, 600)
+			end
+			local sFov = kit.slider(silent, "fov", 20, 600, 1, sFovGet, applySilentFov)
+			local sFovThick = kit.number(silent, "fov thickness", Silent, "fovThickness", 0.5, 12, 0.5, { suffix = "px" })
+			local sHits = kit.masks(silent, "hitboxes", HITBOX_ITEMS, function()
+				return Silent.hitboxes
+			end)
+			local sManipRad: any
+			local sManipBudget: any
+			local sManipStatus: any
+			local sManip = kit.flag(silent, "manipulation", Silent, "manipulation", nil, function()
+				if silentRefresh then
+					silentRefresh()
+				end
+			end)
+			sManipStatus = kit.flag(silent, "status", Silent, "manipStatus")
+			local sManipFontSearch = kit.box(silent, "search", function()
+				return tostring(Silent.manipFontSearch or "")
+			end, function(value: string)
+				Silent.manipFontSearch = value
+				if DrawingBridge.requestSync then
+					DrawingBridge.requestSync()
+				end
+			end, false)
+			local sManipFont = kit.choice(silent, "status font", filterFonts(Silent.manipFontSearch), function()
+				return tostring(Silent.manipFont or "Plex")
+			end, function(value: string)
+				Silent.manipFont = value
+			end)
+			bindFontSearch(sManipFont, function()
+				return tostring(Silent.manipFontSearch or "")
+			end, function()
+				return tostring(Silent.manipFont or "Plex")
+			end)
+			local sManipText = kit.color(silent, "text", function()
+				return Silent.manipText
+			end, function(c3: Color3)
+				Silent.manipText = c3
+			end)
+			local sManipHit = kit.color(silent, "hittable", function()
+				return Silent.manipHit
+			end, function(c3: Color3)
+				Silent.manipHit = c3
+			end)
+			local sManipBlock = kit.color(silent, "blocked", function()
+				return Silent.manipBlock
+			end, function(c3: Color3)
+				Silent.manipBlock = c3
+			end)
+			sManipRad = kit.number(silent, "manip radius", Silent, "manipRadius", 2, 24, 0.01)
+			sManipBudget = kit.number(silent, "manip budget", Silent, "manipBudget", 4, 128, 1)
+			silentRefresh = function()
+				local on = Silent.enabled == true
+				for _, entry in {
+					{ silentKey, true },
+					{ sAcc, on },
+					{ sVis, on },
+					{ sDraw, on },
+					{ sTargetAim, on },
+					{ sFovOrigin, on },
+					{ sFovOp, on and Silent.drawFov },
+					{ sSpin, on },
+					{ sSpinSp, on and Silent.spinFov },
+					{ sFov, on },
+					{ sFovThick, on and Silent.drawFov },
+					{ sHits, on },
+					{ sManip, on },
+					{ sManipStatus, on and Silent.manipulation },
+					{ sManipFontSearch, on and Silent.manipulation and Silent.manipStatus },
+					{ sManipFont, on and Silent.manipulation and Silent.manipStatus },
+					{ sManipText, on and Silent.manipulation and Silent.manipStatus },
+					{ sManipHit, on and Silent.manipulation and Silent.manipStatus },
+					{ sManipBlock, on and Silent.manipulation and Silent.manipStatus },
+					{ sManipRad, on and Silent.manipulation },
+					{ sManipBudget, on and Silent.manipulation },
+				} do
+					entry[1].enabled = entry[2] == true
+				end
+				pcall(function()
+					silent:UpdateOptions()
+					combatTab:UpdateSections()
+				end)
+			end
+			table.insert(DrawingBridge.syncers, silentRefresh)
+			silentRefresh()
+
+local trigger = combatTab:AddSection("triggerbot", 1)
+			kit.flag(trigger, "enabled", Trigger, "enabled")
+
+			-- Side 2: Ragebot, Evasion, Visualizer, Exploits
+Flick.enabled = false
+
+			
+			local rage = combatTab:AddSection("ragebot", 2)
 			local rageRefresh: () -> ()
 			if Rage.engine ~= "V1" then
 				Rage.engine = "V2"
@@ -14383,13 +14802,13 @@ Bitstream Vera
 				rageExtraAmt.enabled = on and Rage.extrapolation
 				pcall(function()
 					rage:UpdateOptions()
-					rageTab:UpdateSections()
+					combatTab:UpdateSections()
 				end)
 			end
 			table.insert(DrawingBridge.syncers, rageRefresh)
 			rageRefresh()
 
-			local evadeBox = rageTab:AddSection("evasion", 1)
+			local evadeBox = combatTab:AddSection("evasion", 2)
 			local evadeRefresh: () -> ()
 			local evNow = tostring(Rage.evasion or "Scatter")
 			if evNow == "Random" or evNow == "ProjectileBreaker" or evNow == "Translocate" then
@@ -14451,13 +14870,13 @@ Bitstream Vera
 				evadeY.enabled = on and (Rage.underground == true or ev == "Underground")
 				pcall(function()
 					evadeBox:UpdateOptions()
-					rageTab:UpdateSections()
+					combatTab:UpdateSections()
 				end)
 			end
 			table.insert(DrawingBridge.syncers, evadeRefresh)
 			evadeRefresh()
 
-			local visualizerBox = rageTab:AddSection("visualizer", 2)
+			local visualizerBox = combatTab:AddSection("visualizer", 2)
 			local vizY: any
 			local vizLineThick: any
 			local vizLineColor: any
@@ -14528,7 +14947,7 @@ Bitstream Vera
 				end
 				pcall(function()
 					visualizerBox:UpdateOptions()
-					rageTab:UpdateSections()
+					combatTab:UpdateSections()
 				end)
 			end
 			table.insert(DrawingBridge.syncers, vizRefresh)
@@ -14536,7 +14955,7 @@ Bitstream Vera
 			kit.flag(visualizerBox, "target hud", Rage, "targetHud")
 			kit.number(visualizerBox, "hud size", Rage, "targetHudScale", 0.5, 2, 0.05, { suffix = "x" })
 
-			local exploits = rageTab:AddSection("exploits", 2)
+			local exploits = combatTab:AddSection("exploits", 2)
 			local gunSpeed: any
 			local meleeSpeed: any
 			kit.flag(exploits, "gun rapid", Exploits, "gunRapid", nil, function(value: boolean)
@@ -14572,291 +14991,6 @@ Bitstream Vera
 			kit.gate(exploits, function()
 				return Exploits.meleeRapid
 			end, { meleeSpeed })
-
-			local legitTab = kit.tab("legit")
-			local aim = legitTab:AddSection("aimbot", 1)
-			local aimRefresh: () -> ()
-			kit.flag(aim, "enabled", Aim, "enabled", nil, function()
-				if aimRefresh then
-					aimRefresh()
-				end
-			end)
-			kit.choice(aim, "weapon", WEAPON_PROFILE_NAMES, function()
-				return Aim.editProfile or "Global"
-			end, function(value: string)
-				Aim.editProfile = value
-				if DrawingBridge.requestSync then
-					DrawingBridge.requestSync()
-				end
-			end)
-			kit.flag(aim, "always active", Aim, "alwaysOn")
-			local aimKey = kit.bind(aim, "aim key", function()
-				return Aim.keyName
-			end, function(name: string)
-				Aim.keyName = name
-				local key = kit.keyFromName(name)
-				if key then
-					Aim.key = key
-				end
-			end, {
-				label = "aimbot",
-				active = function()
-					return Aim.enabled == true and kit.keyHeld(Aim.keyName)
-				end,
-			})
-			Aim.sticky = true
-			local aimVis = kit.flag(aim, "visible check", Aim, "visibleCheck")
-			local aimPred = kit.flag(aim, "prediction", Aim, "prediction", nil, function()
-				if aimRefresh then
-					aimRefresh()
-				end
-			end)
-			local aimPredGet, aimPredSet = editNumber("predictionAmount", function()
-				return Aim.predictionAmount
-			end, function(value: number)
-				Aim.predictionAmount = value
-			end, 0, 100)
-			local aimPredAmt = kit.slider(aim, "prediction amount", 0, 100, 1, aimPredGet, aimPredSet)
-			local aimDraw = kit.flag(aim, "draw fov", Aim, "drawFov", { { key = "fovColor1" }, { key = "fovColor2" } }, function()
-				if aimRefresh then
-					aimRefresh()
-				end
-			end)
-			local aimDynFov = kit.flag(aim, "dynamic fov", Aim, "dynamicFov")
-			local aimFovOrigin = kit.choice(aim, "fov position", { "Center", "Muzzle", "Target" }, function()
-				return normalizeFovOrigin(Aim.fovOrigin)
-			end, function(value: string)
-				Aim.fovOrigin = normalizeFovOrigin(value)
-			end)
-			local aimFovOp = kit.number(aim, "fov opacity", Aim, "fovOpacity", 0, 100, 1, { scale = 100, suffix = "%" })
-			local aimSpin = kit.flag(aim, "spin fov", Aim, "spinFov", nil, function()
-				if aimRefresh then
-					aimRefresh()
-				end
-			end)
-			local aimSpinSp = kit.number(aim, "spin speed", Aim, "spinSpeed", 0, 360, 1)
-			local aimFovGet, aimFovSet = editNumber("fov", function()
-				return Aim.fov
-			end, function(value: number)
-				Aim.fov = value
-			end, 20, 400)
-			local aimFov = kit.slider(aim, "fov", 20, 400, 1, aimFovGet, aimFovSet)
-			local aimFovThick = kit.number(aim, "fov thickness", Aim, "fovThickness", 0.5, 12, 0.5, { suffix = "px" })
-			local aimHits = kit.masks(aim, "hitboxes", HITBOX_ITEMS, function()
-				return Aim.hitboxes
-			end)
-			local aimCond = kit.masks(aim, "conditions", AIM_CONDITION_ITEMS, function()
-				return Aim.flags
-			end)
-			local aimSmoothGet, aimSmoothSet = editNumber("smooth", function()
-				return Aim.smooth
-			end, function(value: number)
-				Aim.smooth = value
-			end, 0, 40)
-			local aimDeadGet, aimDeadSet = editNumber("deadzone", function()
-				return Aim.deadzone
-			end, function(value: number)
-				Aim.deadzone = value
-			end, 0, 100)
-			local aimHumanGet, aimHumanSet = editNumber("humanize", function()
-				return Aim.humanize
-			end, function(value: number)
-				Aim.humanize = value
-			end, 0, 100)
-			local aimReactGet, aimReactSet = editNumber("reaction", function()
-				return Aim.reaction
-			end, function(value: number)
-				Aim.reaction = value
-			end, 0, 0.5)
-			local aimVampGet, aimVampSet = editNumber("wuziLovesVamp", function()
-				return Aim.wuziLovesVamp
-			end, function(value: number)
-				Aim.wuziLovesVamp = value
-			end, 0, 100)
-			local aimSmooth = kit.slider(aim, "smoothness", 0, 40, 0.5, aimSmoothGet, aimSmoothSet)
-			local aimDead = kit.slider(aim, "deadzone", 0, 100, 1, aimDeadGet, aimDeadSet, { suffix = "px" })
-			local aimHuman = kit.slider(aim, "humanize", 0, 100, 1, aimHumanGet, aimHumanSet)
-			local aimReact = kit.slider(aim, "reaction", 0, 500, 5, aimReactGet, aimReactSet, { scale = 1000, suffix = "ms" })
-			local aimVamp = kit.slider(aim, "wuzi loves vamp", 0, 100, 1, aimVampGet, aimVampSet)
-			aimRefresh = function()
-				local on = Aim.enabled == true
-				Aim.sticky = true
-				local kids = {
-					{ aimKey, on },
-					{ aimVis, on },
-					{ aimPred, on },
-					{ aimPredAmt, on and Aim.prediction },
-					{ aimDraw, on },
-					{ aimDynFov, on },
-					{ aimFovOrigin, on },
-					{ aimFovOp, on and Aim.drawFov },
-					{ aimSpin, on },
-					{ aimSpinSp, on and Aim.spinFov },
-					{ aimFov, on },
-					{ aimFovThick, on and Aim.drawFov },
-					{ aimHits, on },
-					{ aimCond, on },
-					{ aimSmooth, on },
-					{ aimDead, on },
-					{ aimHuman, on },
-					{ aimReact, on },
-					{ aimVamp, on },
-				}
-				for _, entry in kids do
-					entry[1].enabled = entry[2] == true
-				end
-				pcall(function()
-					aim:UpdateOptions()
-					legitTab:UpdateSections()
-				end)
-			end
-			table.insert(DrawingBridge.syncers, aimRefresh)
-			aimRefresh()
-
-			local silent = legitTab:AddSection("silent aim", 2)
-			local silentRefresh: () -> ()
-			kit.flag(silent, "enabled", Silent, "enabled", nil, function()
-				if silentRefresh then
-					silentRefresh()
-				end
-			end)
-			kit.flag(silent, "always active", Silent, "alwaysOn")
-			local silentKey = kit.bind(silent, "keybind", function()
-				return Silent.keyName
-			end, function(name: string)
-				Silent.keyName = name
-			end, {
-				label = "silent aim",
-				active = function()
-					return Silent.enabled == true
-				end,
-			})
-			local sAcc = kit.number(silent, "accuracy", Silent, "accuracy", 10, 100, 1, { suffix = "%" })
-			local sVis = kit.flag(silent, "visible check", Silent, "visibleCheck", nil, function()
-				Silent.flags.visible = Silent.visibleCheck == true
-			end)
-			local sDraw = kit.flag(silent, "draw fov", Silent, "drawFov", { { key = "fovColor1" }, { key = "fovColor2" } }, function()
-				if silentRefresh then
-					silentRefresh()
-				end
-			end)
-			Silent.dynamicFov = false
-			local sTargetAim = kit.flag(silent, "target aimbot target", Silent, "targetAimTarget")
-			local sFovOrigin = kit.choice(silent, "fov position", { "Center", "Muzzle", "Target" }, function()
-				return normalizeFovOrigin(Silent.fovOrigin)
-			end, function(value: string)
-				Silent.fovOrigin = normalizeFovOrigin(value)
-			end)
-			local sFovOp = kit.number(silent, "fov opacity", Silent, "fovOpacity", 0, 100, 1, { scale = 100, suffix = "%" })
-			local sSpin = kit.flag(silent, "spin fov", Silent, "spinFov", nil, function()
-				if silentRefresh then
-					silentRefresh()
-				end
-			end)
-			local sSpinSp = kit.number(silent, "spin speed", Silent, "spinSpeed", 0, 360, 1)
-			local function applySilentFov(value: number)
-				local clamped = math.clamp(value, 20, 600)
-				Silent.fov = clamped
-				resolvedSilentFov = clamped
-				local row = editingProfileRow()
-				if row then
-					row["silentFov"] = clamped
-				end
-				lastProfileItem = nil
-				if refreshWeaponProfile then
-					pcall(refreshWeaponProfile)
-				end
-			end
-			local sFovGet = function()
-				local row = editingProfileRow()
-				return profileNumber(row, "silentFov", Silent.fov, 20, 600)
-			end
-			local sFov = kit.slider(silent, "fov", 20, 600, 1, sFovGet, applySilentFov)
-			local sFovThick = kit.number(silent, "fov thickness", Silent, "fovThickness", 0.5, 12, 0.5, { suffix = "px" })
-			local sHits = kit.masks(silent, "hitboxes", HITBOX_ITEMS, function()
-				return Silent.hitboxes
-			end)
-			local sManipRad: any
-			local sManipBudget: any
-			local sManipStatus: any
-			local sManip = kit.flag(silent, "manipulation", Silent, "manipulation", nil, function()
-				if silentRefresh then
-					silentRefresh()
-				end
-			end)
-			sManipStatus = kit.flag(silent, "status", Silent, "manipStatus")
-			local sManipFontSearch = kit.box(silent, "search", function()
-				return tostring(Silent.manipFontSearch or "")
-			end, function(value: string)
-				Silent.manipFontSearch = value
-				if DrawingBridge.requestSync then
-					DrawingBridge.requestSync()
-				end
-			end, false)
-			local sManipFont = kit.choice(silent, "status font", filterFonts(Silent.manipFontSearch), function()
-				return tostring(Silent.manipFont or "Plex")
-			end, function(value: string)
-				Silent.manipFont = value
-			end)
-			bindFontSearch(sManipFont, function()
-				return tostring(Silent.manipFontSearch or "")
-			end, function()
-				return tostring(Silent.manipFont or "Plex")
-			end)
-			local sManipText = kit.color(silent, "text", function()
-				return Silent.manipText
-			end, function(c3: Color3)
-				Silent.manipText = c3
-			end)
-			local sManipHit = kit.color(silent, "hittable", function()
-				return Silent.manipHit
-			end, function(c3: Color3)
-				Silent.manipHit = c3
-			end)
-			local sManipBlock = kit.color(silent, "blocked", function()
-				return Silent.manipBlock
-			end, function(c3: Color3)
-				Silent.manipBlock = c3
-			end)
-			sManipRad = kit.number(silent, "manip radius", Silent, "manipRadius", 2, 24, 0.01)
-			sManipBudget = kit.number(silent, "manip budget", Silent, "manipBudget", 4, 128, 1)
-			silentRefresh = function()
-				local on = Silent.enabled == true
-				for _, entry in {
-					{ silentKey, true },
-					{ sAcc, on },
-					{ sVis, on },
-					{ sDraw, on },
-					{ sTargetAim, on },
-					{ sFovOrigin, on },
-					{ sFovOp, on and Silent.drawFov },
-					{ sSpin, on },
-					{ sSpinSp, on and Silent.spinFov },
-					{ sFov, on },
-					{ sFovThick, on and Silent.drawFov },
-					{ sHits, on },
-					{ sManip, on },
-					{ sManipStatus, on and Silent.manipulation },
-					{ sManipFontSearch, on and Silent.manipulation and Silent.manipStatus },
-					{ sManipFont, on and Silent.manipulation and Silent.manipStatus },
-					{ sManipText, on and Silent.manipulation and Silent.manipStatus },
-					{ sManipHit, on and Silent.manipulation and Silent.manipStatus },
-					{ sManipBlock, on and Silent.manipulation and Silent.manipStatus },
-					{ sManipRad, on and Silent.manipulation },
-					{ sManipBudget, on and Silent.manipulation },
-				} do
-					entry[1].enabled = entry[2] == true
-				end
-				pcall(function()
-					silent:UpdateOptions()
-					legitTab:UpdateSections()
-				end)
-			end
-			table.insert(DrawingBridge.syncers, silentRefresh)
-			silentRefresh()
-
-			local trigger = legitTab:AddSection("triggerbot", 2)
-			kit.flag(trigger, "enabled", Trigger, "enabled")
 
 			local moveTab = kit.tab("move")
 			local speedBox = moveTab:AddSection("speed", 1)
@@ -15020,6 +15154,7 @@ Bitstream Vera
 		caseAmount = 10,
 		deviceOn = false,
 		device = "Desktop",
+		staffPermsOn = false,
 	}
 	DrawingBridge.Spoof = Spoof
 	local AutoQueue = {
@@ -15222,6 +15357,7 @@ Bitstream Vera
 			or Spoof.eloOn
 			or Spoof.keysOn
 			or Spoof.deviceOn
+			or Spoof.staffPermsOn
 			or enemyAliasText() ~= nil
 	end
 
@@ -16094,6 +16230,50 @@ Bitstream Vera
 		end
 	end
 
+	local function applyStaffPermSpoofer(enable: boolean)
+		pcall(function()
+			if _G.AtomwareEmulator and type(_G.AtomwareEmulator.applyStaffPermSpoofer) == "function" then
+				_G.AtomwareEmulator.applyStaffPermSpoofer(enable)
+				return
+			end
+			local modules = ReplicatedStorage:WaitForChild("Modules", 8)
+			if not modules then return end
+			local PermissionsLibrary = require(modules:WaitForChild("PermissionsLibrary", 8))
+			local CONSTANTS = require(modules:WaitForChild("CONSTANTS", 8))
+
+			if PermissionsLibrary and type(PermissionsLibrary) == "table" then
+				if enable then
+					PermissionsLibrary.ALWAYS_AUTHORIZED_TO_USE_COMMANDS = true
+					PermissionsLibrary.ALWAYS_HAS_PERMISSION = true
+					if not PermissionsLibrary._origIsAdmin then
+						PermissionsLibrary._origIsAdmin = PermissionsLibrary.IsAdministrator
+						PermissionsLibrary._origHasPerm = PermissionsLibrary.HasPermission
+						PermissionsLibrary._origCanView = PermissionsLibrary.CanViewPermissionsPage
+						PermissionsLibrary._origCanManage = PermissionsLibrary.CanManageRole
+					end
+
+					PermissionsLibrary.IsAdministrator = function() return true end
+					PermissionsLibrary.HasPermission = function() return true end
+					PermissionsLibrary.CanViewPermissionsPage = function() return true end
+					PermissionsLibrary.CanManageRole = function() return true end
+				elseif PermissionsLibrary._origIsAdmin then
+					PermissionsLibrary.IsAdministrator = PermissionsLibrary._origIsAdmin
+					PermissionsLibrary.HasPermission = PermissionsLibrary._origHasPerm
+					PermissionsLibrary.CanViewPermissionsPage = PermissionsLibrary._origCanView
+					PermissionsLibrary.CanManageRole = PermissionsLibrary._origCanManage
+					PermissionsLibrary.ALWAYS_AUTHORIZED_TO_USE_COMMANDS = false
+					PermissionsLibrary.ALWAYS_HAS_PERMISSION = false
+				end
+			end
+
+			if CONSTANTS and type(CONSTANTS) == "table" then
+				CONSTANTS.IS_STUDIO = enable
+				CONSTANTS.IS_TESTING_SERVER = enable
+			end
+		end)
+	end
+	DrawingBridge.applyStaffPermSpoofer = applyStaffPermSpoofer
+
 	local function applySpoofAll()
 		lastAttrLevel = nil
 		lastAttrStreak = nil
@@ -16105,6 +16285,7 @@ Bitstream Vera
 		applySpoofKeys()
 		applyDeviceSpoof()
 		applyNameUiSpoof(true)
+		applyStaffPermSpoofer(Spoof.staffPermsOn == true)
 	end
 	DrawingBridge.applySpoofAll = applySpoofAll
 	DrawingBridge.spoofAutoApply = function()
@@ -17008,6 +17189,14 @@ Bitstream Vera
 			MoonTextureId = "rbxassetid://6444320592",
 		},
 	}
+
+	-- Aliases for alternate skybox naming
+	SKYBOX_CATALOG["Mountains_alt"] = SKYBOX_CATALOG["Mountains 2"]
+	SKYBOX_CATALOG["Storm_alt"] = SKYBOX_CATALOG["Storm 2"]
+	SKYBOX_CATALOG["Space_alt"] = SKYBOX_CATALOG["Space 2"]
+	SKYBOX_CATALOG["Cloudy_alt"] = SKYBOX_CATALOG["Cloudy 2"]
+	SKYBOX_CATALOG["Galaxy_alt"] = SKYBOX_CATALOG["Galaxy 2"]
+	SKYBOX_CATALOG["Nebula_alt"] = SKYBOX_CATALOG["Nebula 2"]
 
 	local SKYBOX_NAMES: { string } = {}
 	do
@@ -19249,7 +19438,7 @@ Bitstream Vera
 				pcall(collectgarbage, "step", 250)
 			end
 			-- Full GC sweep between match rounds or during menu idle
-			local inMatch = isInGameMatch()
+			local inMatch = (type(worldMatchActive) == "function" and worldMatchActive()) or false
 			if inMatchPrev and not inMatch then
 				if now - lastFullGc >= 15 then
 					lastFullGc = now
@@ -20280,7 +20469,7 @@ Bitstream Vera
 					return Qol.aspect
 				end, { aspectX })()
 			end)
-			aspectX = kit.number(qol, "aspect x", Qol, "aspectX", 0, 150, 1, { scale = 100 })
+			aspectX = kit.number(qol, "aspect x", Qol, "aspectX", 0, 120, 1, { scale = 100 })
 			kit.flag(qol, "remove flash", Qol, "removeFlash", nil, function(value: boolean)
 				if value then
 					installFlashHooks()
@@ -20322,6 +20511,22 @@ Bitstream Vera
 
 			kit.flag(qol, "vacuum all drops", Qol, "autoPickup")
 			kit.flag(qol, "auto respawn", Qol, "autoRespawn")
+			if _G.AtomwareIsLiteMode or (DrawingBridge.library and DrawingBridge.library.isLiteMode == true) then
+				kit.button(qol, "Switch to Full Mode", function()
+					if _G.AtomwareSwitchToFull then _G.AtomwareSwitchToFull() end
+				end)
+			else
+				kit.button(qol, "Switch to Lite Mode", function()
+					if _G.AtomwareSwitchToLite then _G.AtomwareSwitchToLite() end
+				end)
+			end
+			kit.button(qol, "Unload Script", function()
+				if _G.AtomwareCleanup and type(_G.AtomwareCleanup.UnloadAll) == "function" then
+					_G.AtomwareCleanup:UnloadAll()
+				elseif _G.AtomwareUnload then
+					_G.AtomwareUnload()
+				end
+			end)
 			local loadoutPrimary: any
 			local loadoutSecondary: any
 			local loadoutMelee: any
@@ -20397,50 +20602,6 @@ Bitstream Vera
 			ClientFx.tracerLifetime = if type(ClientFx.tracerLifetime) == "number" then ClientFx.tracerLifetime else 0.35
 			ClientFx.tracerBrightness = if type(ClientFx.tracerBrightness) == "number" then ClientFx.tracerBrightness else 1
 
-			local wol = miscTab:AddSection("wol", 1)
-			wol.subTab = "main"
-			local wolRefresh: () -> ()
-			local wolWidth: any
-			local wolLife: any
-			local wolBright: any
-			local wolColor: any
-			local wolReplace: any
-			kit.flag(wol, "bullet tracers", ClientFx, "tracers", nil, function()
-				if wolRefresh then
-					wolRefresh()
-				end
-			end)
-			wolReplace = kit.flag(wol, "replace game tracers", ClientFx, "tracerReplace")
-			wolColor = kit.color(wol, "color", function()
-				return if typeof(ClientFx.tracerColor) == "Color3" then ClientFx.tracerColor else Color3.fromRGB(255, 180, 60)
-			end, function(c3: Color3)
-				if typeof(c3) == "Color3" then
-					ClientFx.tracerColor = Color3.new(c3.R, c3.G, c3.B)
-				end
-				if DrawingBridge.recolorClientFx then
-					pcall(DrawingBridge.recolorClientFx)
-				end
-			end)
-			wolWidth = kit.number(wol, "size", ClientFx, "tracerWidth", 1, 80, 1, { scale = 100 })
-			wolLife = kit.number(wol, "duration", ClientFx, "tracerLifetime", 50, 2000, 10, { scale = 1000, suffix = "ms" })
-			wolBright = kit.number(wol, "brightness", ClientFx, "tracerBrightness", 0, 300, 5, { scale = 100, suffix = "%" })
-			wolRefresh = function()
-				local on = ClientFx.tracers == true
-				for _, opt in { wolReplace, wolColor, wolWidth, wolLife, wolBright } do
-					if opt then
-						opt.enabled = on
-					end
-				end
-				pcall(function()
-					wol:UpdateOptions()
-					miscTab:UpdateSections()
-				end)
-				if DrawingBridge.recolorClientFx then
-					pcall(DrawingBridge.recolorClientFx)
-				end
-			end
-			table.insert(DrawingBridge.syncers, wolRefresh)
-			wolRefresh()
 
 			ClientFx.ambience = ClientFx.ambience == true
 			ClientFx.ambienceTrack = if type(ClientFx.ambienceTrack) == "string" then ClientFx.ambienceTrack else "city"
@@ -21116,14 +21277,51 @@ Bitstream Vera
 			table.insert(worldPaint, DrawingBridge.requestSync)
 			table.insert(hudPaint, DrawingBridge.requestSync)
 
+			if DrawingBridge.builders.spoof then
+				pcall(DrawingBridge.builders.spoof, kit)
+			end
+			rebuildCrosshair()
+			end)
+		end
+
+		DrawingBridge.builders.spoof = function(kit: any)
+			if DrawingBridge.spoofBuilt then return end
+			DrawingBridge.spoofBuilt = true
+
+			local spoofTab: any
+			local okTab, resTab = pcall(function()
+				return kit.tab("spoofing") or kit.tab("misc")
+			end)
+			if okTab and resTab then
+				spoofTab = resTab
+			else
+				spoofTab = kit.tab("misc")
+			end
+
 			local Spoof = DrawingBridge.Spoof
-			if type(Spoof) == "table" then
-				local touch = DrawingBridge.spoofAutoApply or function() end
-				local profile = miscTab:AddSection("profile", 1)
+			if type(Spoof) ~= "table" then
+				Spoof = {}
+				DrawingBridge.Spoof = Spoof
+			end
+			local touch = DrawingBridge.spoofAutoApply or function() end
+
+			-- Staff & Developer Permissions Spoof
+			pcall(function()
+				local staffBox = spoofTab:AddSection("staff / dev", 1)
+				staffBox.subTab = "bullshit"
+				kit.flag(staffBox, "staff permissions", Spoof, "staffPermsOn", nil, function()
+					applyStaffPermSpoofer(Spoof.staffPermsOn == true)
+					touch()
+				end)
+			end)
+
+			-- Profile Spoof
+			pcall(function()
+				local profile = spoofTab:AddSection("profile", 1)
 				profile.subTab = "bullshit"
 				kit.flag(profile, "name", Spoof, "nameOn", nil, touch)
 				kit.box(profile, "name", function()
-					return Spoof.name
+					return Spoof.name or ""
 				end, function(value: string)
 					Spoof.name = value
 					touch()
@@ -21136,8 +21334,11 @@ Bitstream Vera
 				kit.number(profile, "streak value", Spoof, "streak", 0, 999999, 1, { onSet = touch })
 				kit.flag(profile, "keys", Spoof, "keysOn", nil, touch)
 				kit.number(profile, "key amount", Spoof, "keys", 0, 9999999, 1, { onSet = touch })
+			end)
 
-				local rankBox = miscTab:AddSection("rank", 2)
+			-- Rank Spoof
+			pcall(function()
+				local rankBox = spoofTab:AddSection("rank", 2)
 				rankBox.subTab = "bullshit"
 				local rankName: any
 				local eloValue: any
@@ -21150,7 +21351,9 @@ Bitstream Vera
 					end
 					pcall(function()
 						rankBox:UpdateOptions()
-						miscTab:UpdateSections()
+						if spoofTab.UpdateSections then
+							spoofTab:UpdateSections()
+						end
 					end)
 				end
 				kit.flag(rankBox, "rank", Spoof, "rankOn", nil, function()
@@ -21158,7 +21361,7 @@ Bitstream Vera
 					touch()
 				end)
 				rankName = kit.choice(rankBox, "rank name", DrawingBridge.SpoofRanks or { "Nemesis" }, function()
-					return Spoof.rank
+					return Spoof.rank or "Nemesis"
 				end, function(value: string)
 					Spoof.rank = value
 					touch()
@@ -21170,18 +21373,21 @@ Bitstream Vera
 				eloValue = kit.number(rankBox, "elo value", Spoof, "elo", 0, 99999, 1, { onSet = touch })
 				table.insert(DrawingBridge.syncers, rankRefresh)
 				rankRefresh()
+			end)
 
-				local deviceBox = miscTab:AddSection("device", 2)
+			-- Device Spoof & Cases
+			pcall(function()
+				local deviceBox = spoofTab:AddSection("device", 2)
 				deviceBox.subTab = "bullshit"
 				kit.flag(deviceBox, "device", Spoof, "deviceOn", nil, touch)
 				kit.choice(deviceBox, "device type", DrawingBridge.SpoofDevices or { "Desktop", "Mobile", "Console", "VR" }, function()
-					return Spoof.device
+					return Spoof.device or "Desktop"
 				end, function(value: string)
 					Spoof.device = value
 					touch()
 				end)
 				kit.choice(deviceBox, "case", DrawingBridge.SpoofCases or { "Skin Case" }, function()
-					return Spoof.caseName
+					return Spoof.caseName or "Skin Case"
 				end, function(value: string)
 					Spoof.caseName = value
 				end)
@@ -21197,11 +21403,16 @@ Bitstream Vera
 						end,
 					},
 				})
-			end
+			end)
 
-			local AutoQueue = DrawingBridge.AutoQueue
-			if type(AutoQueue) == "table" then
-				local queueBox = miscTab:AddSection("auto queue", 1)
+			-- Auto Queue
+			pcall(function()
+				local AutoQueue = DrawingBridge.AutoQueue
+				if type(AutoQueue) ~= "table" then
+					AutoQueue = { enabled = false, match = "1v1" }
+					DrawingBridge.AutoQueue = AutoQueue
+				end
+				local queueBox = spoofTab:AddSection("auto queue", 1)
 				queueBox.subTab = "bullshit"
 				kit.flag(queueBox, "enabled", AutoQueue, "enabled")
 				kit.choice(queueBox, "match", DrawingBridge.AutoQueueMatches or { "1v1", "2v2", "3v3", "4v4", "5v5", "2v2_beginner" }, function()
@@ -21209,8 +21420,12 @@ Bitstream Vera
 				end, function(value: string)
 					AutoQueue.match = value
 				end)
-			end
-			rebuildCrosshair()
+			end)
+
+			pcall(function()
+				if spoofTab.UpdateSections then
+					spoofTab:UpdateSections()
+				end
 			end)
 		end
 
@@ -22298,16 +22513,58 @@ Bitstream Vera
 					return
 				end
 				lastDamageAt = os.clock()
+				DrawingBridge.lastDamageAt = lastDamageAt
 				pcall(playHitSound)
 				local live = DrawingBridge.RageLive
 				local plr = live and live.targetPlayer
 				local part = live and live.hitPart
 				local pos = if part and part.Parent then part.Position else nil
+				if not plr then
+					plr = DrawingBridge.SilentAimTarget
+					if plr and plr.Character then
+						part = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Head")
+						if part and part:IsA("BasePart") then
+							pos = part.Position
+						end
+					end
+				end
 				if not pos and plr and plr.Character then
 					local root = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Head")
 					if root and root:IsA("BasePart") then
 						pos = root.Position
+						part = root
 					end
+				end
+				if not plr then
+					local cam = Workspace.CurrentCamera
+					if cam then
+						local mouse = UserInputService:GetMouseLocation()
+						local bestDist = 280
+						for _, other in ipairs(Players:GetPlayers()) do
+							if other ~= lp and not isTeammate(other) then
+								local oChar = other.Character
+								local oRoot = oChar and oChar:FindFirstChild("HumanoidRootPart")
+								if oRoot then
+									local sp, onScreen = cam:WorldToViewportPoint(oRoot.Position)
+									if onScreen and sp.Z > 0 then
+										local d = (Vector2.new(sp.X, sp.Y) - mouse).Magnitude
+										if d < bestDist then
+											bestDist = d
+											plr = other
+											part = oRoot
+											pos = oRoot.Position
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+				if DrawingBridge.notifyDamageDealt then
+					pcall(DrawingBridge.notifyDamageDealt, plr, part, amount)
+				end
+				if plr and plr.Character and DrawingBridge.spawnOnshot then
+					pcall(DrawingBridge.spawnOnshot, plr.Character)
 				end
 				if pos and DrawingBridge.spawnHitFx then
 					pcall(DrawingBridge.spawnHitFx, pos, plr)
@@ -23590,6 +23847,12 @@ Bitstream Vera
 				if ClientFx.viewmodel and typeof(cf) == "CFrame" then
 					cf = cf * userViewOffset()
 				end
+				if ClientFx.noRecoilAnimation then
+					pcall(function()
+						if self._recoilSpring then self._recoilSpring:Reset() end
+						if self._unrecoil_spring then self._unrecoil_spring:Reset() end
+					end)
+				end
 				return oldSet(self, cf, ...)
 			end
 			viewclass.__sonataSetCFrame = true
@@ -23774,6 +24037,376 @@ Bitstream Vera
 	installWorldRuntime()
 	end
 
+	-- Damage Indicators Runtime with Instance Pooling
+	do
+		type PooledIndicator = {
+			anchor: Part,
+			bbg: BillboardGui,
+			label: TextLabel,
+			stroke: UIStroke,
+			scale: UIScale,
+			busy: boolean,
+			born: number,
+		}
+		local indicatorPool: { PooledIndicator } = {}
+		local POOL_SIZE = 16
+
+		local function getIndicatorFromPool(): PooledIndicator?
+			for _, item in ipairs(indicatorPool) do
+				if not item.busy then
+					item.busy = true
+					return item
+				end
+			end
+			local oldest = indicatorPool[1]
+			local oldestTime = math.huge
+			for _, item in ipairs(indicatorPool) do
+				if item.born < oldestTime then
+					oldest = item
+					oldestTime = item.born
+				end
+			end
+			if oldest then
+				oldest.busy = true
+				return oldest
+			end
+			return nil
+		end
+
+		local function initIndicatorPool()
+			local parent = resolveParent(nil) or Workspace
+			for i = 1, POOL_SIZE do
+				local anchor = Instance.new("Part")
+				anchor.Anchored = true
+				anchor.CanCollide = false
+				anchor.Transparency = 1
+				anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+				anchor.Position = Vector3.new(0, -500, 0)
+				anchor.Parent = Workspace
+
+				local bbg = Instance.new("BillboardGui")
+				bbg.AlwaysOnTop = true
+				bbg.Size = UDim2.new(0, 180, 0, 45)
+				bbg.Adornee = anchor
+				bbg.Enabled = false
+				bbg.Parent = parent
+
+				local label = Instance.new("TextLabel")
+				label.BackgroundTransparency = 1
+				label.Size = UDim2.new(1, 0, 1, 0)
+				label.Font = Enum.Font.GothamBold
+				label.TextSize = 24
+				label.Parent = bbg
+
+				local stroke = Instance.new("UIStroke")
+				stroke.Thickness = 1.8
+				stroke.Color = Color3.fromRGB(15, 15, 15)
+				stroke.LineJoinMode = Enum.LineJoinMode.Round
+				stroke.Parent = label
+
+				local scale = Instance.new("UIScale")
+				scale.Scale = 0
+				scale.Parent = label
+
+				table.insert(indicatorPool, {
+					anchor = anchor,
+					bbg = bbg,
+					label = label,
+					stroke = stroke,
+					scale = scale,
+					busy = false,
+					born = 0,
+				})
+			end
+		end
+
+		local function create3DDamageIndicator(part: BasePart?, damage: number, isHeadshot: boolean?)
+			local Esp = DrawingBridge.Esp
+			if not Esp or not Esp.damageIndicators or not part or not part.Parent then return end
+			if #indicatorPool == 0 then initIndicatorPool() end
+
+			local item = getIndicatorFromPool()
+			if not item then return end
+
+			local now = os.clock()
+			item.born = now
+			item.anchor.Position = part.Position
+
+			local randX = (math.random(-12, 12) / 10)
+			local startOffset = Vector3.new(randX, 1.8 + (math.random(-4, 4) / 10), 0)
+			item.bbg.StudsOffset = startOffset
+			item.bbg.Enabled = true
+
+			local isCrit = isHeadshot == true or (part.Name == "Head" or part.Name == "HitboxHead")
+			local val = math.floor(damage + 0.5)
+			if isCrit then
+				item.label.Text = tostring(val) .. "!"
+				item.label.TextColor3 = Color3.fromRGB(255, 65, 65)
+				item.label.TextSize = 28
+				item.stroke.Thickness = 2.4
+				item.stroke.Color = Color3.fromRGB(40, 10, 10)
+			else
+				item.label.Text = tostring(val)
+				item.label.TextColor3 = Esp.indicatorColor or Color3.fromRGB(255, 230, 80)
+				item.label.TextSize = 24
+				item.stroke.Thickness = 1.8
+				item.stroke.Color = Esp.indicatorStroke or Color3.fromRGB(15, 15, 15)
+			end
+			item.label.TextTransparency = 0
+			item.stroke.Transparency = 0
+			item.label.Rotation = math.random(-22, 22)
+			item.scale.Scale = 0
+
+			task.spawn(function()
+				local TweenService = game:GetService("TweenService")
+				TweenService:Create(item.scale, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+				TweenService:Create(item.bbg, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { StudsOffset = startOffset + Vector3.new(0, 1.4, 0) }):Play()
+				task.wait(Esp.indicatorDuration or 0.8)
+				if item.born == now then
+					local fadeOut = TweenService:Create(item.label, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1 })
+					TweenService:Create(item.stroke, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Transparency = 1 }):Play()
+					TweenService:Create(item.scale, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Scale = 0 }):Play()
+					fadeOut:Play()
+					fadeOut.Completed:Wait()
+					if item.born == now then
+						item.bbg.Enabled = false
+						item.busy = false
+						item.anchor.Position = Vector3.new(0, -500, 0)
+					end
+				end
+			end)
+		end
+		DrawingBridge.CreateDamageIndicator = create3DDamageIndicator
+
+		-- Elimination Chams & Kill Flash Runtime with Highlight Pooling & Ragdoll Early Cleanup
+		type PooledHighlight = {
+			hl: Highlight,
+			busy: boolean,
+			born: number,
+		}
+		local elimHighlightPool: { PooledHighlight } = {}
+		local playerHpTrack: { [Player]: number } = {}
+		local lastDamagedByMe: { [Player]: number } = {}
+		local flashGui: ScreenGui? = nil
+		local flashFrame: Frame? = nil
+
+		local function getElimHighlight(): PooledHighlight?
+			for _, item in ipairs(elimHighlightPool) do
+				if not item.busy then
+					item.busy = true
+					return item
+				end
+			end
+			if #elimHighlightPool < 4 then
+				local parent = resolveParent(nil) or Workspace
+				local hl = Instance.new("Highlight")
+				hl.Name = "__elim_cham"
+				hl.Enabled = false
+				hl.Parent = parent
+				local item = { hl = hl, busy = true, born = 0 }
+				table.insert(elimHighlightPool, item)
+				return item
+			end
+			local oldest = elimHighlightPool[1]
+			local oldestTime = math.huge
+			for _, item in ipairs(elimHighlightPool) do
+				if item.born < oldestTime then
+					oldest = item
+					oldestTime = item.born
+				end
+			end
+			if oldest then
+				oldest.busy = true
+				return oldest
+			end
+			return nil
+		end
+
+		local function ensureKillFlashGui()
+			if flashGui and flashGui.Parent then return flashFrame end
+			local parent = resolveParent(nil)
+			if not parent then return nil end
+			flashGui = Instance.new("ScreenGui")
+			flashGui.Name = "__sonata_kill_flash"
+			flashGui.DisplayOrder = 9999
+			flashGui.ResetOnSpawn = false
+			flashFrame = Instance.new("Frame")
+			flashFrame.Name = "Flash"
+			flashFrame.Size = UDim2.new(1, 0, 1, 0)
+			flashFrame.BackgroundTransparency = 1
+			flashFrame.BorderSizePixel = 0
+			flashFrame.Parent = flashGui
+			flashGui.Parent = parent
+			return flashFrame
+		end
+
+		local function triggerElimination(targetPlayer: Player, char: Model)
+			local Esp = DrawingBridge.Esp
+			if not Esp then return end
+			-- Kill Flash
+			if Esp.killFlash then
+				local frame = ensureKillFlashGui()
+				if frame then
+					frame.BackgroundColor3 = Esp.killFlashColor or Color3.fromRGB(90, 170, 255)
+					frame.BackgroundTransparency = 0.35
+					task.spawn(function()
+						local TweenService = game:GetService("TweenService")
+						local tw = TweenService:Create(frame, TweenInfo.new(Esp.killFlashDuration or 0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 1 })
+						tw:Play()
+					end)
+				end
+			end
+			-- Elimination Chams with Pooling and Ragdoll Early Cleanup
+			if Esp.elimChams and char and char.Parent then
+				local item = getElimHighlight()
+				if item then
+					local now = os.clock()
+					item.born = now
+					item.hl.Adornee = char
+					item.hl.FillColor = Esp.elimChamsColor or Color3.fromRGB(255, 60, 60)
+					item.hl.FillTransparency = 0.2
+					item.hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+					item.hl.OutlineTransparency = 0
+					item.hl.Enabled = true
+
+					local cleanupConn: RBXScriptConnection? = nil
+					local function finishCham()
+						if cleanupConn then cleanupConn:Disconnect(); cleanupConn = nil end
+						if item.born == now then
+							item.hl.Enabled = false
+							item.hl.Adornee = nil
+							item.busy = false
+						end
+					end
+
+					cleanupConn = char.AncestryChanged:Connect(function(_, p)
+						if not p then finishCham() end
+					end)
+
+					task.spawn(function()
+						local TweenService = game:GetService("TweenService")
+						local dur = Esp.elimChamsDuration or 1.2
+						local tw = TweenService:Create(item.hl, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { FillTransparency = 1, OutlineTransparency = 1 })
+						tw:Play()
+						tw.Completed:Wait()
+						finishCham()
+					end)
+				end
+			end
+		end
+
+		-- Match-End / Round Flush
+		local function flushActiveVisuals()
+			for _, item in ipairs(indicatorPool) do
+				if item.busy then
+					item.bbg.Enabled = false
+					item.busy = false
+					item.anchor.Position = Vector3.new(0, -500, 0)
+				end
+			end
+			for _, item in ipairs(elimHighlightPool) do
+				if item.busy then
+					item.hl.Enabled = false
+					item.hl.Adornee = nil
+					item.busy = false
+				end
+			end
+			if flashFrame then
+				flashFrame.BackgroundTransparency = 1
+			end
+		end
+		DrawingBridge.flushActiveVisuals = flushActiveVisuals
+
+		local function isDamagedByMe(player: Player, root: BasePart?): boolean
+			local now = os.clock()
+			local lastHit = lastDamagedByMe[player]
+			if lastHit and (now - lastHit <= 0.6) then
+				return true
+			end
+			local localShotAt = DrawingBridge.localShotAt or 0
+			local lastDamageAt = DrawingBridge.lastDamageAt or 0
+			local isFiring = (now - localShotAt <= 0.45)
+				or (now - lastDamageAt <= 0.45)
+				or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+			if not isFiring then
+				return false
+			end
+			local rage = DrawingBridge.RageLive
+			if rage and rage.targetPlayer == player then
+				return true
+			end
+			if DrawingBridge.SilentAimTarget == player then
+				return true
+			end
+			local cam = Workspace.CurrentCamera
+			if cam and root then
+				local sp, onScreen = cam:WorldToViewportPoint(root.Position)
+				if onScreen and sp.Z > 0 then
+					local mouse = UserInputService:GetMouseLocation()
+					local dist = (Vector2.new(sp.X, sp.Y) - mouse).Magnitude
+					if dist <= 240 then
+						return true
+					end
+				end
+			end
+			return false
+		end
+
+		DrawingBridge.notifyDamageDealt = function(targetPlayer: Player?, part: BasePart?, dmg: number?)
+			local now = os.clock()
+			if targetPlayer then
+				lastDamagedByMe[targetPlayer] = now
+			end
+			if part and dmg and dmg > 0 then
+				local isHead = part.Name == "Head" or part.Name == "HitboxHead"
+				create3DDamageIndicator(part, dmg, isHead)
+			end
+		end
+
+		local lastInMatch = true
+		RunService.Heartbeat:Connect(function()
+			local lp = Players.LocalPlayer
+			local now = os.clock()
+			local inMatchProbe = DrawingBridge.isInGameMatch
+			local inMatch = true
+			if type(inMatchProbe) == "function" then
+				local okM, mRes = pcall(inMatchProbe)
+				if okM then inMatch = (mRes == true) end
+			end
+			if not inMatch and lastInMatch then
+				flushActiveVisuals()
+			end
+			lastInMatch = inMatch
+
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= lp then
+					local char = p.Character
+					local hum = char and char:FindFirstChildOfClass("Humanoid")
+					local root = char and char:FindFirstChild("HumanoidRootPart")
+					if hum and root then
+						local curHp = hum.Health
+						local prevHp = playerHpTrack[p]
+						if prevHp and prevHp > curHp then
+							local dmg = prevHp - curHp
+							if isDamagedByMe(p, root) then
+								lastDamagedByMe[p] = now
+								create3DDamageIndicator(root, dmg, false)
+							end
+							if curHp <= 0 and prevHp > 0 then
+								local hitAt = lastDamagedByMe[p]
+								if hitAt and (now - hitAt <= 1.5) then
+									lastDamagedByMe[p] = nil
+									triggerElimination(p, char)
+								end
+							end
+						end
+						playerHpTrack[p] = curHp
+					end
+				end
+			end
+		end)
+	end
+
 	local rebuildConfigList: (() -> ())? = nil
 	local selectedConfig: string? = nil
 
@@ -23789,7 +24422,10 @@ Bitstream Vera
 		end
 	end
 
-	local function sanitizeConfigName(name: string): string
+	local function sanitizeConfigName(name: any): string
+		if type(name) ~= "string" then
+			return "config"
+		end
 		local cleaned = string.gsub(name, "[^%w%-_ ]", "")
 		cleaned = string.gsub(cleaned, "^%s+", "")
 		cleaned = string.gsub(cleaned, "%s+$", "")
@@ -24327,7 +24963,12 @@ Bitstream Vera
 	end
 
 	local function buildConfigPayload(): any
-		local skins, wraps, charms, finishers = Cosmetics:export()
+		local skins, wraps, charms, finishers = nil, nil, nil, nil
+		if Cosmetics and type(Cosmetics.export) == "function" then
+			pcall(function()
+				skins, wraps, charms, finishers = Cosmetics:export()
+			end)
+		end
 		local payload = {
 			version = 4,
 			name = "Atomware Rivals",
@@ -24339,10 +24980,10 @@ Bitstream Vera
 			esp = if exportEsp then exportEsp() else nil,
 			combat = if exportCombat then exportCombat() else nil,
 			world = if exportWorldQol then exportWorldQol() else nil,
-			client = exportClientFx(),
-			spoof = exportSpoof(),
-			autoQueue = exportAutoQueue(),
-			ui = exportUiSettings(),
+			client = if exportClientFx then exportClientFx() else nil,
+			spoof = if exportSpoof then exportSpoof() else nil,
+			autoQueue = if exportAutoQueue then exportAutoQueue() else nil,
+			ui = if exportUiSettings then exportUiSettings() else nil,
 		}
 		local ok, encoded = pcall(function()
 			return HttpService:JSONEncode(payload)
@@ -24436,7 +25077,10 @@ Bitstream Vera
 		elseif clean == "" then
 			clean = "config"
 		end
-		local payload = buildConfigPayload()
+		local okPayload, payload = pcall(buildConfigPayload)
+		if not okPayload or type(payload) ~= "table" then
+			return false, "failed to build config data"
+		end
 		payload.name = clean
 		payload.savedAt = os.time()
 		local ok, encoded = pcall(function()
@@ -24692,458 +25336,7 @@ Bitstream Vera
 		end
 
 		DrawingBridge.builders.lua = function(kit: any)
-			local tab = kit.tab("extras")
-			tab:AddSubTabs({ "lua", "servers" })
-			local scripts = tab:AddSection("luas", 1)
-			scripts.subTab = "lua"
-
-			local perfBox = tab:AddSection("performance", 2)
-			perfBox.subTab = "lua"
-
-			local extrasModelBox = tab:AddSection("player model", 2)
-			extrasModelBox.subTab = "lua"
-
-			local extrasModels = DrawingBridge.modelNames or { "Classic R6", "Dummy", "Mini Dummy", "Noob" }
-			local extrasModelList: any
-			local function refreshExtrasModelList()
-				if not extrasModelList then return end
-				pcall(function()
-					extrasModelList:ClearValues()
-					local names = DrawingBridge.modelNames or extrasModels
-					for _, name in names do
-						extrasModelList:AddValue(name)
-					end
-					extrasModelList:Select(tostring(ClientFx.playerModelName or "Noob"), true)
-				end)
-			end
-
-			kit.flag(extrasModelBox, "player model", ClientFx, "customModel", nil, function()
-				if ClientFx.customModel ~= true then
-					ClientFx.customModelReplaceChar = false
-				end
-				if DrawingBridge.customRefresh then DrawingBridge.customRefresh() end
-			end)
-
-			extrasModelList = kit.choice(extrasModelBox, "saved", extrasModels, function()
-				return tostring(ClientFx.playerModelName or "Noob")
-			end, function(value: string)
-				ClientFx.playerModelName = value
-			end)
-
-			kit.buttons(extrasModelBox, {
-				{
-					text = "load",
-					callback = function()
-						if DrawingBridge.loadPlayerModel then
-							DrawingBridge.loadPlayerModel()
-						end
-					end
-				},
-				{
-					text = "refresh",
-					callback = function()
-						if DrawingBridge.scanPlayerModels then DrawingBridge.scanPlayerModels() end
-						refreshExtrasModelList()
-					end
-				}
-			})
-
-			kit.slider(extrasModelBox, "scale", 0.05, 5, 0.05, function()
-				return (ClientFx :: any)["customCharScale"] or 1
-			end, function(v: number)
-				(ClientFx :: any)["customCharScale"] = v
-				if DrawingBridge.customRefresh then DrawingBridge.customRefresh() end
-			end)
-
-			local fpsUnlockerOn = false
-			local fpsCapValue = 240
-			local function applyFpsCap()
-				local setFps = execApi("setfpscap") or execApi("set_fps_cap")
-				if typeof(setFps) == "function" then
-					pcall(setFps, if fpsUnlockerOn then fpsCapValue else 60)
-				end
-			end
-
-			local fpsCapSlider: any
-			kit.toggle(perfBox, "fps unlocker", function()
-				return fpsUnlockerOn
-			end, function(v: boolean)
-				fpsUnlockerOn = v
-				applyFpsCap()
-				if fpsCapSlider then
-					fpsCapSlider.enabled = fpsUnlockerOn
-					pcall(function()
-						perfBox:UpdateOptions()
-					end)
-				end
-			end)
-
-			fpsCapSlider = kit.slider(perfBox, "fps cap", 30, 360, 5, function()
-				return fpsCapValue
-			end, function(v: number)
-				fpsCapValue = math.clamp(math.floor(v), 30, 360)
-				if fpsUnlockerOn then
-					applyFpsCap()
-				end
-			end, { suffix = " fps" })
-			refreshLuaNames()
-			picked = luaNames[1] or ""
-			local listCtl: any = nil
-			listCtl = kit.fullList(scripts, "script", function()
-				if #luaNames == 0 then
-					return { "none" }
-				end
-				return luaNames
-			end, function()
-				return if picked ~= "" then picked else "none"
-			end, function(value: string)
-				if value ~= "none" and luaPaths[value] then
-					picked = value
-				end
-			end)
-			kit.buttons(scripts, {
-				{
-					text = "load",
-					callback = function()
-						local src, err = readPicked()
-						if not src then
-							luaNotify(err or "no script selected")
-							refreshLuaNames()
-							pcall(listCtl.render)
-							return
-						end
-						runLua(picked, src)
-					end,
-				},
-				{
-					text = "refresh",
-					callback = function()
-						refreshLuaNames()
-						if picked == "" or not luaPaths[picked] then
-							picked = luaNames[1] or ""
-						end
-						pcall(listCtl.render)
-					end,
-				},
-				{
-					text = "delete",
-					confirm = true,
-					callback = function()
-						if picked == "" or not luaPaths[picked] then
-							luaNotify("no script selected")
-							return
-						end
-						local name = picked
-						pcall(fsDelfile, luaPaths[name])
-						refreshLuaNames()
-						picked = luaNames[1] or ""
-						pcall(listCtl.render)
-						luaNotify("deleted · " .. name)
-					end,
-				},
-			})
-
-			local serverRows: { any } = {}
-			local serverByLabel: { [string]: any } = {}
-			local pickedServer = ""
-			local pastedId = ""
-			local fetching = false
-
-			local function serverNote(message: string)
-				local lib: any = DrawingBridge.library
-				if lib then
-					pcall(function()
-						lib:SendNotification(message, 3.5)
-					end)
-				end
-			end
-
-			local function readClipboard(): string
-				local fn = execApi("getclipboard") or execApi("get_clipboard")
-				if typeof(fn) ~= "function" then
-					local syn = execApi("syn")
-					if type(syn) == "table" then
-						fn = syn.getclipboard or syn.get_clipboard
-					end
-				end
-				if typeof(fn) ~= "function" then
-					return ""
-				end
-				local ok, text = pcall(fn)
-				if ok and type(text) == "string" then
-					return text
-				end
-				return ""
-			end
-
-			local function writeClipboard(text: string): boolean
-				local fn = execApi("setclipboard") or execApi("set_clipboard")
-				if typeof(fn) ~= "function" then
-					local syn = execApi("syn")
-					if type(syn) == "table" then
-						fn = syn.setclipboard or syn.set_clipboard
-					end
-				end
-				if typeof(fn) ~= "function" then
-					return false
-				end
-				return pcall(fn, text)
-			end
-
-			local function jobFromText(text: string): string?
-				if type(text) ~= "string" then
-					return nil
-				end
-				local id = string.match(text, "[%x]+%-[%x]+%-[%x]+%-[%x]+%-[%x]+")
-				if type(id) == "string" and #id >= 32 then
-					return id
-				end
-				local trimmed = string.gsub(text, "%s+", "")
-				if #trimmed >= 16 then
-					return trimmed
-				end
-				return nil
-			end
-
-			local function joinJob(jobId: string)
-				if jobId == "" then
-					serverNote("no server id")
-					return
-				end
-				if jobId == game.JobId then
-					serverNote("already in this server")
-					return
-				end
-				local teleport = getService("TeleportService")
-				local ok = pcall(function()
-					teleport:TeleportToPlaceInstance(game.PlaceId, jobId, Players.LocalPlayer)
-				end)
-				if ok then
-					serverNote("joining server")
-				else
-					serverNote("join failed")
-				end
-			end
-
-			local function fetchPublicServers(): { any }
-				local rows = {}
-				local used: { [string]: boolean } = {}
-				local cursor = ""
-				local mine = game.JobId
-				for _ = 1, 3 do
-					local suffix = ""
-					if cursor ~= "" then
-						local encoded = cursor
-						pcall(function()
-							encoded = HttpService:UrlEncode(cursor)
-						end)
-						suffix = "&cursor=" .. encoded
-					end
-					local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100%s", game.PlaceId, suffix)
-					local ok, body = pcall(function()
-						return game:HttpGet(url)
-					end)
-					if not ok or type(body) ~= "string" then
-						break
-					end
-					local okDecode, page = pcall(function()
-						return HttpService:JSONDecode(body)
-					end)
-					if not okDecode or type(page) ~= "table" or type(page.data) ~= "table" then
-						break
-					end
-					for _, entry in page.data do
-						local id = if type(entry) == "table" then entry.id else nil
-						if type(id) == "string" and id ~= "" and id ~= mine and not used[id] then
-							used[id] = true
-							local playing = tonumber(entry.playing) or 0
-							local maxp = tonumber(entry.maxPlayers) or 0
-							local ping = tonumber(entry.ping)
-							local pingText = if ping then string.format(" · %dms", math.floor(ping + 0.5)) else ""
-							local base = string.format("%d/%d%s", playing, maxp, pingText)
-							local label = base
-							local n = 2
-							while used["label:" .. label] do
-								label = base .. " · " .. tostring(n)
-								n += 1
-							end
-							used["label:" .. label] = true
-							table.insert(rows, { id = id, playing = playing, label = label })
-						end
-					end
-					cursor = if type(page.nextPageCursor) == "string" then page.nextPageCursor else ""
-					if cursor == "" then
-						break
-					end
-				end
-				table.sort(rows, function(a, b)
-					return a.playing > b.playing
-				end)
-				return rows
-			end
-
-			local listCtlServers: any = nil
-			local function showServers(rows: { any })
-				table.clear(serverRows)
-				table.clear(serverByLabel)
-				for _, row in rows do
-					table.insert(serverRows, row)
-					serverByLabel[row.label] = row
-				end
-				if not serverByLabel[pickedServer] then
-					pickedServer = if serverRows[1] then serverRows[1].label else ""
-				end
-				if listCtlServers then
-					pcall(listCtlServers.render)
-				end
-			end
-
-			local function refreshServers()
-				if fetching then
-					return
-				end
-				fetching = true
-				serverNote("loading servers")
-				task.spawn(function()
-					local ok, rows = pcall(fetchPublicServers)
-					fetching = false
-					if not ok or type(rows) ~= "table" then
-						serverNote("server list failed")
-						return
-					end
-					showServers(rows)
-					serverNote(string.format("servers · %d", #rows))
-				end)
-			end
-
-			local function randomJob(high: boolean): string?
-				if #serverRows == 0 then
-					return nil
-				end
-				local sorted = table.clone(serverRows)
-				table.sort(sorted, function(a, b)
-					if high then
-						return a.playing > b.playing
-					end
-					return a.playing < b.playing
-				end)
-				local count = math.clamp(math.ceil(#sorted * 0.25), 1, #sorted)
-				return sorted[math.random(1, count)].id
-			end
-
-			local browser = tab:AddSection("servers", 1)
-			browser.subTab = "servers"
-			listCtlServers = kit.fullList(browser, "server", function()
-				if #serverRows == 0 then
-					return { "none" }
-				end
-				local names = {}
-				for _, row in serverRows do
-					table.insert(names, row.label)
-				end
-				return names
-			end, function()
-				return if pickedServer ~= "" then pickedServer else "none"
-			end, function(value: string)
-				if value ~= "none" and serverByLabel[value] then
-					pickedServer = value
-				end
-			end)
-			kit.buttons(browser, {
-				{
-					text = "refresh",
-					callback = refreshServers,
-				},
-				{
-					text = "join",
-					callback = function()
-						local row = serverByLabel[pickedServer]
-						if not row then
-							serverNote("no server selected")
-							return
-						end
-						joinJob(row.id)
-					end,
-				},
-			})
-			kit.buttons(browser, {
-				{
-					text = "random high",
-					callback = function()
-						local id = randomJob(true)
-						if not id then
-							serverNote("no servers")
-							return
-						end
-						joinJob(id)
-					end,
-				},
-				{
-					text = "random low",
-					callback = function()
-						local id = randomJob(false)
-						if not id then
-							serverNote("no servers")
-							return
-						end
-						joinJob(id)
-					end,
-				},
-			})
-
-			local share = tab:AddSection("share", 2)
-			share.subTab = "servers"
-			local idLine = kit.text(share, "server id")
-			local function paintShare()
-				local id = game.JobId
-				local shown = if id ~= "" then id else "unavailable"
-				pcall(function()
-					idLine:SetText("id · " .. shown)
-				end)
-			end
-			paintShare()
-			local idBox = kit.box(share, "server id", function()
-				return pastedId
-			end, function(value: string)
-				pastedId = value
-			end)
-			kit.buttons(share, {
-				{
-					text = "copy id",
-					callback = function()
-						local id = game.JobId
-						if id == "" then
-							serverNote("no server id")
-							return
-						end
-						pastedId = id
-						pcall(function()
-							idBox:SetInput(id, true)
-						end)
-						if writeClipboard(id) then
-							serverNote("copied server id")
-						else
-							serverNote("copy failed")
-						end
-					end,
-				},
-				{
-					text = "join copied",
-					callback = function()
-						local id = jobFromText(pastedId) or jobFromText(readClipboard())
-						if not id then
-							serverNote("clipboard has no server id")
-							return
-						end
-						pastedId = id
-						pcall(function()
-							idBox:SetInput(id, true)
-						end)
-						joinJob(id)
-					end,
-				},
-			})
-			task.defer(refreshServers)
+			-- Extras tab removed in whole per user request
 		end
 	end
 
@@ -25430,6 +25623,224 @@ Bitstream Vera
 			warn("settings tab is on vacation")
 			return
 		end
+
+		local isLite = _G.AtomwareIsLiteMode == true
+			or (DrawingBridge.library and DrawingBridge.library.isLiteMode == true)
+			or (DrawingBridge.menu and DrawingBridge.menu.isLiteMode == true)
+			or (DrawingBridge.menu and DrawingBridge.menu.name == "Atomware Mobile Lite")
+
+		local function notify(message: string, _good: boolean?)
+			local lib: any = DrawingBridge.library
+			if lib then
+				pcall(function()
+					lib:SendNotification(message, 3.5)
+				end)
+			end
+		end
+
+		local function performSwitchToFull()
+			notify("Switching to Full Mode...")
+			task.spawn(function()
+				if _G.AtomwareCleanup and type(_G.AtomwareCleanup.UnloadAll) == "function" then
+					_G.AtomwareCleanup:UnloadAll()
+				elseif _G.AtomwareUnload then
+					_G.AtomwareUnload()
+				end
+				_G.AtomwareIsLiteMode = false
+				_G.AtomwareForceLite = false
+				_G.AtomwareForceFull = true
+				pcall(function()
+					local makeF = type(makefolder) == "function" and makefolder
+					local isF = type(isfolder) == "function" and isfolder
+					if makeF and isF and not isF("Atomware") then makeF("Atomware") end
+					if type(writefile) == "function" then
+						writefile("Atomware/lite_mode_preference.json", "full")
+					end
+				end)
+				task.wait(0.6)
+				local initCode = nil
+				pcall(function()
+					if readfile then
+						local ok, s = pcall(readfile, "rivals/init.lua")
+						if ok and s and #s > 0 then initCode = s else
+							local ok2, s2 = pcall(readfile, "init.lua")
+							if ok2 and s2 and #s2 > 0 then initCode = s2 end
+						end
+					end
+				end)
+				if not initCode then
+					pcall(function()
+						initCode = game:HttpGet("https://raw.githubusercontent.com/revileDev/TestFork/main/rivals/init.lua?v=" .. tostring(os.time()))
+					end)
+				end
+				if initCode then
+					local fn = loadstring(initCode)
+					if fn then fn() end
+				end
+			end)
+		end
+
+		local function performSwitchToLite()
+			notify("Switching to Lite Mode...")
+			task.spawn(function()
+				if _G.AtomwareCleanup and type(_G.AtomwareCleanup.UnloadAll) == "function" then
+					_G.AtomwareCleanup:UnloadAll()
+				elseif _G.AtomwareUnload then
+					_G.AtomwareUnload()
+				end
+				_G.AtomwareIsLiteMode = true
+				_G.AtomwareForceLite = true
+				_G.AtomwareForceFull = false
+				pcall(function()
+					local makeF = type(makefolder) == "function" and makefolder
+					local isF = type(isfolder) == "function" and isfolder
+					if makeF and isF and not isF("Atomware") then makeF("Atomware") end
+					if type(writefile) == "function" then
+						writefile("Atomware/lite_mode_preference.json", "lite")
+					end
+				end)
+				task.wait(0.6)
+				local initCode = nil
+				pcall(function()
+					if readfile then
+						local ok, s = pcall(readfile, "rivals/init.lua")
+						if ok and s and #s > 0 then initCode = s else
+							local ok2, s2 = pcall(readfile, "init.lua")
+							if ok2 and s2 and #s2 > 0 then initCode = s2 end
+						end
+					end
+				end)
+				if not initCode then
+					pcall(function()
+						initCode = game:HttpGet("https://raw.githubusercontent.com/revileDev/TestFork/main/rivals/init.lua?v=" .. tostring(os.time()))
+					end)
+				end
+				if initCode then
+					local fn = loadstring(initCode)
+					if fn then fn() end
+				end
+			end)
+		end
+
+		local function triggerSwitchToFullWithWarning()
+			local isLowMem = false
+			pcall(function()
+				local Stats = game:GetService("Stats")
+				local UIS = game:GetService("UserInputService")
+				local platform = UIS:GetPlatform()
+				local memMb = Stats:GetTotalMemoryUsageMb()
+				if platform == Enum.Platform.Android or platform == Enum.Platform.IOS then
+					isLowMem = true
+				elseif memMb > 2500 then
+					isLowMem = true
+				end
+			end)
+
+			if isLowMem then
+				local parent = resolveParent(nil) or game:GetService("CoreGui")
+				local modalGui = Instance.new("ScreenGui")
+				modalGui.Name = "__atomware_switch_confirm"
+				modalGui.DisplayOrder = 99999
+				modalGui.Parent = parent
+
+				local overlay = Instance.new("TextButton")
+				overlay.Size = UDim2.new(1, 0, 1, 0)
+				overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+				overlay.BackgroundTransparency = 0.5
+				overlay.Text = ""
+				overlay.AutoButtonColor = false
+				overlay.Parent = modalGui
+
+				local box = Instance.new("Frame")
+				box.Size = UDim2.new(0, 320, 0, 180)
+				box.Position = UDim2.new(0.5, -160, 0.5, -90)
+				box.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+				box.BorderSizePixel = 0
+				box.Parent = modalGui
+				local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 8); c.Parent = box
+				local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(255, 75, 75); s.Thickness = 1.5; s.Parent = box
+
+				local title = Instance.new("TextLabel")
+				title.Size = UDim2.new(1, -20, 0, 24)
+				title.Position = UDim2.new(0, 10, 0, 10)
+				title.BackgroundTransparency = 1
+				title.Text = "Switch to Full Mode"
+				title.Font = Enum.Font.GothamBold
+				title.TextSize = 15
+				title.TextColor3 = Color3.fromRGB(255, 80, 80)
+				title.TextXAlignment = Enum.TextXAlignment.Left
+				title.Parent = box
+
+				local desc = Instance.new("TextLabel")
+				desc.Size = UDim2.new(1, -20, 0, 80)
+				desc.Position = UDim2.new(0, 10, 0, 36)
+				desc.BackgroundTransparency = 1
+				desc.Text = "Warning: Low Memory Detected (<3GB RAM). Full Mode loads advanced 3D shaders, custom viewmodels, and heavy UI assets that may cause instability or client crashes. Do you want to proceed?"
+				desc.Font = Enum.Font.Gotham
+				desc.TextSize = 12
+				desc.TextColor3 = Color3.fromRGB(210, 210, 220)
+				desc.TextWrapped = true
+				desc.TextXAlignment = Enum.TextXAlignment.Left
+				desc.TextYAlignment = Enum.TextYAlignment.Top
+				desc.Parent = box
+
+				local btnCancel = Instance.new("TextButton")
+				btnCancel.Size = UDim2.new(0.45, 0, 0, 32)
+				btnCancel.Position = UDim2.new(0.05, 0, 1, -42)
+				btnCancel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+				btnCancel.Text = "Cancel"
+				btnCancel.TextColor3 = Color3.fromRGB(200, 200, 200)
+				btnCancel.Font = Enum.Font.GothamBold
+				btnCancel.TextSize = 12
+				btnCancel.Parent = box
+				local cc = Instance.new("UICorner"); cc.CornerRadius = UDim.new(0, 6); cc.Parent = btnCancel
+
+				local btnProceed = Instance.new("TextButton")
+				btnProceed.Size = UDim2.new(0.45, 0, 0, 32)
+				btnProceed.Position = UDim2.new(0.52, 0, 1, -42)
+				btnProceed.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+				btnProceed.Text = "Yes, Switch"
+				btnProceed.TextColor3 = Color3.fromRGB(255, 255, 255)
+				btnProceed.Font = Enum.Font.GothamBold
+				btnProceed.TextSize = 12
+				btnProceed.Parent = box
+				local cp = Instance.new("UICorner"); cp.CornerRadius = UDim.new(0, 6); cp.Parent = btnProceed
+
+				btnCancel.MouseButton1Click:Connect(function() modalGui:Destroy() end)
+				overlay.MouseButton1Click:Connect(function() modalGui:Destroy() end)
+				btnProceed.MouseButton1Click:Connect(function()
+					modalGui:Destroy()
+					performSwitchToFull()
+				end)
+			else
+				performSwitchToFull()
+			end
+		end
+
+		local function performUnload()
+			notify("Unloading Atomware...")
+			task.spawn(function()
+				task.wait(0.2)
+				if _G.AtomwareCleanup and type(_G.AtomwareCleanup.UnloadAll) == "function" then
+					_G.AtomwareCleanup:UnloadAll()
+				elseif _G.AtomwareUnload then
+					_G.AtomwareUnload()
+				end
+			end)
+		end
+
+		_G.AtomwareSwitchToFull = triggerSwitchToFullWithWarning
+		_G.AtomwareSwitchToLite = performSwitchToLite
+
+		-- Prominent System Management Card in Settings (Column 1, top)
+		local sysSection = settingsTab:AddSection("System", 1, 1)
+		if isLite then
+			kit.button(sysSection, "Switch to Full Mode", triggerSwitchToFullWithWarning)
+		else
+			kit.button(sysSection, "Switch to Lite Mode", performSwitchToLite)
+		end
+		kit.button(sysSection, "Unload Script", performUnload)
+
 		local credits = settingsTab:AddSection("credits", 1, 999)
 		credits.span = 2
 		pcall(function()
@@ -25443,15 +25854,6 @@ Bitstream Vera
 		local nameText = loadedConfigName or selectedConfig or "default"
 		local nameBox: any = nil
 		local list: any = nil
-
-		local function notify(message: string, _good: boolean?)
-			local lib: any = DrawingBridge.library
-			if lib then
-				pcall(function()
-					lib:SendNotification(message, 3.5)
-				end)
-			end
-		end
 
 		local function refreshConfigs()
 			if not list then
@@ -25506,12 +25908,19 @@ Bitstream Vera
 			{
 				text = "Create",
 				callback = function()
-					local target = sanitizeConfigName(nameText)
+					local targetName = nameText
+					if nameBox and type(nameBox.GetInput) == "function" then
+						local cur = nameBox:GetInput()
+						if type(cur) == "string" and cur ~= "" then
+							targetName = cur
+						end
+					end
+					local target = sanitizeConfigName(targetName or "config")
 					local ok, result = createConfig(target)
 					if ok then
 						selectedConfig = result
 						nameText = result
-						if nameBox then
+						if nameBox and type(nameBox.SetInput) == "function" then
 							nameBox:SetInput(result, true)
 						end
 						refreshConfigs()
@@ -25524,11 +25933,24 @@ Bitstream Vera
 			{
 				text = "Save",
 				callback = function()
-					local target = sanitizeConfigName(nameText)
+					local targetName = nameText
+					if nameBox and type(nameBox.GetInput) == "function" then
+						local cur = nameBox:GetInput()
+						if type(cur) == "string" and cur ~= "" then
+							targetName = cur
+						end
+					end
+					if not targetName or targetName == "" then
+						targetName = selectedConfig or loadedConfigName or "default"
+					end
+					local target = sanitizeConfigName(targetName)
 					local ok, result = saveConfig(target)
 					if ok then
 						selectedConfig = result
 						nameText = result
+						if nameBox and type(nameBox.SetInput) == "function" then
+							nameBox:SetInput(result, true)
+						end
 						refreshConfigs()
 						notify("saved · " .. result)
 					else
@@ -25645,6 +26067,14 @@ Bitstream Vera
 				end,
 			},
 		})
+
+		kit.separator(section, "management")
+		if isLite then
+			kit.button(section, "Switch to Full Mode", triggerSwitchToFullWithWarning)
+		else
+			kit.button(section, "Switch to Lite Mode", performSwitchToLite)
+		end
+		kit.button(section, "Unload Script", performUnload)
 
 		rebuildConfigList = function()
 			refreshConfigs()
@@ -25784,10 +26214,10 @@ Bitstream Vera
 		DrawingBridge.library = library
 		print("[Atomware Rivals] Mounting UI tabs and feature cards onto Atomware UI...")
 
-		for _, name in { "visuals", "legit", "rage", "move", "world", "items", "misc", "extras" } do
+		for _, name in { "visuals", "legit", "rage", "move", "world", "items", "misc", "spoofing" } do
 			pcall(DKit.tab, name)
 		end
-		for _, key in { "combat", "esp", "world", "misc", "cosmetics", "lua" } do
+		for _, key in { "combat", "esp", "world", "misc", "spoof", "cosmetics" } do
 			local builder = DrawingBridge.builders[key]
 			if builder then
 				local okBuild, _buildErr = pcall(builder, DKit)
@@ -25841,7 +26271,7 @@ Bitstream Vera
 		open = library.open == true
 		pcall(function()
 			if library.SelectTab then
-				library:SelectTab("Legit")
+				library:SelectTab("Combat")
 			end
 		end)
 
@@ -25895,6 +26325,40 @@ do
 	end
 end
 
+
+-- Disarm ItemLibrary.Items hookfunction callstack trap & OutOfBoundsMachine kill triggers
+pcall(function()
+	if _G.AtomwareEmulator and type(_G.AtomwareEmulator.disarmItemLibraryTrap) == "function" then
+		_G.AtomwareEmulator.disarmItemLibraryTrap()
+	else
+		local ok, ItemLibrary = pcall(function()
+			local modules = ReplicatedStorage:WaitForChild("Modules", 10)
+			return modules and require(modules:WaitForChild("ItemLibrary", 10))
+		end)
+		if ok and type(ItemLibrary) == "table" and type(ItemLibrary.Items) == "table" then
+			local cleanMt = {
+				__index = function(t, k) return rawget(t, k) end,
+				__newindex = function(t, k, v) rawset(t, k, v) end,
+			}
+			local set_raw_mt = setrawmetatable or (type(debug) == "table" and (debug :: any).setmetatable) or setmetatable
+			if type(set_raw_mt) == "function" then
+				pcall(set_raw_mt, ItemLibrary.Items, cleanMt)
+			end
+		end
+	end
+	if _G.AtomwareEmulator and type(_G.AtomwareEmulator.neutralizeOutOfBounds) == "function" then
+		_G.AtomwareEmulator.neutralizeOutOfBounds()
+	else
+		local ok, OOB = pcall(function()
+			local modules = ReplicatedStorage:WaitForChild("Modules", 10)
+			return modules and require(modules:WaitForChild("OutOfBoundsMachine", 10))
+		end)
+		if ok and type(OOB) == "table" then
+			if type(OOB.IsOutOfBounds) == "function" then OOB.IsOutOfBounds = function() return false end end
+			if type(OOB._CheckKill) == "function" then OOB._CheckKill = function() return false end end
+		end
+	end
+end)
 
 -- Launch Atomware Rivals Feature Engine
 Window({ title = "Atomware Rivals" })

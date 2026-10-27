@@ -1155,6 +1155,7 @@ export type Window = {
 			weaponWireframe = false,
 			armWireframe = false,
 			wireframeOnly = false,
+			noRecoilAnimation = false,
 		},
 		AmbienceTracks = { "city", "forest", "rain", "snow" },
 		HitSounds = {
@@ -9212,6 +9213,9 @@ Bitstream Vera
 			local manipActive = Silent.manipulation == true
 			if Silent.enabled then
 				local lock = silentTarget()
+				if (Silent.hitChance or 100) < 100 and math.random(1, 100) > (Silent.hitChance or 100) then
+					lock = nil
+				end
 				if manipActive then
 					if lock then
 						local camPos = cam.CFrame.Position
@@ -14529,6 +14533,8 @@ local silent = combatTab:AddSection("silent aim", 1)
 				end,
 			})
 			local sAcc = kit.number(silent, "accuracy", Silent, "accuracy", 10, 100, 1, { suffix = "%" })
+			local sHitChance = kit.number(silent, "hit chance", Silent, "hitChance", 1, 100, 1, { suffix = "%" })
+			local sAngleManip = kit.flag(silent, "bullet angle manipulation", Silent, "angleManipulation")
 			local sVis = kit.flag(silent, "visible check", Silent, "visibleCheck", nil, function()
 				Silent.flags.visible = Silent.visibleCheck == true
 			end)
@@ -23840,6 +23846,12 @@ Flick.enabled = false
 			viewclass.SetCFrame = function(self: any, cf: any, ...: any)
 				if ClientFx.viewmodel and typeof(cf) == "CFrame" then
 					cf = cf * userViewOffset()
+				end
+				if ClientFx.noRecoilAnimation then
+					pcall(function()
+						if self._recoilSpring then self._recoilSpring:Reset() end
+						if self._unrecoil_spring then self._unrecoil_spring:Reset() end
+					end)
 				end
 				return oldSet(self, cf, ...)
 			end
