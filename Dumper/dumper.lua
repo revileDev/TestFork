@@ -173,14 +173,15 @@ end
 
 -- UI panel objects. Always opaque, always on top.
 local function CreateUIDraw(objType, props)
-    -- Explicitly inject Transparency = 0 so mobile executor defaults can't
-    -- silently make the object invisible.
+    -- In standard Drawing libraries: Transparency = 1 means fully opaque, 0 is fully transparent.
     if props.Transparency == nil then
-        props.Transparency = 0
+        props.Transparency = 1
+    end
+    if objType == "Text" and props.Font == nil then
+        -- 0 is Drawing.Fonts.UI / System font fallback
+        props.Font = 0
     end
     local obj = Drawing.new(objType)
-    -- ZIndex = 255: maximum layer for executors that support it.
-    -- pcall so it silently skips on executors that don't.
     pcall(function() obj.ZIndex = 255 end)
     for k, v in pairs(props) do obj[k] = v end
     table.insert(RenderObjects, obj)
@@ -707,37 +708,32 @@ end)
 
 local GUI_READY = false
 
-task.defer(function()
-    -- Wait for the first render frame so ESP gets its objects created first
-    RunService.RenderStepped:Wait()
-    RunService.RenderStepped:Wait()
-
-    -- Now create window frame objects — they'll be on top in creation-order
-    FrameDraws.Shadow = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(5, 5, 7),    Transparency = 0.45 })
-    FrameDraws.Main   = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(15, 15, 18), Transparency = 0    })
-    FrameDraws.Header = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Transparency = 0    })
-    FrameDraws.Accent = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43),Transparency = 0    })
+local function InitFrameDraws()
+    FrameDraws.Shadow = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(5, 5, 7),    Transparency = 0.5 })
+    FrameDraws.Main   = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(15, 15, 18), Transparency = 1   })
+    FrameDraws.Header = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Transparency = 1   })
+    FrameDraws.Accent = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43),Transparency = 1   })
     FrameDraws.Title  = MakeUI("Text",   {
         Text  = "matthews a hoe ass boy",
         Size  = 15,
         Color = Color3.fromRGB(235, 235, 240),
         Center = false,
-        Transparency = 0,
+        Transparency = 1,
     })
 
     for _, tabName in ipairs(TabNames) do
         TabButtons[tabName] = {
-            Background = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Transparency = 0 }),
-            Text       = MakeUI("Text",   { Text = tabName, Size = 13, Center = true, Transparency = 0 }),
-            Indicator  = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43), Visible = false, Transparency = 0 }),
+            Background = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Transparency = 1 }),
+            Text       = MakeUI("Text",   { Text = tabName, Size = 13, Center = true, Transparency = 1 }),
+            Indicator  = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43), Visible = false, Transparency = 1 }),
         }
     end
 
-    -- Also re-bump element objects that were created before the frame objects
     GUI:_bumpToTop()
-
     GUI_READY = true
-end)
+end
+
+InitFrameDraws()
 
 -- ── Render ────────────────────────────────────────────────────────────────────
 function GUI:Render()
