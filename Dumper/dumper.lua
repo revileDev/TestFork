@@ -1,15 +1,10 @@
 --[=[
     Universal Exploitation & Visuals Suite
     UI Title: "matthews a hoe ass boy"
-    Architecture: Pure Drawing Library Overlay
+    Architecture: Native ScreenGui (CoreGui / gethui) + Drawing Library Overlays (ESP & FOV)
     Theme: Sleek Red & Dark Carbon (#FF2B2B / #0F0F12 / #18191E)
-    Keybind: Insert (Toggle UI Visibility) / Double-Tap Header on Mobile
-    Features:
-      - Aim: Camera Smoothing (mousemoverel), Silent Aim (__namecall hook), FOV Circle, Part Selector
-      - Visuals: 2D Box (Full, Corner, 3D), Box Fill (Gradient interpolation & Transparency),
-                 Tracers (Origin: Bottom, Mouse, Center), Dynamic Material Chams (Gradient, Transparency, See-Through)
-      - World: Fullbright, WalkSpeed, JumpPower, Noclip, Fog Remover
-      - Settings: Accent Colors, Unload Engine
+    Compatibility: Delta Mobile, PC Executors, etc.
+    Keybind: Insert (Toggle UI Visibility) / On-Screen Floating Button (Mobile)
 ]=]
 
 if not game:IsLoaded() then
@@ -22,35 +17,23 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
--- ============================================================================
--- MOBILE / PLATFORM DETECTION
--- ============================================================================
-
-local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-
--- ============================================================================
--- TOUCH STATE TRACKER
--- Unified pointer position & press state for both PC (mouse) and Mobile (touch)
--- ============================================================================
-
-local TouchState = {
-    Position = Vector2.new(0, 0),
-    IsDown   = false,
-}
-
-do
-    local vp = Camera.ViewportSize
-    TouchState.Position = Vector2.new(vp.X / 2, vp.Y / 2)
+-- Parent resolver for executors (CoreGui / gethui fallback)
+local function GetUIParent()
+    if typeof(gethui) == "function" then
+        local success, res = pcall(gethui)
+        if success and res then return res end
+    end
+    local success, _ = pcall(function() return CoreGui.Name end)
+    if success then return CoreGui end
+    return LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- ============================================================================
--- EXECUTOR COMPATIBILITY
--- ============================================================================
-
+-- Cleanup existing instances if running
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
 if type(env) == "table" and type(env.UNIVERSAL_SUITE_UNLOAD) == "function" then
     pcall(env.UNIVERSAL_SUITE_UNLOAD)
@@ -71,7 +54,7 @@ local State = {
     UIVisible = true,
     ActiveTab = "Aim",
 
-    -- Aim
+    -- Aim Settings
     AimAssist     = false,
     SilentAim     = false,
     AimPart       = "Head",
@@ -80,9 +63,9 @@ local State = {
     ShowFOV       = true,
     FOVColor      = Color3.fromRGB(255, 43, 43),
 
-    -- Visuals
+    -- Visuals Settings
     ESPEnabled          = true,
-    BoxType             = "Full",
+    BoxType             = "Full", -- "Full", "Corner", "3D"
     BoxFill             = true,
     BoxFillGradient     = true,
     BoxFillTransparency = 0.35,
@@ -90,10 +73,10 @@ local State = {
     BoxColor2           = Color3.fromRGB(40, 0, 0),
 
     Tracers      = true,
-    TracerOrigin = "Bottom",
+    TracerOrigin = "Bottom", -- "Bottom", "Mouse", "Center"
     TracerColor  = Color3.fromRGB(255, 43, 43),
 
-    -- Chams
+    -- Material Chams Settings
     ChamsEnabled     = true,
     ChamsMaterial    = "ForceField",
     ChamsSeeThrough  = true,
@@ -103,7 +86,7 @@ local State = {
     ChamsUseGradient = true,
     ChamsTransparency = 0.2,
 
-    -- World
+    -- World Settings
     Fullbright     = false,
     NoClip         = false,
     NoFog          = false,
@@ -133,62 +116,22 @@ local OriginalLighting = {
     FogEnd         = Lighting.FogEnd,
 }
 
+-- Touch / Mouse Tracking for Targeting and FOV
+local PointerPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
 -- ============================================================================
--- DRAWING WRAPPERS
---
--- ROOT CAUSE FIX (three bugs):
---
--- 1. Z-ORDER: In Roblox's Drawing library, objects drawn later (created later)
---    render ON TOP of objects created earlier. The original code created all
---    UI objects at startup, then lazily created ESP objects each frame — so
---    ESP always rendered on top of the UI panel, hiding it completely.
---    FIX: Two separate creation functions. UI objects get ZIndex = 255 where
---    the executor supports it, AND the entire UI is initialized in a deferred
---    task so it runs after the first ESP batch, keeping UI on top by
---    creation order for executors that don't support ZIndex.
---
--- 2. MOBILE TRANSPARENCY DEFAULT: On many mobile executors, Drawing objects
---    with Filled = true default to Transparency = 1 (invisible), unlike PC
---    where the default is 0 (opaque). ESP box outlines use Filled = false and
---    Lines — these don't use Transparency — so they show fine. Every filled UI
---    square was invisible because Transparency was never explicitly set.
---    FIX: CreateUIDraw() always injects Transparency = 0 unless overridden.
---
--- 3. NO SEPARATION: There was one shared CreateDraw() for both ESP and UI,
---    making it impossible to apply different ZIndex values.
---    FIX: CreateDraw() for game-world overlays (ESP, FOV circle),
---         CreateUIDraw() for the UI panel — high ZIndex + explicit transparency.
+-- DRAWING OVERLAYS (ESP & FOV CIRCLE)
 -- ============================================================================
 
 local RenderObjects = {}
-
--- Game-world overlays (ESP, FOV). Rendered below the UI.
 local function CreateDraw(objType, props)
     local obj = Drawing.new(objType)
-    pcall(function() obj.ZIndex = 1 end)
     for k, v in pairs(props) do obj[k] = v end
     table.insert(RenderObjects, obj)
     return obj
 end
 
--- UI panel objects. Always opaque, always on top.
-local function CreateUIDraw(objType, props)
-    -- In standard Drawing libraries: Transparency = 1 means fully opaque, 0 is fully transparent.
-    if props.Transparency == nil then
-        props.Transparency = 1
-    end
-    if objType == "Text" and props.Font == nil then
-        -- 0 is Drawing.Fonts.UI / System font fallback
-        props.Font = 0
-    end
-    local obj = Drawing.new(objType)
-    pcall(function() obj.ZIndex = 255 end)
-    for k, v in pairs(props) do obj[k] = v end
-    table.insert(RenderObjects, obj)
-    return obj
-end
-
--- FOV Circle (game-world overlay, created first = lowest z-order)
+-- FOV Circle
 local FOVCircle = CreateDraw("Circle", {
     Visible      = false,
     Radius       = State.FOV,
@@ -196,7 +139,7 @@ local FOVCircle = CreateDraw("Circle", {
     Thickness    = 1.2,
     Filled       = false,
     Transparency = 0.8,
-    Position     = Vector2.new(0, 0),
+    Position     = PointerPos,
 })
 
 -- ============================================================================
@@ -211,7 +154,7 @@ end
 
 local function GetClosestTarget()
     local closest, shortestDist = nil, State.FOV
-    local mousePos = TouchState.Position
+    local mousePos = PointerPos
 
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and IsAlive(plr) then
@@ -236,7 +179,7 @@ local function GetClosestTarget()
     return closest
 end
 
--- Silent Aim namecall hook
+-- Silent Aim hook
 if hookMeta and getNamecall then
     local origNamecall
     origNamecall = hookMeta(game, "__namecall", newClosure(function(self, ...)
@@ -344,7 +287,7 @@ local function ApplyChams(plr)
             hl.OutlineTransparency = 0
             hl.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
             hl.Adornee            = char
-            hl.Parent             = CoreGui
+            hl.Parent             = GetUIParent()
             rec.highlight         = hl
         end
         rec.highlight.OutlineColor = State.ChamsColor1
@@ -356,8 +299,6 @@ end
 
 -- ============================================================================
 -- ESP RENDER LOOP (BOXES, FILLS, TRACERS)
--- NOTE: PlayerESP entries are created via CreateDraw() (ZIndex = 1),
--- which puts them BELOW the UI (ZIndex = 255).
 -- ============================================================================
 
 local PlayerESP = {}
@@ -415,12 +356,11 @@ local function UpdateESP()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and IsAlive(plr) and State.ESPEnabled then
             if not PlayerESP[plr] then
-                -- All ESP objects use CreateDraw (ZIndex = 1, below UI)
                 PlayerESP[plr] = {
                     Box        = CreateDraw("Square", { Thickness = 1.2, Filled = false, Visible = false }),
                     BoxOutline = CreateDraw("Square", { Thickness = 2.4, Color = Color3.new(0,0,0), Filled = false, Visible = false }),
-                    FillTop    = CreateDraw("Square", { Filled = true, Thickness = 0, Transparency = 0.35, Visible = false }),
-                    FillBottom = CreateDraw("Square", { Filled = true, Thickness = 0, Transparency = 0.35, Visible = false }),
+                    FillTop    = CreateDraw("Square", { Filled = true,  Thickness = 0, Transparency = 0.35, Visible = false }),
+                    FillBottom = CreateDraw("Square", { Filled = true,  Thickness = 0, Transparency = 0.35, Visible = false }),
                     Tracer     = CreateDraw("Line",   { Thickness = 1.2, Visible = false }),
                     C1  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
                     C2  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
@@ -435,18 +375,9 @@ local function UpdateESP()
                 for i = 1, 12 do
                     PlayerESP[plr].L3D[i] = CreateDraw("Line", { Thickness = 1.2, Visible = false })
                 end
-
-                -- Z-ORDER FIX for executors without ZIndex support:
-                -- Whenever new ESP objects are created (new player joins), we bump
-                -- the UI drawing objects back to the top by toggling their ZIndex.
-                -- For executors that don't support ZIndex, this is a no-op (pcall),
-                -- so the deferred UI init (below) handles those cases.
-                if GUI and GUI._bumpToTop then
-                    GUI:_bumpToTop()
-                end
             end
 
-            local esp     = PlayerESP[plr]
+            local esp = PlayerESP[plr]
             local minX, minY, maxX, maxY, scrCorners = GetBoundingBox(plr.Character)
 
             if minX and maxX and (maxX - minX > 2) and (maxY - minY > 2) then
@@ -522,7 +453,7 @@ local function UpdateESP()
                     local vp     = Camera.ViewportSize
                     local origin = Vector2.new(vp.X / 2, vp.Y)
                     if State.TracerOrigin == "Mouse" then
-                        origin = TouchState.Position
+                        origin = PointerPos
                     elseif State.TracerOrigin == "Center" then
                         origin = Vector2.new(vp.X / 2, vp.Y / 2)
                     end
@@ -549,565 +480,525 @@ local function UpdateESP()
 end
 
 -- ============================================================================
--- CUSTOM DRAWING GUI LIBRARY
--- All Drawing objects here use CreateUIDraw() — ZIndex = 255, Transparency = 0
+-- NATIVE ROBLOX SCREENGUI (100% RELIABLE ON DELTA MOBILE & PC)
 -- ============================================================================
 
-local GUI = {
-    X              = 140,
-    Y              = 120,
-    W              = 460,
-    H              = 340,
-    Dragging       = false,
-    DragOffset     = Vector2.new(0, 0),
-    ActiveDropdown = nil,
-    ActiveSlider   = nil,
-    Elements       = {},
-    _lastHeaderTap = 0,
-    _allUIObjects  = {}, -- tracks all UI Drawing objects for _bumpToTop
-}
+local SuiteGui = Instance.new("ScreenGui")
+SuiteGui.Name = "UniversalSuiteGui"
+SuiteGui.ResetOnSpawn = false
+SuiteGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+SuiteGui.DisplayOrder = 999
+SuiteGui.Parent = GetUIParent()
 
--- Viewport-aware initial position (always on-screen for any device)
-do
-    local vp = Camera.ViewportSize
-    -- Scale down on small screens
-    if vp.X < 820 then
-        GUI.W = math.min(math.floor(vp.X * 0.94), 460)
-        GUI.H = math.min(math.floor(vp.Y * 0.68), 380)
-        GUI.X = math.floor((vp.X - GUI.W) / 2)
-        GUI.Y = math.floor(vp.Y * 0.06)
-    end
-    -- Clamp to viewport regardless
-    GUI.X = math.clamp(GUI.X, 0, math.max(0, vp.X - GUI.W))
-    GUI.Y = math.clamp(GUI.Y, 0, math.max(0, vp.Y - GUI.H))
-end
+-- Mobile Floating Toggle Pill
+local FloatingPill = Instance.new("TextButton")
+FloatingPill.Name = "FloatingPill"
+FloatingPill.Size = UDim2.new(0, 48, 0, 48)
+FloatingPill.Position = UDim2.new(0, 16, 0.4, 0)
+FloatingPill.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+FloatingPill.Text = "⚡"
+FloatingPill.TextSize = 22
+FloatingPill.TextColor3 = Color3.fromRGB(255, 43, 43)
+FloatingPill.Font = Enum.Font.GothamBold
+FloatingPill.Active = true
+FloatingPill.Draggable = true
+FloatingPill.Parent = SuiteGui
 
--- Re-bump UI Drawing objects to the top of the z-order by refreshing ZIndex.
--- For executors that don't support ZIndex this is a harmless no-op (pcall).
-function GUI:_bumpToTop()
-    for _, obj in ipairs(self._allUIObjects) do
-        pcall(function() obj.ZIndex = 255 end)
-    end
-end
+local PillCorner = Instance.new("UICorner")
+PillCorner.CornerRadius = UDim.new(0, 12)
+PillCorner.Parent = FloatingPill
 
--- UI-specific Drawing factory: wraps CreateUIDraw and tracks the object
-local function MakeUI(objType, props)
-    local obj = CreateUIDraw(objType, props)
-    table.insert(GUI._allUIObjects, obj)
-    return obj
-end
+local PillStroke = Instance.new("UIStroke")
+PillStroke.Color = Color3.fromRGB(255, 43, 43)
+PillStroke.Thickness = 1.5
+PillStroke.Parent = FloatingPill
 
--- ── Window frame Drawing objects ──────────────────────────────────────────────
---
--- IMPORTANT: These are declared here but not yet created.
--- They are created inside a task.defer below (after ESP has a chance to
--- create its objects on the first frame), so they end up on TOP in z-order
--- even on executors that don't support ZIndex.
---
-local FrameDraws = {}
+-- Main Window Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 470, 0, 360)
+MainFrame.Position = UDim2.new(0.5, -235, 0.5, -180)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.ClipsDescendants = false
+MainFrame.Parent = SuiteGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(45, 45, 52)
+MainStroke.Thickness = 1
+MainStroke.Parent = MainFrame
+
+-- Header Bar
+local Header = Instance.new("Frame")
+Header.Name = "Header"
+Header.Size = UDim2.new(1, 0, 0, 38)
+Header.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 8)
+HeaderCorner.Parent = Header
+
+local HeaderTitle = Instance.new("TextLabel")
+HeaderTitle.Size = UDim2.new(1, -70, 1, 0)
+HeaderTitle.Position = UDim2.new(0, 14, 0, 0)
+HeaderTitle.BackgroundTransparency = 1
+HeaderTitle.Text = "matthews a hoe ass boy"
+HeaderTitle.Font = Enum.Font.GothamBold
+HeaderTitle.TextSize = 14
+HeaderTitle.TextColor3 = Color3.fromRGB(240, 240, 245)
+HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
+HeaderTitle.Parent = Header
+
+-- Close/Hide Button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 28, 0, 28)
+CloseBtn.Position = UDim2.new(1, -34, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+CloseBtn.Text = "✕"
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 13
+CloseBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
+CloseBtn.Parent = Header
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseBtn
+
+-- Red Accent Line below Header
+local AccentLine = Instance.new("Frame")
+AccentLine.Size = UDim2.new(1, 0, 0, 2)
+AccentLine.Position = UDim2.new(0, 0, 0, 38)
+AccentLine.BackgroundColor3 = Color3.fromRGB(255, 43, 43)
+AccentLine.BorderSizePixel = 0
+AccentLine.Parent = MainFrame
+
+-- Tab Navigation Bar
+local TabBar = Instance.new("Frame")
+TabBar.Size = UDim2.new(1, 0, 0, 32)
+TabBar.Position = UDim2.new(0, 0, 0, 40)
+TabBar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+TabBar.BorderSizePixel = 0
+TabBar.Parent = MainFrame
+
+local TabNames = { "Aim", "Visuals", "World", "Settings" }
 local TabButtons = {}
-local TabNames   = { "Aim", "Visuals", "World", "Settings" }
+local TabPages = {}
 
--- ── Element factories ─────────────────────────────────────────────────────────
-function GUI:AddToggle(tab, title, refKey)
-    table.insert(self.Elements, {
-        Type  = "Toggle", Tab = tab, Title = title, Ref = refKey,
-        Box   = MakeUI("Square", { Filled = true, Thickness = 1 }),
-        Inner = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43) }),
-        Label = MakeUI("Text",   { Text = title, Size = 13 }),
-    })
+-- Container for Content
+local ContentArea = Instance.new("Frame")
+ContentArea.Size = UDim2.new(1, -20, 1, -84)
+ContentArea.Position = UDim2.new(0, 10, 0, 78)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = MainFrame
+
+for _, name in ipairs(TabNames) do
+    local page = Instance.new("ScrollingFrame")
+    page.Name = name .. "Page"
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.ScrollBarThickness = 4
+    page.ScrollBarImageColor3 = Color3.fromRGB(255, 43, 43)
+    page.Visible = (name == State.ActiveTab)
+    page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.Parent = ContentArea
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 8)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = page
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 4)
+    pad.PaddingBottom = UDim.new(0, 8)
+    pad.PaddingLeft = UDim.new(0, 4)
+    pad.PaddingRight = UDim.new(0, 6)
+    pad.Parent = page
+
+    TabPages[name] = page
 end
 
-function GUI:AddSlider(tab, title, refKey, min, max, isFloat)
-    table.insert(self.Elements, {
-        Type  = "Slider", Tab = tab, Title = title, Ref = refKey,
-        Min = min, Max = max, Float = isFloat,
-        Bar      = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(30, 30, 36) }),
-        Fill     = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43) }),
-        Label    = MakeUI("Text",   { Text = title, Size = 13 }),
-        ValLabel = MakeUI("Text",   { Text = "", Size = 12 }),
-    })
-end
-
-function GUI:AddDropdown(tab, title, refKey, options)
-    local elem = {
-        Type    = "Dropdown", Tab = tab, Title = title, Ref = refKey,
-        Options = options, Open = false,
-        MainBox  = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(28, 28, 34) }),
-        MainText = MakeUI("Text",   { Size = 13 }),
-        Label    = MakeUI("Text",   { Text = title, Size = 13 }),
-        OptionDraws = {}
-    }
-    for _, opt in ipairs(options) do
-        table.insert(elem.OptionDraws, {
-            Box  = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Visible = false }),
-            Text = MakeUI("Text",   { Text = opt, Size = 12, Visible = false }),
-            Val  = opt,
-        })
+local function SwitchTab(targetTab)
+    State.ActiveTab = targetTab
+    for name, page in pairs(TabPages) do
+        page.Visible = (name == targetTab)
     end
-    table.insert(self.Elements, elem)
+    for name, btn in pairs(TabButtons) do
+        local active = (name == targetTab)
+        btn.TextColor3 = active and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(160, 160, 170)
+        btn.BackgroundColor3 = active and Color3.fromRGB(28, 28, 34) or Color3.fromRGB(18, 18, 22)
+        local ind = btn:FindFirstChild("Indicator")
+        if ind then ind.Visible = active end
+    end
 end
 
-function GUI:AddButton(tab, title, callback)
-    table.insert(self.Elements, {
-        Type = "Button", Tab = tab, Title = title, Callback = callback,
-        Box   = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(35, 35, 42) }),
-        Label = MakeUI("Text",   { Text = title, Size = 13, Center = true }),
-    })
+local tabCount = #TabNames
+for i, name in ipairs(TabNames) do
+    local btn = Instance.new("TextButton")
+    btn.Name = name .. "Tab"
+    btn.Size = UDim2.new(1 / tabCount, 0, 1, 0)
+    btn.Position = UDim2.new((i - 1) / tabCount, 0, 0, 0)
+    btn.BackgroundColor3 = (name == State.ActiveTab) and Color3.fromRGB(28, 28, 34) or Color3.fromRGB(18, 18, 22)
+    btn.Text = name
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 13
+    btn.TextColor3 = (name == State.ActiveTab) and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(160, 160, 170)
+    btn.BorderSizePixel = 0
+    btn.Parent = TabBar
+
+    local ind = Instance.new("Frame")
+    ind.Name = "Indicator"
+    ind.Size = UDim2.new(1, 0, 0, 2)
+    ind.Position = UDim2.new(0, 0, 1, -2)
+    ind.BackgroundColor3 = Color3.fromRGB(255, 43, 43)
+    ind.BorderSizePixel = 0
+    ind.Visible = (name == State.ActiveTab)
+    ind.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        SwitchTab(name)
+    end)
+    TabButtons[name] = btn
 end
 
--- ── Layout configuration ─────────────────────────────────────────────────────
-GUI:AddToggle("Aim", "Aim Assist (Smooth Cam)", "AimAssist")
-GUI:AddToggle("Aim", "Silent Aim (Bullet Redir)", "SilentAim")
-GUI:AddDropdown("Aim", "Target Part", "AimPart", { "Head", "HumanoidRootPart" })
-GUI:AddSlider("Aim", "Aim Smoothness", "AimSmoothness", 0.05, 1.0, true)
-GUI:AddSlider("Aim", "Aim FOV Radius", "FOV", 30, 400, false)
-GUI:AddToggle("Aim", "Show FOV Circle", "ShowFOV")
+-- ============================================================================
+-- UI BUILDER CONTROLS
+-- ============================================================================
 
-GUI:AddToggle("Visuals", "Box ESP Enabled", "ESPEnabled")
-GUI:AddDropdown("Visuals", "Box Styling", "BoxType", { "Full", "Corner", "3D" })
-GUI:AddToggle("Visuals", "Box Interior Fill", "BoxFill")
-GUI:AddToggle("Visuals", "Interior Gradient Mode", "BoxFillGradient")
-GUI:AddSlider("Visuals", "Fill Transparency", "BoxFillTransparency", 0.05, 0.9, true)
-GUI:AddToggle("Visuals", "Player Tracers", "Tracers")
-GUI:AddDropdown("Visuals", "Tracer Origin", "TracerOrigin", { "Bottom", "Mouse", "Center" })
-GUI:AddToggle("Visuals", "Material Chams", "ChamsEnabled")
-GUI:AddDropdown("Visuals", "Chams Material", "ChamsMaterial",
+local function AddToggle(tab, title, refKey)
+    local page = TabPages[tab]
+    if not page then return end
+
+    local row = Instance.new("TextButton")
+    row.Size = UDim2.new(1, 0, 0, 36)
+    row.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+    row.BorderSizePixel = 0
+    row.AutoButtonColor = false
+    row.Text = ""
+    row.Parent = page
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = row
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -60, 1, 0)
+    label.Position = UDim2.new(0, 12, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = title
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.TextColor3 = Color3.fromRGB(220, 220, 225)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = row
+
+    local box = Instance.new("Frame")
+    box.Size = UDim2.new(0, 20, 0, 20)
+    box.Position = UDim2.new(1, -32, 0.5, -10)
+    box.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+    box.BorderSizePixel = 0
+    box.Parent = row
+
+    local boxCorner = Instance.new("UICorner")
+    boxCorner.CornerRadius = UDim.new(0, 4)
+    boxCorner.Parent = box
+
+    local check = Instance.new("Frame")
+    check.Size = UDim2.new(0, 12, 0, 12)
+    check.Position = UDim2.new(0.5, -6, 0.5, -6)
+    check.BackgroundColor3 = Color3.fromRGB(255, 43, 43)
+    check.BorderSizePixel = 0
+    check.Visible = State[refKey]
+    check.Parent = box
+
+    local checkCorner = Instance.new("UICorner")
+    checkCorner.CornerRadius = UDim.new(0, 2)
+    checkCorner.Parent = check
+
+    row.MouseButton1Click:Connect(function()
+        State[refKey] = not State[refKey]
+        check.Visible = State[refKey]
+    end)
+end
+
+local function AddSlider(tab, title, refKey, min, max, isFloat)
+    local page = TabPages[tab]
+    if not page then return end
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 46)
+    card.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+    card.BorderSizePixel = 0
+    card.Parent = page
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = card
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -90, 0, 20)
+    label.Position = UDim2.new(0, 12, 0, 4)
+    label.BackgroundTransparency = 1
+    label.Text = title
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.TextColor3 = Color3.fromRGB(220, 220, 225)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = card
+
+    local valLabel = Instance.new("TextLabel")
+    valLabel.Size = UDim2.new(0, 70, 0, 20)
+    valLabel.Position = UDim2.new(1, -82, 0, 4)
+    valLabel.BackgroundTransparency = 1
+    valLabel.Text = isFloat and string.format("%.2f", State[refKey]) or tostring(math.floor(State[refKey]))
+    valLabel.Font = Enum.Font.GothamMedium
+    valLabel.TextSize = 12
+    valLabel.TextColor3 = Color3.fromRGB(180, 180, 190)
+    valLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valLabel.Parent = card
+
+    local bar = Instance.new("TextButton")
+    bar.Size = UDim2.new(1, -24, 0, 8)
+    bar.Position = UDim2.new(0, 12, 0, 28)
+    bar.BackgroundColor3 = Color3.fromRGB(36, 36, 44)
+    bar.BorderSizePixel = 0
+    bar.Text = ""
+    bar.AutoButtonColor = false
+    bar.Parent = card
+
+    local barCorner = Instance.new("UICorner")
+    barCorner.CornerRadius = UDim.new(0, 4)
+    barCorner.Parent = bar
+
+    local fill = Instance.new("Frame")
+    local initRatio = math.clamp((State[refKey] - min) / (max - min), 0, 1)
+    fill.Size = UDim2.new(initRatio, 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(255, 43, 43)
+    fill.BorderSizePixel = 0
+    fill.Parent = bar
+
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, 4)
+    fillCorner.Parent = fill
+
+    local sliding = false
+    local function UpdateVal(inputX)
+        local ratio = math.clamp((inputX - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local newVal = min + ((max - min) * ratio)
+        newVal = isFloat and newVal or math.floor(newVal + 0.5)
+        State[refKey] = newVal
+        fill.Size = UDim2.new(ratio, 0, 1, 0)
+        valLabel.Text = isFloat and string.format("%.2f", newVal) or tostring(math.floor(newVal))
+    end
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = true
+            UpdateVal(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            UpdateVal(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+        end
+    end)
+end
+
+local function AddDropdown(tab, title, refKey, options)
+    local page = TabPages[tab]
+    if not page then return end
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 38)
+    card.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+    card.BorderSizePixel = 0
+    card.ClipsDescendants = true
+    card.Parent = page
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = card
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -160, 0, 38)
+    label.Position = UDim2.new(0, 12, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = title
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.TextColor3 = Color3.fromRGB(220, 220, 225)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = card
+
+    local trigger = Instance.new("TextButton")
+    trigger.Size = UDim2.new(0, 140, 0, 26)
+    trigger.Position = UDim2.new(1, -150, 0, 6)
+    trigger.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+    trigger.Text = tostring(State[refKey]) .. " ▼"
+    trigger.Font = Enum.Font.GothamMedium
+    trigger.TextSize = 12
+    trigger.TextColor3 = Color3.fromRGB(240, 240, 245)
+    trigger.Parent = card
+
+    local trigCorner = Instance.new("UICorner")
+    trigCorner.CornerRadius = UDim.new(0, 4)
+    trigCorner.Parent = trigger
+
+    local open = false
+    local rowH = 26
+    local optContainer = Instance.new("Frame")
+    optContainer.Size = UDim2.new(0, 140, 0, #options * rowH)
+    optContainer.Position = UDim2.new(1, -150, 0, 36)
+    optContainer.BackgroundTransparency = 1
+    optContainer.Parent = card
+
+    for idx, opt in ipairs(options) do
+        local optBtn = Instance.new("TextButton")
+        optBtn.Size = UDim2.new(1, 0, 0, rowH)
+        optBtn.Position = UDim2.new(0, 0, 0, (idx - 1) * rowH)
+        optBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+        optBtn.Text = opt
+        optBtn.Font = Enum.Font.Gotham
+        optBtn.TextSize = 12
+        optBtn.TextColor3 = (State[refKey] == opt) and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(180, 180, 190)
+        optBtn.BorderSizePixel = 0
+        optBtn.Parent = optContainer
+
+        optBtn.MouseButton1Click:Connect(function()
+            State[refKey] = opt
+            trigger.Text = opt .. " ▼"
+            open = false
+            card.Size = UDim2.new(1, 0, 0, 38)
+            for _, b in ipairs(optContainer:GetChildren()) do
+                if b:IsA("TextButton") then
+                    b.TextColor3 = (b.Text == opt) and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(180, 180, 190)
+                end
+            end
+        end)
+    end
+
+    trigger.MouseButton1Click:Connect(function()
+        open = not open
+        if open then
+            card.Size = UDim2.new(1, 0, 0, 38 + (#options * rowH))
+        else
+            card.Size = UDim2.new(1, 0, 0, 38)
+        end
+    end)
+end
+
+local function AddButton(tab, title, callback)
+    local page = TabPages[tab]
+    if not page then return end
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
+    btn.Text = title
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.TextColor3 = Color3.fromRGB(255, 60, 60)
+    btn.BorderSizePixel = 0
+    btn.Parent = page
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        callback()
+    end)
+end
+
+-- ============================================================================
+-- BUILD CONTROLS IN TABS
+-- ============================================================================
+
+-- Aim
+AddToggle("Aim", "Aim Assist (Smooth Cam)", "AimAssist")
+AddToggle("Aim", "Silent Aim (Bullet Redir)", "SilentAim")
+AddDropdown("Aim", "Target Part", "AimPart", { "Head", "HumanoidRootPart" })
+AddSlider("Aim", "Aim Smoothness", "AimSmoothness", 0.05, 1.0, true)
+AddSlider("Aim", "Aim FOV Radius", "FOV", 30, 400, false)
+AddToggle("Aim", "Show FOV Circle", "ShowFOV")
+
+-- Visuals
+AddToggle("Visuals", "Box ESP Enabled", "ESPEnabled")
+AddDropdown("Visuals", "Box Styling", "BoxType", { "Full", "Corner", "3D" })
+AddToggle("Visuals", "Box Interior Fill", "BoxFill")
+AddToggle("Visuals", "Interior Gradient Mode", "BoxFillGradient")
+AddSlider("Visuals", "Fill Transparency", "BoxFillTransparency", 0.05, 0.9, true)
+AddToggle("Visuals", "Player Tracers", "Tracers")
+AddDropdown("Visuals", "Tracer Origin", "TracerOrigin", { "Bottom", "Mouse", "Center" })
+AddToggle("Visuals", "Material Chams", "ChamsEnabled")
+AddDropdown("Visuals", "Chams Material", "ChamsMaterial",
     { "ForceField", "Neon", "Glass", "Ice", "Marble", "Foil", "Metal", "Wood" })
-GUI:AddToggle("Visuals", "Chams Gradient Blend", "ChamsUseGradient")
-GUI:AddToggle("Visuals", "Chams Wall Penetration", "ChamsSeeThrough")
-GUI:AddSlider("Visuals", "Chams Transparency", "ChamsTransparency", 0.0, 0.9, true)
+AddToggle("Visuals", "Chams Gradient Blend", "ChamsUseGradient")
+AddToggle("Visuals", "Chams Wall Penetration", "ChamsSeeThrough")
+AddSlider("Visuals", "Chams Transparency", "ChamsTransparency", 0.0, 0.9, true)
 
-GUI:AddToggle("World", "Fullbright Mode", "Fullbright")
-GUI:AddToggle("World", "Noclip Walls", "NoClip")
-GUI:AddToggle("World", "Remove Atmospheric Fog", "NoFog")
-GUI:AddToggle("World", "Override WalkSpeed", "WalkSpeedMod")
-GUI:AddSlider("World", "WalkSpeed Multiplier", "WalkSpeedValue", 16, 150, false)
-GUI:AddToggle("World", "Override JumpPower", "JumpPowerMod")
-GUI:AddSlider("World", "JumpPower Multiplier", "JumpPowerValue", 50, 300, false)
+-- World
+AddToggle("World", "Fullbright Mode", "Fullbright")
+AddToggle("World", "Noclip Walls", "NoClip")
+AddToggle("World", "Remove Atmospheric Fog", "NoFog")
+AddToggle("World", "Override WalkSpeed", "WalkSpeedMod")
+AddSlider("World", "WalkSpeed Multiplier", "WalkSpeedValue", 16, 150, false)
+AddToggle("World", "Override JumpPower", "JumpPowerMod")
+AddSlider("World", "JumpPower Multiplier", "JumpPowerValue", 50, 300, false)
 
-GUI:AddButton("Settings", "Unload Universal Suite", function()
+-- Settings
+AddButton("Settings", "Unload Universal Suite", function()
     if env.UNIVERSAL_SUITE_UNLOAD then
         env.UNIVERSAL_SUITE_UNLOAD()
     end
 end)
 
--- ============================================================================
--- DEFERRED UI FRAME INITIALIZATION
---
--- We wait TWO frames before creating the window frame Drawing objects.
--- Frame 1: RenderStepped fires → UpdateESP() creates PlayerESP Drawing objects
--- Frame 2: These frame objects are then created AFTER ESP objects in memory,
---          so they sit on top in z-order on executors without ZIndex support.
---
--- The GUI element objects (toggles, sliders, etc.) were already created above
--- using MakeUI() / CreateUIDraw() which sets ZIndex = 255 where supported.
--- For executors without ZIndex, this deferred frame also puts those above ESP
--- via _bumpToTop() which re-sets ZIndex on all tracked UI objects.
--- ============================================================================
-
-local GUI_READY = false
-
-local function InitFrameDraws()
-    FrameDraws.Shadow = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(5, 5, 7),    Transparency = 0.5 })
-    FrameDraws.Main   = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(15, 15, 18), Transparency = 1   })
-    FrameDraws.Header = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Transparency = 1   })
-    FrameDraws.Accent = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43),Transparency = 1   })
-    FrameDraws.Title  = MakeUI("Text",   {
-        Text  = "matthews a hoe ass boy",
-        Size  = 15,
-        Color = Color3.fromRGB(235, 235, 240),
-        Center = false,
-        Transparency = 1,
-    })
-
-    for _, tabName in ipairs(TabNames) do
-        TabButtons[tabName] = {
-            Background = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Transparency = 1 }),
-            Text       = MakeUI("Text",   { Text = tabName, Size = 13, Center = true, Transparency = 1 }),
-            Indicator  = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43), Visible = false, Transparency = 1 }),
-        }
-    end
-
-    GUI:_bumpToTop()
-    GUI_READY = true
+-- Visibility toggles (PC Keybind & Floating Button)
+local function SetUIVisible(val)
+    State.UIVisible = val
+    MainFrame.Visible = val
 end
 
-InitFrameDraws()
+FloatingPill.MouseButton1Click:Connect(function()
+    SetUIVisible(not State.UIVisible)
+end)
 
--- ── Render ────────────────────────────────────────────────────────────────────
-function GUI:Render()
-    -- Frame objects not yet created — skip this tick
-    if not GUI_READY then return end
+CloseBtn.MouseButton1Click:Connect(function()
+    SetUIVisible(false)
+end)
 
-    local mouse     = TouchState.Position
-    local mouseDown = TouchState.IsDown
-
-    -- Dragging
-    if self.Dragging then
-        if mouseDown then
-            self.X = mouse.X - self.DragOffset.X
-            self.Y = mouse.Y - self.DragOffset.Y
-        else
-            self.Dragging = false
-        end
-    end
-
-    -- Clamp window to viewport so it can't be dragged off-screen
-    local vp = Camera.ViewportSize
-    self.X = math.clamp(self.X, 0, math.max(0, vp.X - self.W))
-    self.Y = math.clamp(self.Y, 0, math.max(0, vp.Y - self.H))
-
-    local vis = State.UIVisible
-
-    -- Helper: set frame visibility
-    local function setFrameVis(v)
-        FrameDraws.Shadow.Visible = v
-        FrameDraws.Main.Visible   = v
-        FrameDraws.Header.Visible = v
-        FrameDraws.Accent.Visible = v
-        FrameDraws.Title.Visible  = v
-    end
-
-    setFrameVis(vis)
-
-    if not vis then
-        for _, elem in ipairs(self.Elements) do
-            elem.Label.Visible = false
-            if elem.Box      then elem.Box.Visible      = false end
-            if elem.Inner    then elem.Inner.Visible    = false end
-            if elem.Bar      then elem.Bar.Visible      = false end
-            if elem.Fill     then elem.Fill.Visible     = false end
-            if elem.ValLabel then elem.ValLabel.Visible = false end
-            if elem.MainBox  then elem.MainBox.Visible  = false end
-            if elem.MainText then elem.MainText.Visible = false end
-            if elem.OptionDraws then
-                for _, od in ipairs(elem.OptionDraws) do
-                    od.Box.Visible  = false
-                    od.Text.Visible = false
-                end
-            end
-        end
-        for _, tb in pairs(TabButtons) do
-            tb.Background.Visible = false
-            tb.Text.Visible       = false
-            tb.Indicator.Visible  = false
-        end
-        return
-    end
-
-    -- Window frame
-    FrameDraws.Shadow.Position = Vector2.new(self.X - 4, self.Y - 4)
-    FrameDraws.Shadow.Size     = Vector2.new(self.W + 8, self.H + 8)
-    FrameDraws.Main.Position   = Vector2.new(self.X, self.Y)
-    FrameDraws.Main.Size       = Vector2.new(self.W, self.H)
-    FrameDraws.Header.Position = Vector2.new(self.X, self.Y)
-    FrameDraws.Header.Size     = Vector2.new(self.W, 36)
-    FrameDraws.Accent.Position = Vector2.new(self.X, self.Y + 34)
-    FrameDraws.Accent.Size     = Vector2.new(self.W, 2)
-    FrameDraws.Title.Position  = Vector2.new(self.X + 12, self.Y + 10)
-
-    -- Tab bar
-    local tabW = self.W / #TabNames
-    for i, name in ipairs(TabNames) do
-        local tb = TabButtons[name]
-        if not tb then continue end
-        local tx = self.X + ((i - 1) * tabW)
-        local ty = self.Y + 36
-
-        tb.Background.Visible  = true
-        tb.Background.Position = Vector2.new(tx, ty)
-        tb.Background.Size     = Vector2.new(tabW, 28)
-        tb.Background.Color    = (State.ActiveTab == name)
-            and Color3.fromRGB(28, 28, 34) or Color3.fromRGB(18, 18, 22)
-
-        tb.Text.Visible   = true
-        tb.Text.Position  = Vector2.new(tx + (tabW / 2), ty + 7)
-        tb.Text.Color     = (State.ActiveTab == name)
-            and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(160, 160, 170)
-
-        tb.Indicator.Visible   = (State.ActiveTab == name)
-        tb.Indicator.Position  = Vector2.new(tx, ty + 26)
-        tb.Indicator.Size      = Vector2.new(tabW, 2)
-    end
-
-    -- Elements
-    local itemY      = self.Y + 76
-    local leftMargin = self.X + 16
-
-    for _, elem in ipairs(self.Elements) do
-        local inTab = (elem.Tab == State.ActiveTab)
-        if inTab and itemY + 30 <= self.Y + self.H then
-            elem.Label.Visible = true
-            elem.Label.Color   = Color3.fromRGB(215, 215, 220)
-
-            if elem.Type == "Toggle" then
-                local toggled = State[elem.Ref]
-                elem.Label.Position = Vector2.new(leftMargin + 24, itemY + 2)
-                elem.Box.Visible    = true
-                elem.Box.Position   = Vector2.new(leftMargin, itemY + 2)
-                elem.Box.Size       = Vector2.new(14, 14)
-                elem.Box.Color      = Color3.fromRGB(45, 45, 52)
-                elem.Inner.Visible  = toggled
-                elem.Inner.Position = Vector2.new(leftMargin + 2, itemY + 4)
-                elem.Inner.Size     = Vector2.new(10, 10)
-                itemY = itemY + 24
-
-            elseif elem.Type == "Slider" then
-                local curVal = State[elem.Ref]
-                elem.Label.Position   = Vector2.new(leftMargin, itemY)
-                elem.ValLabel.Visible = true
-                elem.ValLabel.Text    = elem.Float
-                    and string.format("%.2f", curVal) or tostring(math.floor(curVal))
-                elem.ValLabel.Position = Vector2.new(self.X + self.W - 55, itemY)
-                elem.ValLabel.Color    = Color3.fromRGB(180, 180, 190)
-
-                local barW = self.W - 32
-                elem.Bar.Visible  = true
-                elem.Bar.Position = Vector2.new(leftMargin, itemY + 16)
-                elem.Bar.Size     = Vector2.new(barW, 8)
-
-                local ratio = math.clamp((curVal - elem.Min) / (elem.Max - elem.Min), 0, 1)
-                elem.Fill.Visible  = true
-                elem.Fill.Position = Vector2.new(leftMargin, itemY + 16)
-                elem.Fill.Size     = Vector2.new(barW * ratio, 8)
-
-                if self.ActiveSlider == elem and mouseDown then
-                    local newRatio = math.clamp((mouse.X - leftMargin) / barW, 0, 1)
-                    local newVal   = elem.Min + ((elem.Max - elem.Min) * newRatio)
-                    State[elem.Ref] = elem.Float and newVal or math.floor(newVal + 0.5)
-                end
-                itemY = itemY + 30
-
-            elseif elem.Type == "Dropdown" then
-                elem.Label.Position = Vector2.new(leftMargin, itemY + 2)
-
-                local boxX = self.X + self.W - 145
-                elem.MainBox.Visible   = true
-                elem.MainBox.Position  = Vector2.new(boxX, itemY)
-                elem.MainBox.Size      = Vector2.new(129, 22)
-                elem.MainText.Visible  = true
-                elem.MainText.Position = Vector2.new(boxX + 8, itemY + 4)
-                elem.MainText.Text     = tostring(State[elem.Ref])
-                elem.MainText.Color    = Color3.fromRGB(240, 240, 245)
-
-                if elem.Open then
-                    for oi, od in ipairs(elem.OptionDraws) do
-                        local oy = itemY + (oi * 23)
-                        od.Box.Visible   = true
-                        od.Box.Position  = Vector2.new(boxX, oy)
-                        od.Box.Size      = Vector2.new(129, 23)
-                        od.Box.Color     = (State[elem.Ref] == od.Val)
-                            and Color3.fromRGB(38, 38, 46) or Color3.fromRGB(25, 25, 30)
-                        od.Text.Visible  = true
-                        od.Text.Position = Vector2.new(boxX + 8, oy + 5)
-                        od.Text.Color    = (State[elem.Ref] == od.Val)
-                            and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(180, 180, 190)
-                    end
-                else
-                    for _, od in ipairs(elem.OptionDraws) do
-                        od.Box.Visible  = false
-                        od.Text.Visible = false
-                    end
-                end
-                itemY = itemY + 28
-
-            elseif elem.Type == "Button" then
-                local bW = self.W - 32
-                elem.Box.Visible   = true
-                elem.Box.Position  = Vector2.new(leftMargin, itemY)
-                elem.Box.Size      = Vector2.new(bW, 28)
-                elem.Label.Visible = true
-                elem.Label.Position = Vector2.new(leftMargin + (bW / 2), itemY + 7)
-                elem.Label.Color   = Color3.fromRGB(240, 240, 245)
-                itemY = itemY + 36
-            end
-        else
-            elem.Label.Visible = false
-            if elem.Box      then elem.Box.Visible      = false end
-            if elem.Inner    then elem.Inner.Visible    = false end
-            if elem.Bar      then elem.Bar.Visible      = false end
-            if elem.Fill     then elem.Fill.Visible     = false end
-            if elem.ValLabel then elem.ValLabel.Visible = false end
-            if elem.MainBox  then elem.MainBox.Visible  = false end
-            if elem.MainText then elem.MainText.Visible = false end
-            if elem.OptionDraws then
-                for _, od in ipairs(elem.OptionDraws) do
-                    od.Box.Visible  = false
-                    od.Text.Visible = false
-                end
-            end
-        end
-    end
-
-    if not mouseDown then
-        self.ActiveSlider = nil
-    end
-end
-
--- ============================================================================
--- INPUT MANAGEMENT (unified PC + Touch)
--- ============================================================================
-
-local function HandlePress(pos)
-    if not State.UIVisible then return end
-
-    -- 1. Dropdown option hit-test (topmost in visual order)
-    if GUI.ActiveDropdown and GUI.ActiveDropdown.Open then
-        for _, od in ipairs(GUI.ActiveDropdown.OptionDraws) do
-            if od.Box.Visible then
-                local bPos, bSize = od.Box.Position, od.Box.Size
-                if pos.X >= bPos.X and pos.X <= bPos.X + bSize.X
-                and pos.Y >= bPos.Y and pos.Y <= bPos.Y + bSize.Y then
-                    State[GUI.ActiveDropdown.Ref] = od.Val
-                    GUI.ActiveDropdown.Open = false
-                    GUI.ActiveDropdown      = nil
-                    return
-                end
-            end
-        end
-        -- Tapped outside open dropdown — close it
-        GUI.ActiveDropdown.Open = false
-        GUI.ActiveDropdown      = nil
-    end
-
-    -- 2. Header: drag start + double-tap toggle (mobile alternative to Insert key)
-    if GUI_READY
-    and pos.X >= GUI.X and pos.X <= GUI.X + GUI.W
-    and pos.Y >= GUI.Y and pos.Y <= GUI.Y + 36 then
-        local now = tick()
-        if now - GUI._lastHeaderTap < 0.4 then
-            State.UIVisible    = not State.UIVisible
-            GUI._lastHeaderTap = 0
-        else
-            GUI._lastHeaderTap = now
-            GUI.Dragging       = true
-            GUI.DragOffset     = Vector2.new(pos.X - GUI.X, pos.Y - GUI.Y)
-        end
-        return
-    end
-
-    -- 3. Tab bar
-    if GUI_READY then
-        local tabW = GUI.W / #TabNames
-        for i, name in ipairs(TabNames) do
-            local tx = GUI.X + ((i - 1) * tabW)
-            local ty = GUI.Y + 36
-            if pos.X >= tx and pos.X <= tx + tabW
-            and pos.Y >= ty and pos.Y <= ty + 28 then
-                State.ActiveTab = name
-                return
-            end
-        end
-    end
-
-    -- 4. Elements
-    for _, elem in ipairs(GUI.Elements) do
-        if elem.Tab == State.ActiveTab then
-            if elem.Type == "Toggle" and elem.Box.Visible then
-                local bPos = elem.Box.Position
-                -- Wide hit area for mobile touch
-                if pos.X >= bPos.X - 4 and pos.X <= bPos.X + 220
-                and pos.Y >= bPos.Y - 8 and pos.Y <= bPos.Y + 22 then
-                    State[elem.Ref] = not State[elem.Ref]
-                    return
-                end
-
-            elseif elem.Type == "Slider" and elem.Bar.Visible then
-                local bPos, bSize = elem.Bar.Position, elem.Bar.Size
-                -- Extra vertical padding for finger touch
-                if pos.X >= bPos.X and pos.X <= bPos.X + bSize.X
-                and pos.Y >= bPos.Y - 12 and pos.Y <= bPos.Y + bSize.Y + 12 then
-                    GUI.ActiveSlider = elem
-                    local newRatio   = math.clamp((pos.X - bPos.X) / bSize.X, 0, 1)
-                    local newVal     = elem.Min + ((elem.Max - elem.Min) * newRatio)
-                    State[elem.Ref]  = elem.Float and newVal or math.floor(newVal + 0.5)
-                    return
-                end
-
-            elseif elem.Type == "Dropdown" and elem.MainBox.Visible then
-                local bPos, bSize = elem.MainBox.Position, elem.MainBox.Size
-                if pos.X >= bPos.X and pos.X <= bPos.X + bSize.X
-                and pos.Y >= bPos.Y and pos.Y <= bPos.Y + bSize.Y then
-                    if GUI.ActiveDropdown and GUI.ActiveDropdown ~= elem then
-                        GUI.ActiveDropdown.Open = false
-                    end
-                    elem.Open          = not elem.Open
-                    GUI.ActiveDropdown = elem.Open and elem or nil
-                    return
-                end
-
-            elseif elem.Type == "Button" and elem.Box.Visible then
-                local bPos, bSize = elem.Box.Position, elem.Box.Size
-                if pos.X >= bPos.X and pos.X <= bPos.X + bSize.X
-                and pos.Y >= bPos.Y and pos.Y <= bPos.Y + bSize.Y then
-                    elem.Callback()
-                    return
-                end
-            end
-        end
-    end
-end
-
--- ── PC: keyboard + mouse ──────────────────────────────────────────────────────
-local inputBeganConn = UserInputService.InputBegan:Connect(function(input, _processed)
+local inputKeyConn = UserInputService.InputBegan:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.Insert then
-        State.UIVisible = not State.UIVisible
-        return
+        SetUIVisible(not State.UIVisible)
     end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        local pos = UserInputService:GetMouseLocation()
-        TouchState.Position = pos
-        TouchState.IsDown   = true
-        HandlePress(pos)
+    if not processed and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
+        PointerPos = Vector2.new(input.Position.X, input.Position.Y)
     end
 end)
-table.insert(Connections, inputBeganConn)
+table.insert(Connections, inputKeyConn)
 
-local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        TouchState.IsDown = false
-        GUI.ActiveSlider  = nil
+local inputMoveConn = UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        PointerPos = Vector2.new(input.Position.X, input.Position.Y)
     end
 end)
-table.insert(Connections, inputEndedConn)
-
-local mouseMoveConn = UserInputService.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        TouchState.Position = UserInputService:GetMouseLocation()
-    end
-end)
-table.insert(Connections, mouseMoveConn)
-
--- ── Mobile: touch events ──────────────────────────────────────────────────────
-local touchBeganConn = UserInputService.TouchStarted:Connect(function(touch, _processed)
-    TouchState.Position = Vector2.new(touch.Position.X, touch.Position.Y)
-    TouchState.IsDown   = true
-    HandlePress(TouchState.Position)
-end)
-table.insert(Connections, touchBeganConn)
-
-local touchMoveConn = UserInputService.TouchMoved:Connect(function(touch, _processed)
-    TouchState.Position = Vector2.new(touch.Position.X, touch.Position.Y)
-    -- Live slider drag via touch
-    if GUI.ActiveSlider then
-        local elem    = GUI.ActiveSlider
-        local barPos  = elem.Bar.Position
-        local barSize = elem.Bar.Size
-        if barPos and barSize then
-            local newRatio  = math.clamp((TouchState.Position.X - barPos.X) / barSize.X, 0, 1)
-            local newVal    = elem.Min + ((elem.Max - elem.Min) * newRatio)
-            State[elem.Ref] = elem.Float and newVal or math.floor(newVal + 0.5)
-        end
-    end
-end)
-table.insert(Connections, touchMoveConn)
-
-local touchEndConn = UserInputService.TouchEnded:Connect(function(_touch, _processed)
-    TouchState.IsDown = false
-    GUI.ActiveSlider  = nil
-end)
-table.insert(Connections, touchEndConn)
+table.insert(Connections, inputMoveConn)
 
 -- ============================================================================
 -- WORLD MODIFIER APPLICATION
@@ -1149,18 +1040,18 @@ end
 local renderConn = RunService.RenderStepped:Connect(function()
     if not State.Running then return end
 
-    -- FOV circle follows the pointer (works on both platforms via TouchState)
+    -- FOV circle
     FOVCircle.Visible  = State.ShowFOV
     FOVCircle.Radius   = State.FOV
     FOVCircle.Color    = State.FOVColor
-    FOVCircle.Position = TouchState.Position
+    FOVCircle.Position = PointerPos
 
-    -- Camera smoothing aim assist (PC only — mousemoverel unavailable on mobile)
+    -- Camera smoothing aim assist (PC)
     if State.AimAssist and mousemove then
         local target = GetClosestTarget()
         if target then
-            local deltaX = (target.Screen.X - TouchState.Position.X) * State.AimSmoothness
-            local deltaY = (target.Screen.Y - TouchState.Position.Y) * State.AimSmoothness
+            local deltaX = (target.Screen.X - PointerPos.X) * State.AimSmoothness
+            local deltaY = (target.Screen.Y - PointerPos.Y) * State.AimSmoothness
             mousemove(deltaX, deltaY)
         end
     end
@@ -1177,14 +1068,10 @@ local renderConn = RunService.RenderStepped:Connect(function()
             RestoreChams(plr)
         end
     end
-
-    -- Wrap in pcall so any runtime error inside Render doesn't silently kill
-    -- the render connection (which would make the UI permanently invisible).
-    pcall(function() GUI:Render() end)
 end)
 table.insert(Connections, renderConn)
 
--- ── Player lifecycle hooks ────────────────────────────────────────────────────
+-- Player Events
 local pAdded = Players.PlayerAdded:Connect(function(plr)
     plr.CharacterAdded:Connect(function()
         task.wait(0.3)
@@ -1217,6 +1104,10 @@ local function UnloadSuite()
         pcall(function() draw:Remove() end)
     end
     table.clear(RenderObjects)
+
+    if SuiteGui then
+        pcall(function() SuiteGui:Destroy() end)
+    end
 
     Lighting.Ambient        = OriginalLighting.Ambient
     Lighting.OutdoorAmbient = OriginalLighting.OutdoorAmbient
