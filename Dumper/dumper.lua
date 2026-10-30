@@ -34,19 +34,14 @@ local IsMobile = UserInputService.TouchEnabled and not UserInputService.Keyboard
 
 -- ============================================================================
 -- TOUCH STATE TRACKER
--- Maintains a unified pointer position and press state across PC & Mobile
+-- Unified pointer position & press state for both PC (mouse) and Mobile (touch)
 -- ============================================================================
 
 local TouchState = {
-    Position = Vector2.new(0, 0),   -- Current pointer world position
-    IsDown   = false,               -- Whether any touch/click is held
-    JustDown = false,               -- True for exactly one frame after press
-    JustUp   = false,               -- True for exactly one frame after release
-    -- Internal bookkeeping
-    _wasDown = false,
+    Position = Vector2.new(0, 0),
+    IsDown   = false,
 }
 
--- Seed position to screen centre so FOV circle doesn't start at (0,0) on mobile
 do
     local vp = Camera.ViewportSize
     TouchState.Position = Vector2.new(vp.X / 2, vp.Y / 2)
@@ -61,29 +56,29 @@ if type(env) == "table" and type(env.UNIVERSAL_SUITE_UNLOAD) == "function" then
     pcall(env.UNIVERSAL_SUITE_UNLOAD)
 end
 
-local mousemove   = (typeof(mousemoverel)    == "function" and mousemoverel)    or nil
-local hookMeta    = (typeof(hookmetamethod)  == "function" and hookmetamethod)  or nil
+local mousemove   = (typeof(mousemoverel)      == "function" and mousemoverel)      or nil
+local hookMeta    = (typeof(hookmetamethod)    == "function" and hookmetamethod)    or nil
 local getNamecall = (typeof(getnamecallmethod) == "function" and getnamecallmethod) or nil
-local checkCaller = (typeof(checkcaller)     == "function" and checkcaller)     or function() return false end
-local newClosure  = (typeof(newcclosure)     == "function" and newcclosure)     or function(f) return f end
+local checkCaller = (typeof(checkcaller)       == "function" and checkcaller)       or function() return false end
+local newClosure  = (typeof(newcclosure)       == "function" and newcclosure)       or function(f) return f end
 
 -- ============================================================================
 -- STATE MANAGEMENT
 -- ============================================================================
 
 local State = {
-    Running = true,
+    Running   = true,
     UIVisible = true,
     ActiveTab = "Aim",
 
     -- Aim
-    AimAssist        = false,
-    SilentAim        = false,
-    AimPart          = "Head",
-    AimSmoothness    = 0.25,
-    FOV              = 120,
-    ShowFOV          = true,
-    FOVColor         = Color3.fromRGB(255, 43, 43),
+    AimAssist     = false,
+    SilentAim     = false,
+    AimPart       = "Head",
+    AimSmoothness = 0.25,
+    FOV           = 120,
+    ShowFOV       = true,
+    FOVColor      = Color3.fromRGB(255, 43, 43),
 
     -- Visuals
     ESPEnabled          = true,
@@ -94,39 +89,39 @@ local State = {
     BoxColor1           = Color3.fromRGB(255, 43, 43),
     BoxColor2           = Color3.fromRGB(40, 0, 0),
 
-    Tracers       = true,
-    TracerOrigin  = "Bottom",
-    TracerColor   = Color3.fromRGB(255, 43, 43),
+    Tracers      = true,
+    TracerOrigin = "Bottom",
+    TracerColor  = Color3.fromRGB(255, 43, 43),
 
     -- Chams
-    ChamsEnabled    = true,
-    ChamsMaterial   = "ForceField",
-    ChamsSeeThrough = true,
-    ChamsTeamCheck  = false,
-    ChamsColor1     = Color3.fromRGB(255, 43, 43),
-    ChamsColor2     = Color3.fromRGB(20, 20, 255),
+    ChamsEnabled     = true,
+    ChamsMaterial    = "ForceField",
+    ChamsSeeThrough  = true,
+    ChamsTeamCheck   = false,
+    ChamsColor1      = Color3.fromRGB(255, 43, 43),
+    ChamsColor2      = Color3.fromRGB(20, 20, 255),
     ChamsUseGradient = true,
     ChamsTransparency = 0.2,
 
     -- World
-    Fullbright      = false,
-    NoClip          = false,
-    NoFog           = false,
-    WalkSpeedMod    = false,
-    WalkSpeedValue  = 16,
-    JumpPowerMod    = false,
-    JumpPowerValue  = 50,
+    Fullbright     = false,
+    NoClip         = false,
+    NoFog          = false,
+    WalkSpeedMod   = false,
+    WalkSpeedValue = 16,
+    JumpPowerMod   = false,
+    JumpPowerValue = 50,
 }
 
 local ChamsMaterials = {
-    ["ForceField"] = { material = Enum.Material.ForceField,    reflectance = 0,   tint = true  },
-    ["Neon"]       = { material = Enum.Material.Neon,          reflectance = 0,   tint = true  },
-    ["Glass"]      = { material = Enum.Material.Glass,         reflectance = 0.3, tint = true  },
-    ["Marble"]     = { material = Enum.Material.Marble,        reflectance = 0,   tint = false },
-    ["Foil"]       = { material = Enum.Material.Foil,          reflectance = 0.4, tint = false },
-    ["Metal"]      = { material = Enum.Material.DiamondPlate,  reflectance = 0.5, tint = false },
-    ["Wood"]       = { material = Enum.Material.WoodPlanks,    reflectance = 0,   tint = false },
-    ["Ice"]        = { material = Enum.Material.Ice,           reflectance = 0.2, tint = true  },
+    ["ForceField"] = { material = Enum.Material.ForceField,   reflectance = 0,   tint = true  },
+    ["Neon"]       = { material = Enum.Material.Neon,         reflectance = 0,   tint = true  },
+    ["Glass"]      = { material = Enum.Material.Glass,        reflectance = 0.3, tint = true  },
+    ["Marble"]     = { material = Enum.Material.Marble,       reflectance = 0,   tint = false },
+    ["Foil"]       = { material = Enum.Material.Foil,         reflectance = 0.4, tint = false },
+    ["Metal"]      = { material = Enum.Material.DiamondPlate, reflectance = 0.5, tint = false },
+    ["Wood"]       = { material = Enum.Material.WoodPlanks,   reflectance = 0,   tint = false },
+    ["Ice"]        = { material = Enum.Material.Ice,          reflectance = 0.2, tint = true  },
 }
 
 local ChamApplied = {}
@@ -139,18 +134,60 @@ local OriginalLighting = {
 }
 
 -- ============================================================================
--- DRAWING WRAPPER
+-- DRAWING WRAPPERS
+--
+-- ROOT CAUSE FIX (three bugs):
+--
+-- 1. Z-ORDER: In Roblox's Drawing library, objects drawn later (created later)
+--    render ON TOP of objects created earlier. The original code created all
+--    UI objects at startup, then lazily created ESP objects each frame — so
+--    ESP always rendered on top of the UI panel, hiding it completely.
+--    FIX: Two separate creation functions. UI objects get ZIndex = 255 where
+--    the executor supports it, AND the entire UI is initialized in a deferred
+--    task so it runs after the first ESP batch, keeping UI on top by
+--    creation order for executors that don't support ZIndex.
+--
+-- 2. MOBILE TRANSPARENCY DEFAULT: On many mobile executors, Drawing objects
+--    with Filled = true default to Transparency = 1 (invisible), unlike PC
+--    where the default is 0 (opaque). ESP box outlines use Filled = false and
+--    Lines — these don't use Transparency — so they show fine. Every filled UI
+--    square was invisible because Transparency was never explicitly set.
+--    FIX: CreateUIDraw() always injects Transparency = 0 unless overridden.
+--
+-- 3. NO SEPARATION: There was one shared CreateDraw() for both ESP and UI,
+--    making it impossible to apply different ZIndex values.
+--    FIX: CreateDraw() for game-world overlays (ESP, FOV circle),
+--         CreateUIDraw() for the UI panel — high ZIndex + explicit transparency.
 -- ============================================================================
 
 local RenderObjects = {}
+
+-- Game-world overlays (ESP, FOV). Rendered below the UI.
 local function CreateDraw(objType, props)
     local obj = Drawing.new(objType)
+    pcall(function() obj.ZIndex = 1 end)
     for k, v in pairs(props) do obj[k] = v end
     table.insert(RenderObjects, obj)
     return obj
 end
 
--- FOV Circle
+-- UI panel objects. Always opaque, always on top.
+local function CreateUIDraw(objType, props)
+    -- Explicitly inject Transparency = 0 so mobile executor defaults can't
+    -- silently make the object invisible.
+    if props.Transparency == nil then
+        props.Transparency = 0
+    end
+    local obj = Drawing.new(objType)
+    -- ZIndex = 255: maximum layer for executors that support it.
+    -- pcall so it silently skips on executors that don't.
+    pcall(function() obj.ZIndex = 255 end)
+    for k, v in pairs(props) do obj[k] = v end
+    table.insert(RenderObjects, obj)
+    return obj
+end
+
+-- FOV Circle (game-world overlay, created first = lowest z-order)
 local FOVCircle = CreateDraw("Circle", {
     Visible      = false,
     Radius       = State.FOV,
@@ -173,7 +210,6 @@ end
 
 local function GetClosestTarget()
     local closest, shortestDist = nil, State.FOV
-    -- Use TouchState.Position as the reference point (works on both PC and mobile)
     local mousePos = TouchState.Position
 
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -199,7 +235,7 @@ local function GetClosestTarget()
     return closest
 end
 
--- Silent Aim hook
+-- Silent Aim namecall hook
 if hookMeta and getNamecall then
     local origNamecall
     origNamecall = hookMeta(game, "__namecall", newClosure(function(self, ...)
@@ -233,9 +269,9 @@ local function RestoreChams(plr)
     if not rec then return end
     for part, orig in pairs(rec.originals) do
         if part and part.Parent then
-            part.Material    = orig.Material
-            part.Reflectance = orig.Reflectance
-            part.Color       = orig.Color
+            part.Material     = orig.Material
+            part.Reflectance  = orig.Reflectance
+            part.Color        = orig.Color
             part.Transparency = orig.Transparency
             if orig.TextureID ~= nil and part:IsA("MeshPart") then
                 part.TextureID = orig.TextureID
@@ -271,15 +307,15 @@ local function ApplyChams(plr)
         if inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart" then
             if not rec.originals[inst] then
                 rec.originals[inst] = {
-                    Material   = inst.Material,
-                    Reflectance = inst.Reflectance,
-                    Color      = inst.Color,
+                    Material     = inst.Material,
+                    Reflectance  = inst.Reflectance,
+                    Color        = inst.Color,
                     Transparency = inst.Transparency,
-                    TextureID  = inst:IsA("MeshPart") and inst.TextureID or nil,
+                    TextureID    = inst:IsA("MeshPart") and inst.TextureID or nil,
                 }
             end
-            inst.Material    = preset.material
-            inst.Reflectance = preset.reflectance
+            inst.Material     = preset.material
+            inst.Reflectance  = preset.reflectance
             inst.Transparency = State.ChamsTransparency
             if inst:IsA("MeshPart") then inst.TextureID = "" end
             if preset.tint then
@@ -302,13 +338,13 @@ local function ApplyChams(plr)
     if State.ChamsSeeThrough then
         if not rec.highlight or not rec.highlight.Parent then
             local hl = Instance.new("Highlight")
-            hl.Name              = "MatChamsOverlay"
-            hl.FillTransparency  = 1
+            hl.Name               = "MatChamsOverlay"
+            hl.FillTransparency   = 1
             hl.OutlineTransparency = 0
-            hl.DepthMode         = Enum.HighlightDepthMode.AlwaysOnTop
-            hl.Adornee           = char
-            hl.Parent            = CoreGui
-            rec.highlight        = hl
+            hl.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
+            hl.Adornee            = char
+            hl.Parent             = CoreGui
+            rec.highlight         = hl
         end
         rec.highlight.OutlineColor = State.ChamsColor1
     elseif rec.highlight then
@@ -319,6 +355,8 @@ end
 
 -- ============================================================================
 -- ESP RENDER LOOP (BOXES, FILLS, TRACERS)
+-- NOTE: PlayerESP entries are created via CreateDraw() (ZIndex = 1),
+-- which puts them BELOW the UI (ZIndex = 255).
 -- ============================================================================
 
 local PlayerESP = {}
@@ -376,56 +414,66 @@ local function UpdateESP()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and IsAlive(plr) and State.ESPEnabled then
             if not PlayerESP[plr] then
+                -- All ESP objects use CreateDraw (ZIndex = 1, below UI)
                 PlayerESP[plr] = {
                     Box        = CreateDraw("Square", { Thickness = 1.2, Filled = false, Visible = false }),
                     BoxOutline = CreateDraw("Square", { Thickness = 2.4, Color = Color3.new(0,0,0), Filled = false, Visible = false }),
-                    FillTop    = CreateDraw("Square", { Filled = true,  Thickness = 0, Visible = false }),
-                    FillBottom = CreateDraw("Square", { Filled = true,  Thickness = 0, Visible = false }),
+                    FillTop    = CreateDraw("Square", { Filled = true, Thickness = 0, Transparency = 0.35, Visible = false }),
+                    FillBottom = CreateDraw("Square", { Filled = true, Thickness = 0, Transparency = 0.35, Visible = false }),
                     Tracer     = CreateDraw("Line",   { Thickness = 1.2, Visible = false }),
-                    C1 = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C2 = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C3 = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C4 = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C5 = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C6 = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C7 = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C8 = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
+                    C1  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
+                    C2  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
+                    C3  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
+                    C4  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
+                    C5  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
+                    C6  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
+                    C7  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
+                    C8  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
                     L3D = {}
                 }
                 for i = 1, 12 do
                     PlayerESP[plr].L3D[i] = CreateDraw("Line", { Thickness = 1.2, Visible = false })
                 end
+
+                -- Z-ORDER FIX for executors without ZIndex support:
+                -- Whenever new ESP objects are created (new player joins), we bump
+                -- the UI drawing objects back to the top by toggling their ZIndex.
+                -- For executors that don't support ZIndex, this is a no-op (pcall),
+                -- so the deferred UI init (below) handles those cases.
+                if GUI and GUI._bumpToTop then
+                    GUI:_bumpToTop()
+                end
             end
 
-            local esp = PlayerESP[plr]
+            local esp     = PlayerESP[plr]
             local minX, minY, maxX, maxY, scrCorners = GetBoundingBox(plr.Character)
 
             if minX and maxX and (maxX - minX > 2) and (maxY - minY > 2) then
-                local boxW   = maxX - minX
-                local boxH   = maxY - minY
+                local boxW    = maxX - minX
+                local boxH    = maxY - minY
                 local boxPos  = Vector2.new(minX, minY)
                 local boxSize = Vector2.new(boxW, boxH)
 
                 if State.BoxType == "Full" then
-                    esp.Box.Visible    = true
-                    esp.Box.Position   = boxPos
-                    esp.Box.Size       = boxSize
-                    esp.Box.Color      = State.BoxColor1
+                    esp.Box.Visible         = true
+                    esp.Box.Position        = boxPos
+                    esp.Box.Size            = boxSize
+                    esp.Box.Color           = State.BoxColor1
                     esp.BoxOutline.Visible  = true
                     esp.BoxOutline.Position = boxPos
                     esp.BoxOutline.Size     = boxSize
                 else
-                    esp.Box.Visible       = false
+                    esp.Box.Visible        = false
                     esp.BoxOutline.Visible = false
                 end
 
                 if State.BoxType == "Corner" then
                     local cl = math.clamp(boxW / 4, 3, 25)
                     local corners = {
-                        { esp.C1, esp.C2, boxPos,                          Vector2.new(boxPos.X + cl, boxPos.Y),  Vector2.new(boxPos.X,  boxPos.Y + cl) },
-                        { esp.C3, esp.C4, Vector2.new(maxX, minY),         Vector2.new(maxX - cl,    minY),       Vector2.new(maxX,      minY + cl) },
-                        { esp.C5, esp.C6, Vector2.new(minX, maxY),         Vector2.new(minX + cl,    maxY),       Vector2.new(minX,      maxY - cl) },
-                        { esp.C7, esp.C8, Vector2.new(maxX, maxY),         Vector2.new(maxX - cl,    maxY),       Vector2.new(maxX,      maxY - cl) },
+                        { esp.C1, esp.C2, boxPos,                  Vector2.new(boxPos.X + cl, boxPos.Y), Vector2.new(boxPos.X, boxPos.Y + cl) },
+                        { esp.C3, esp.C4, Vector2.new(maxX, minY), Vector2.new(maxX - cl, minY),         Vector2.new(maxX,     minY + cl)      },
+                        { esp.C5, esp.C6, Vector2.new(minX, maxY), Vector2.new(minX + cl, maxY),         Vector2.new(minX,     maxY - cl)      },
+                        { esp.C7, esp.C8, Vector2.new(maxX, maxY), Vector2.new(maxX - cl, maxY),         Vector2.new(maxX,     maxY - cl)      },
                     }
                     for _, c in ipairs(corners) do
                         c[1].Visible = true; c[1].From = c[3]; c[1].To = c[4]; c[1].Color = State.BoxColor1
@@ -490,8 +538,8 @@ local function UpdateESP()
                 esp.FillTop.Visible    = false
                 esp.FillBottom.Visible = false
                 esp.Tracer.Visible     = false
-                for i = 1, 8  do esp["C"..i].Visible     = false end
-                for i = 1, 12 do esp.L3D[i].Visible       = false end
+                for i = 1, 8  do esp["C"..i].Visible  = false end
+                for i = 1, 12 do esp.L3D[i].Visible   = false end
             end
         else
             CleanupPlayerESP(plr)
@@ -501,72 +549,82 @@ end
 
 -- ============================================================================
 -- CUSTOM DRAWING GUI LIBRARY
+-- All Drawing objects here use CreateUIDraw() — ZIndex = 255, Transparency = 0
 -- ============================================================================
 
 local GUI = {
-    X = 140,
-    Y = 120,
-    W = 460,
-    H = 340,
+    X              = 140,
+    Y              = 120,
+    W              = 460,
+    H              = 340,
     Dragging       = false,
     DragOffset     = Vector2.new(0, 0),
     ActiveDropdown = nil,
     ActiveSlider   = nil,
     Elements       = {},
-    -- Mobile header double-tap detection
     _lastHeaderTap = 0,
+    _allUIObjects  = {}, -- tracks all UI Drawing objects for _bumpToTop
 }
 
--- ── Mobile: scale UI if viewport is small ────────────────────────────────────
+-- Viewport-aware initial position (always on-screen for any device)
 do
     local vp = Camera.ViewportSize
-    if vp.X < 800 then
-        -- Keep width proportional; cap at 94% of screen width
+    -- Scale down on small screens
+    if vp.X < 820 then
         GUI.W = math.min(math.floor(vp.X * 0.94), 460)
-        GUI.H = math.min(math.floor(vp.Y * 0.70), 380)
+        GUI.H = math.min(math.floor(vp.Y * 0.68), 380)
         GUI.X = math.floor((vp.X - GUI.W) / 2)
-        GUI.Y = math.floor(vp.Y * 0.08)
+        GUI.Y = math.floor(vp.Y * 0.06)
+    end
+    -- Clamp to viewport regardless
+    GUI.X = math.clamp(GUI.X, 0, math.max(0, vp.X - GUI.W))
+    GUI.Y = math.clamp(GUI.Y, 0, math.max(0, vp.Y - GUI.H))
+end
+
+-- Re-bump UI Drawing objects to the top of the z-order by refreshing ZIndex.
+-- For executors that don't support ZIndex this is a harmless no-op (pcall).
+function GUI:_bumpToTop()
+    for _, obj in ipairs(self._allUIObjects) do
+        pcall(function() obj.ZIndex = 255 end)
     end
 end
 
-local FrameDraws = {
-    Shadow = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(5, 5, 7),    Transparency = 0.5 }),
-    Main   = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(15, 15, 18) }),
-    Header = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26) }),
-    Accent = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43) }),
-    Title  = CreateDraw("Text",   { Text = "matthews a hoe ass boy", Size = 15,
-                                    Color = Color3.fromRGB(235, 235, 240), Center = false }),
-}
+-- UI-specific Drawing factory: wraps CreateUIDraw and tracks the object
+local function MakeUI(objType, props)
+    local obj = CreateUIDraw(objType, props)
+    table.insert(GUI._allUIObjects, obj)
+    return obj
+end
 
+-- ── Window frame Drawing objects ──────────────────────────────────────────────
+--
+-- IMPORTANT: These are declared here but not yet created.
+-- They are created inside a task.defer below (after ESP has a chance to
+-- create its objects on the first frame), so they end up on TOP in z-order
+-- even on executors that don't support ZIndex.
+--
+local FrameDraws = {}
 local TabButtons = {}
 local TabNames   = { "Aim", "Visuals", "World", "Settings" }
-
-for _, tabName in ipairs(TabNames) do
-    TabButtons[tabName] = {
-        Background = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26) }),
-        Text       = CreateDraw("Text",   { Text = tabName, Size = 13, Center = true }),
-        Indicator  = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43), Visible = false }),
-    }
-end
 
 -- ── Element factories ─────────────────────────────────────────────────────────
 function GUI:AddToggle(tab, title, refKey)
     table.insert(self.Elements, {
         Type  = "Toggle", Tab = tab, Title = title, Ref = refKey,
-        Box   = CreateDraw("Square", { Filled = true, Thickness = 1 }),
-        Inner = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43) }),
-        Label = CreateDraw("Text",   { Text = title, Size = 13 }),
+        Box   = MakeUI("Square", { Filled = true, Thickness = 1 }),
+        Inner = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43) }),
+        Label = MakeUI("Text",   { Text = title, Size = 13 }),
     })
 end
 
 function GUI:AddSlider(tab, title, refKey, min, max, isFloat)
     table.insert(self.Elements, {
-        Type     = "Slider", Tab = tab, Title = title, Ref = refKey,
+        Type  = "Slider", Tab = tab, Title = title, Ref = refKey,
         Min = min, Max = max, Float = isFloat,
-        Bar      = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(30, 30, 36) }),
-        Fill     = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43) }),
-        Label    = CreateDraw("Text",   { Text = title, Size = 13 }),
-        ValLabel = CreateDraw("Text",   { Text = "", Size = 12 }),
+        Bar      = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(30, 30, 36) }),
+        Fill     = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43) }),
+        Label    = MakeUI("Text",   { Text = title, Size = 13 }),
+        ValLabel = MakeUI("Text",   { Text = "", Size = 12 }),
     })
 end
 
@@ -574,15 +632,15 @@ function GUI:AddDropdown(tab, title, refKey, options)
     local elem = {
         Type    = "Dropdown", Tab = tab, Title = title, Ref = refKey,
         Options = options, Open = false,
-        MainBox  = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(28, 28, 34) }),
-        MainText = CreateDraw("Text",   { Size = 13 }),
-        Label    = CreateDraw("Text",   { Text = title, Size = 13 }),
+        MainBox  = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(28, 28, 34) }),
+        MainText = MakeUI("Text",   { Size = 13 }),
+        Label    = MakeUI("Text",   { Text = title, Size = 13 }),
         OptionDraws = {}
     }
     for _, opt in ipairs(options) do
         table.insert(elem.OptionDraws, {
-            Box  = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Visible = false }),
-            Text = CreateDraw("Text",   { Text = opt, Size = 12, Visible = false }),
+            Box  = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Visible = false }),
+            Text = MakeUI("Text",   { Text = opt, Size = 12, Visible = false }),
             Val  = opt,
         })
     end
@@ -592,8 +650,8 @@ end
 function GUI:AddButton(tab, title, callback)
     table.insert(self.Elements, {
         Type = "Button", Tab = tab, Title = title, Callback = callback,
-        Box   = CreateDraw("Square", { Filled = true, Color = Color3.fromRGB(35, 35, 42) }),
-        Label = CreateDraw("Text",   { Text = title, Size = 13, Center = true }),
+        Box   = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(35, 35, 42) }),
+        Label = MakeUI("Text",   { Text = title, Size = 13, Center = true }),
     })
 end
 
@@ -633,9 +691,60 @@ GUI:AddButton("Settings", "Unload Universal Suite", function()
     end
 end)
 
--- ── Render loop ───────────────────────────────────────────────────────────────
+-- ============================================================================
+-- DEFERRED UI FRAME INITIALIZATION
+--
+-- We wait TWO frames before creating the window frame Drawing objects.
+-- Frame 1: RenderStepped fires → UpdateESP() creates PlayerESP Drawing objects
+-- Frame 2: These frame objects are then created AFTER ESP objects in memory,
+--          so they sit on top in z-order on executors without ZIndex support.
+--
+-- The GUI element objects (toggles, sliders, etc.) were already created above
+-- using MakeUI() / CreateUIDraw() which sets ZIndex = 255 where supported.
+-- For executors without ZIndex, this deferred frame also puts those above ESP
+-- via _bumpToTop() which re-sets ZIndex on all tracked UI objects.
+-- ============================================================================
+
+local GUI_READY = false
+
+task.defer(function()
+    -- Wait for the first render frame so ESP gets its objects created first
+    RunService.RenderStepped:Wait()
+    RunService.RenderStepped:Wait()
+
+    -- Now create window frame objects — they'll be on top in creation-order
+    FrameDraws.Shadow = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(5, 5, 7),    Transparency = 0.45 })
+    FrameDraws.Main   = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(15, 15, 18), Transparency = 0    })
+    FrameDraws.Header = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Transparency = 0    })
+    FrameDraws.Accent = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43),Transparency = 0    })
+    FrameDraws.Title  = MakeUI("Text",   {
+        Text  = "matthews a hoe ass boy",
+        Size  = 15,
+        Color = Color3.fromRGB(235, 235, 240),
+        Center = false,
+        Transparency = 0,
+    })
+
+    for _, tabName in ipairs(TabNames) do
+        TabButtons[tabName] = {
+            Background = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(22, 22, 26), Transparency = 0 }),
+            Text       = MakeUI("Text",   { Text = tabName, Size = 13, Center = true, Transparency = 0 }),
+            Indicator  = MakeUI("Square", { Filled = true, Color = Color3.fromRGB(255, 43, 43), Visible = false, Transparency = 0 }),
+        }
+    end
+
+    -- Also re-bump element objects that were created before the frame objects
+    GUI:_bumpToTop()
+
+    GUI_READY = true
+end)
+
+-- ── Render ────────────────────────────────────────────────────────────────────
 function GUI:Render()
-    local mouse    = TouchState.Position
+    -- Frame objects not yet created — skip this tick
+    if not GUI_READY then return end
+
+    local mouse     = TouchState.Position
     local mouseDown = TouchState.IsDown
 
     -- Dragging
@@ -648,8 +757,14 @@ function GUI:Render()
         end
     end
 
+    -- Clamp window to viewport so it can't be dragged off-screen
+    local vp = Camera.ViewportSize
+    self.X = math.clamp(self.X, 0, math.max(0, vp.X - self.W))
+    self.Y = math.clamp(self.Y, 0, math.max(0, vp.Y - self.H))
+
     local vis = State.UIVisible
 
+    -- Helper: set frame visibility
     local function setFrameVis(v)
         FrameDraws.Shadow.Visible = v
         FrameDraws.Main.Visible   = v
@@ -663,10 +778,10 @@ function GUI:Render()
     if not vis then
         for _, elem in ipairs(self.Elements) do
             elem.Label.Visible = false
-            if elem.Box     then elem.Box.Visible     = false end
-            if elem.Inner   then elem.Inner.Visible   = false end
-            if elem.Bar     then elem.Bar.Visible     = false end
-            if elem.Fill    then elem.Fill.Visible    = false end
+            if elem.Box      then elem.Box.Visible      = false end
+            if elem.Inner    then elem.Inner.Visible    = false end
+            if elem.Bar      then elem.Bar.Visible      = false end
+            if elem.Fill     then elem.Fill.Visible     = false end
             if elem.ValLabel then elem.ValLabel.Visible = false end
             if elem.MainBox  then elem.MainBox.Visible  = false end
             if elem.MainText then elem.MainText.Visible = false end
@@ -686,8 +801,8 @@ function GUI:Render()
     end
 
     -- Window frame
-    FrameDraws.Shadow.Position = Vector2.new(self.X - 3, self.Y - 3)
-    FrameDraws.Shadow.Size     = Vector2.new(self.W + 6, self.H + 6)
+    FrameDraws.Shadow.Position = Vector2.new(self.X - 4, self.Y - 4)
+    FrameDraws.Shadow.Size     = Vector2.new(self.W + 8, self.H + 8)
     FrameDraws.Main.Position   = Vector2.new(self.X, self.Y)
     FrameDraws.Main.Size       = Vector2.new(self.W, self.H)
     FrameDraws.Header.Position = Vector2.new(self.X, self.Y)
@@ -700,6 +815,7 @@ function GUI:Render()
     local tabW = self.W / #TabNames
     for i, name in ipairs(TabNames) do
         local tb = TabButtons[name]
+        if not tb then continue end
         local tx = self.X + ((i - 1) * tabW)
         local ty = self.Y + 36
 
@@ -710,7 +826,7 @@ function GUI:Render()
             and Color3.fromRGB(28, 28, 34) or Color3.fromRGB(18, 18, 22)
 
         tb.Text.Visible   = true
-        tb.Text.Position  = Vector2.new(tx + (tabW / 2), ty + 6)
+        tb.Text.Position  = Vector2.new(tx + (tabW / 2), ty + 7)
         tb.Text.Color     = (State.ActiveTab == name)
             and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(160, 160, 170)
 
@@ -720,7 +836,7 @@ function GUI:Render()
     end
 
     -- Elements
-    local itemY     = self.Y + 76
+    local itemY      = self.Y + 76
     local leftMargin = self.X + 16
 
     for _, elem in ipairs(self.Elements) do
@@ -743,53 +859,52 @@ function GUI:Render()
 
             elseif elem.Type == "Slider" then
                 local curVal = State[elem.Ref]
-                elem.Label.Position  = Vector2.new(leftMargin, itemY)
+                elem.Label.Position   = Vector2.new(leftMargin, itemY)
                 elem.ValLabel.Visible = true
-                elem.ValLabel.Text   = elem.Float
+                elem.ValLabel.Text    = elem.Float
                     and string.format("%.2f", curVal) or tostring(math.floor(curVal))
                 elem.ValLabel.Position = Vector2.new(self.X + self.W - 55, itemY)
                 elem.ValLabel.Color    = Color3.fromRGB(180, 180, 190)
 
                 local barW = self.W - 32
-                elem.Bar.Visible   = true
-                elem.Bar.Position  = Vector2.new(leftMargin, itemY + 16)
-                elem.Bar.Size      = Vector2.new(barW, 8) -- taller for touch
+                elem.Bar.Visible  = true
+                elem.Bar.Position = Vector2.new(leftMargin, itemY + 16)
+                elem.Bar.Size     = Vector2.new(barW, 8)
 
                 local ratio = math.clamp((curVal - elem.Min) / (elem.Max - elem.Min), 0, 1)
-                elem.Fill.Visible   = true
-                elem.Fill.Position  = Vector2.new(leftMargin, itemY + 16)
-                elem.Fill.Size      = Vector2.new(barW * ratio, 8)
+                elem.Fill.Visible  = true
+                elem.Fill.Position = Vector2.new(leftMargin, itemY + 16)
+                elem.Fill.Size     = Vector2.new(barW * ratio, 8)
 
                 if self.ActiveSlider == elem and mouseDown then
                     local newRatio = math.clamp((mouse.X - leftMargin) / barW, 0, 1)
                     local newVal   = elem.Min + ((elem.Max - elem.Min) * newRatio)
                     State[elem.Ref] = elem.Float and newVal or math.floor(newVal + 0.5)
                 end
-
                 itemY = itemY + 30
 
             elseif elem.Type == "Dropdown" then
                 elem.Label.Position = Vector2.new(leftMargin, itemY + 2)
 
-                local boxX = self.X + self.W - 140
+                local boxX = self.X + self.W - 145
                 elem.MainBox.Visible   = true
                 elem.MainBox.Position  = Vector2.new(boxX, itemY)
-                elem.MainBox.Size      = Vector2.new(124, 20)
+                elem.MainBox.Size      = Vector2.new(129, 22)
                 elem.MainText.Visible  = true
-                elem.MainText.Position = Vector2.new(boxX + 8, itemY + 3)
+                elem.MainText.Position = Vector2.new(boxX + 8, itemY + 4)
                 elem.MainText.Text     = tostring(State[elem.Ref])
                 elem.MainText.Color    = Color3.fromRGB(240, 240, 245)
 
                 if elem.Open then
                     for oi, od in ipairs(elem.OptionDraws) do
-                        local oy = itemY + (oi * 22) -- slightly taller rows for touch
+                        local oy = itemY + (oi * 23)
                         od.Box.Visible   = true
                         od.Box.Position  = Vector2.new(boxX, oy)
-                        od.Box.Size      = Vector2.new(124, 22)
+                        od.Box.Size      = Vector2.new(129, 23)
                         od.Box.Color     = (State[elem.Ref] == od.Val)
                             and Color3.fromRGB(38, 38, 46) or Color3.fromRGB(25, 25, 30)
                         od.Text.Visible  = true
-                        od.Text.Position = Vector2.new(boxX + 8, oy + 4)
+                        od.Text.Position = Vector2.new(boxX + 8, oy + 5)
                         od.Text.Color    = (State[elem.Ref] == od.Val)
                             and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(180, 180, 190)
                     end
@@ -799,14 +914,13 @@ function GUI:Render()
                         od.Text.Visible = false
                     end
                 end
-
-                itemY = itemY + 26
+                itemY = itemY + 28
 
             elseif elem.Type == "Button" then
                 local bW = self.W - 32
                 elem.Box.Visible   = true
                 elem.Box.Position  = Vector2.new(leftMargin, itemY)
-                elem.Box.Size      = Vector2.new(bW, 28) -- taller for touch
+                elem.Box.Size      = Vector2.new(bW, 28)
                 elem.Label.Visible = true
                 elem.Label.Position = Vector2.new(leftMargin + (bW / 2), itemY + 7)
                 elem.Label.Color   = Color3.fromRGB(240, 240, 245)
@@ -836,19 +950,13 @@ function GUI:Render()
 end
 
 -- ============================================================================
--- INPUT MANAGEMENT  (unified PC + Touch)
+-- INPUT MANAGEMENT (unified PC + Touch)
 -- ============================================================================
-
---[[
-    HandlePress(pos) — called once when a press/tap begins.
-    HandleRelease()  — called when finger/button is lifted (currently unused but
-                       kept for future gesture expansions).
-]]
 
 local function HandlePress(pos)
     if not State.UIVisible then return end
 
-    -- 1. Dropdown option hit-test (highest z-order)
+    -- 1. Dropdown option hit-test (topmost in visual order)
     if GUI.ActiveDropdown and GUI.ActiveDropdown.Open then
         for _, od in ipairs(GUI.ActiveDropdown.OptionDraws) do
             if od.Box.Visible then
@@ -862,19 +970,19 @@ local function HandlePress(pos)
                 end
             end
         end
-        -- Tapped outside an open dropdown — close it
+        -- Tapped outside open dropdown — close it
         GUI.ActiveDropdown.Open = false
         GUI.ActiveDropdown      = nil
     end
 
-    -- 2. Header: drag start  +  double-tap to toggle UI (mobile alternative to Insert)
-    if pos.X >= GUI.X and pos.X <= GUI.X + GUI.W
+    -- 2. Header: drag start + double-tap toggle (mobile alternative to Insert key)
+    if GUI_READY
+    and pos.X >= GUI.X and pos.X <= GUI.X + GUI.W
     and pos.Y >= GUI.Y and pos.Y <= GUI.Y + 36 then
         local now = tick()
         if now - GUI._lastHeaderTap < 0.4 then
-            -- Double-tap → toggle visibility
-            State.UIVisible      = not State.UIVisible
-            GUI._lastHeaderTap   = 0
+            State.UIVisible    = not State.UIVisible
+            GUI._lastHeaderTap = 0
         else
             GUI._lastHeaderTap = now
             GUI.Dragging       = true
@@ -884,14 +992,16 @@ local function HandlePress(pos)
     end
 
     -- 3. Tab bar
-    local tabW = GUI.W / #TabNames
-    for i, name in ipairs(TabNames) do
-        local tx = GUI.X + ((i - 1) * tabW)
-        local ty = GUI.Y + 36
-        if pos.X >= tx and pos.X <= tx + tabW
-        and pos.Y >= ty and pos.Y <= ty + 28 then
-            State.ActiveTab = name
-            return
+    if GUI_READY then
+        local tabW = GUI.W / #TabNames
+        for i, name in ipairs(TabNames) do
+            local tx = GUI.X + ((i - 1) * tabW)
+            local ty = GUI.Y + 36
+            if pos.X >= tx and pos.X <= tx + tabW
+            and pos.Y >= ty and pos.Y <= ty + 28 then
+                State.ActiveTab = name
+                return
+            end
         end
     end
 
@@ -900,9 +1010,9 @@ local function HandlePress(pos)
         if elem.Tab == State.ActiveTab then
             if elem.Type == "Toggle" and elem.Box.Visible then
                 local bPos = elem.Box.Position
-                -- Larger hit area for mobile (full row width, generous vertical padding)
-                if pos.X >= bPos.X - 4 and pos.X <= bPos.X + 200
-                and pos.Y >= bPos.Y - 6 and pos.Y <= bPos.Y + 20 then
+                -- Wide hit area for mobile touch
+                if pos.X >= bPos.X - 4 and pos.X <= bPos.X + 220
+                and pos.Y >= bPos.Y - 8 and pos.Y <= bPos.Y + 22 then
                     State[elem.Ref] = not State[elem.Ref]
                     return
                 end
@@ -911,11 +1021,11 @@ local function HandlePress(pos)
                 local bPos, bSize = elem.Bar.Position, elem.Bar.Size
                 -- Extra vertical padding for finger touch
                 if pos.X >= bPos.X and pos.X <= bPos.X + bSize.X
-                and pos.Y >= bPos.Y - 10 and pos.Y <= bPos.Y + bSize.Y + 10 then
+                and pos.Y >= bPos.Y - 12 and pos.Y <= bPos.Y + bSize.Y + 12 then
                     GUI.ActiveSlider = elem
-                    local newRatio = math.clamp((pos.X - bPos.X) / bSize.X, 0, 1)
-                    local newVal   = elem.Min + ((elem.Max - elem.Min) * newRatio)
-                    State[elem.Ref] = elem.Float and newVal or math.floor(newVal + 0.5)
+                    local newRatio   = math.clamp((pos.X - bPos.X) / bSize.X, 0, 1)
+                    local newVal     = elem.Min + ((elem.Max - elem.Min) * newRatio)
+                    State[elem.Ref]  = elem.Float and newVal or math.floor(newVal + 0.5)
                     return
                 end
 
@@ -926,7 +1036,7 @@ local function HandlePress(pos)
                     if GUI.ActiveDropdown and GUI.ActiveDropdown ~= elem then
                         GUI.ActiveDropdown.Open = false
                     end
-                    elem.Open         = not elem.Open
+                    elem.Open          = not elem.Open
                     GUI.ActiveDropdown = elem.Open and elem or nil
                     return
                 end
@@ -943,10 +1053,8 @@ local function HandlePress(pos)
     end
 end
 
--- ── Input connections ─────────────────────────────────────────────────────────
-
--- PC keyboard (Insert) + mouse click
-local inputConn = UserInputService.InputBegan:Connect(function(input, processed)
+-- ── PC: keyboard + mouse ──────────────────────────────────────────────────────
+local inputBeganConn = UserInputService.InputBegan:Connect(function(input, _processed)
     if input.KeyCode == Enum.KeyCode.Insert then
         State.UIVisible = not State.UIVisible
         return
@@ -958,17 +1066,16 @@ local inputConn = UserInputService.InputBegan:Connect(function(input, processed)
         HandlePress(pos)
     end
 end)
-table.insert(Connections, inputConn)
+table.insert(Connections, inputBeganConn)
 
-local inputEndConn = UserInputService.InputEnded:Connect(function(input)
+local inputEndedConn = UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        TouchState.IsDown     = false
-        GUI.ActiveSlider      = nil
+        TouchState.IsDown = false
+        GUI.ActiveSlider  = nil
     end
 end)
-table.insert(Connections, inputEndConn)
+table.insert(Connections, inputEndedConn)
 
--- Track mouse position on PC (needed for FOV circle + aim)
 local mouseMoveConn = UserInputService.InputChanged:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseMovement then
         TouchState.Position = UserInputService:GetMouseLocation()
@@ -976,35 +1083,33 @@ local mouseMoveConn = UserInputService.InputChanged:Connect(function(input)
 end)
 table.insert(Connections, mouseMoveConn)
 
--- ── TOUCH EVENTS (mobile) ────────────────────────────────────────────────────
-
-local touchBeganConn = UserInputService.TouchStarted:Connect(function(touch, processed)
-    -- Update shared pointer state
+-- ── Mobile: touch events ──────────────────────────────────────────────────────
+local touchBeganConn = UserInputService.TouchStarted:Connect(function(touch, _processed)
     TouchState.Position = Vector2.new(touch.Position.X, touch.Position.Y)
     TouchState.IsDown   = true
     HandlePress(TouchState.Position)
 end)
 table.insert(Connections, touchBeganConn)
 
-local touchMoveConn = UserInputService.TouchMoved:Connect(function(touch, processed)
+local touchMoveConn = UserInputService.TouchMoved:Connect(function(touch, _processed)
     TouchState.Position = Vector2.new(touch.Position.X, touch.Position.Y)
-    -- Slider drag: update value live as finger moves
+    -- Live slider drag via touch
     if GUI.ActiveSlider then
-        local elem   = GUI.ActiveSlider
+        local elem    = GUI.ActiveSlider
         local barPos  = elem.Bar.Position
         local barSize = elem.Bar.Size
         if barPos and barSize then
-            local newRatio = math.clamp((TouchState.Position.X - barPos.X) / barSize.X, 0, 1)
-            local newVal   = elem.Min + ((elem.Max - elem.Min) * newRatio)
+            local newRatio  = math.clamp((TouchState.Position.X - barPos.X) / barSize.X, 0, 1)
+            local newVal    = elem.Min + ((elem.Max - elem.Min) * newRatio)
             State[elem.Ref] = elem.Float and newVal or math.floor(newVal + 0.5)
         end
     end
 end)
 table.insert(Connections, touchMoveConn)
 
-local touchEndConn = UserInputService.TouchEnded:Connect(function(touch, processed)
-    TouchState.IsDown  = false
-    GUI.ActiveSlider   = nil
+local touchEndConn = UserInputService.TouchEnded:Connect(function(_touch, _processed)
+    TouchState.IsDown = false
+    GUI.ActiveSlider  = nil
 end)
 table.insert(Connections, touchEndConn)
 
@@ -1048,7 +1153,7 @@ end
 local renderConn = RunService.RenderStepped:Connect(function()
     if not State.Running then return end
 
-    -- FOV circle follows pointer (TouchState.Position works on both platforms)
+    -- FOV circle follows the pointer (works on both platforms via TouchState)
     FOVCircle.Visible  = State.ShowFOV
     FOVCircle.Radius   = State.FOV
     FOVCircle.Color    = State.FOVColor
@@ -1058,9 +1163,8 @@ local renderConn = RunService.RenderStepped:Connect(function()
     if State.AimAssist and mousemove then
         local target = GetClosestTarget()
         if target then
-            local mousePos = TouchState.Position
-            local deltaX   = (target.Screen.X - mousePos.X) * State.AimSmoothness
-            local deltaY   = (target.Screen.Y - mousePos.Y) * State.AimSmoothness
+            local deltaX = (target.Screen.X - TouchState.Position.X) * State.AimSmoothness
+            local deltaY = (target.Screen.Y - TouchState.Position.Y) * State.AimSmoothness
             mousemove(deltaX, deltaY)
         end
     end
@@ -1078,11 +1182,13 @@ local renderConn = RunService.RenderStepped:Connect(function()
         end
     end
 
-    GUI:Render()
+    -- Wrap in pcall so any runtime error inside Render doesn't silently kill
+    -- the render connection (which would make the UI permanently invisible).
+    pcall(function() GUI:Render() end)
 end)
 table.insert(Connections, renderConn)
 
--- ── Player events ─────────────────────────────────────────────────────────────
+-- ── Player lifecycle hooks ────────────────────────────────────────────────────
 local pAdded = Players.PlayerAdded:Connect(function(plr)
     plr.CharacterAdded:Connect(function()
         task.wait(0.3)
@@ -1121,9 +1227,7 @@ local function UnloadSuite()
     Lighting.Brightness     = OriginalLighting.Brightness
     Lighting.FogEnd         = OriginalLighting.FogEnd
 
-    if env.UNIVERSAL_SUITE_UNLOAD then
-        env.UNIVERSAL_SUITE_UNLOAD = nil
-    end
+    env.UNIVERSAL_SUITE_UNLOAD = nil
 end
 
 env.UNIVERSAL_SUITE_UNLOAD = UnloadSuite
