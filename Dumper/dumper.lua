@@ -1,10 +1,9 @@
 --[=[
     Universal Exploitation & Visuals Suite
     UI Title: "matthews a hoe ass boy"
-    Architecture: Native ScreenGui (CoreGui / gethui) + Drawing Library Overlays (ESP & FOV)
+    Architecture: 100% Pure Native Roblox Instances (ScreenGui & BillboardGui)
     Theme: Sleek Red & Dark Carbon (#FF2B2B / #0F0F12 / #18191E)
-    Compatibility: Delta Mobile, PC Executors, etc.
-    Keybind: Insert (Toggle UI Visibility) / On-Screen Floating Button (Mobile)
+    Compatibility: Delta Mobile, Arceus X, Codex, PC (No Drawing Library Needed!)
 ]=]
 
 if not game:IsLoaded() then
@@ -17,12 +16,11 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local CoreGui = game:GetService("CoreGui")
-local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
--- Parent resolver for executors (CoreGui / gethui fallback)
+-- Parent resolver for executors (gethui / CoreGui / PlayerGui)
 local function GetUIParent()
     if typeof(gethui) == "function" then
         local success, res = pcall(gethui)
@@ -65,12 +63,10 @@ local State = {
 
     -- Visuals Settings
     ESPEnabled          = true,
-    BoxType             = "Full", -- "Full", "Corner", "3D"
+    BoxType             = "Full", -- "Full", "Corner"
     BoxFill             = true,
-    BoxFillGradient     = true,
-    BoxFillTransparency = 0.35,
+    BoxFillTransparency = 0.65,
     BoxColor1           = Color3.fromRGB(255, 43, 43),
-    BoxColor2           = Color3.fromRGB(40, 0, 0),
 
     Tracers      = true,
     TracerOrigin = "Bottom", -- "Bottom", "Mouse", "Center"
@@ -116,31 +112,55 @@ local OriginalLighting = {
     FogEnd         = Lighting.FogEnd,
 }
 
--- Touch / Mouse Tracking for Targeting and FOV
 local PointerPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
 -- ============================================================================
--- DRAWING OVERLAYS (ESP & FOV CIRCLE)
+-- ROOT GUI CONTAINER
 -- ============================================================================
 
-local RenderObjects = {}
-local function CreateDraw(objType, props)
-    local obj = Drawing.new(objType)
-    for k, v in pairs(props) do obj[k] = v end
-    table.insert(RenderObjects, obj)
-    return obj
-end
+local SuiteGui = Instance.new("ScreenGui")
+SuiteGui.Name = "UniversalSuiteGui"
+SuiteGui.ResetOnSpawn = false
+SuiteGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+SuiteGui.DisplayOrder = 999
+SuiteGui.Parent = GetUIParent()
 
--- FOV Circle
-local FOVCircle = CreateDraw("Circle", {
-    Visible      = false,
-    Radius       = State.FOV,
-    Color        = State.FOVColor,
-    Thickness    = 1.2,
-    Filled       = false,
-    Transparency = 0.8,
-    Position     = PointerPos,
-})
+-- Tracer & Visuals Overlay Layer (Renders under the UI Window)
+local OverlayLayer = Instance.new("Frame")
+OverlayLayer.Name = "OverlayLayer"
+OverlayLayer.Size = UDim2.new(1, 0, 1, 0)
+OverlayLayer.BackgroundTransparency = 1
+OverlayLayer.ZIndex = 1
+OverlayLayer.Parent = SuiteGui
+
+-- ============================================================================
+-- NATIVE FOV CIRCLE (100% Reliable GUI on Delta)
+-- ============================================================================
+
+local FOVFrame = Instance.new("Frame")
+FOVFrame.Name = "FOVFrame"
+FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVFrame.BackgroundTransparency = 1
+FOVFrame.Visible = State.ShowFOV
+FOVFrame.ZIndex = 2
+FOVFrame.Parent = OverlayLayer
+
+local FOVCorner = Instance.new("UICorner")
+FOVCorner.CornerRadius = UDim.new(1, 0)
+FOVCorner.Parent = FOVFrame
+
+local FOVStroke = Instance.new("UIStroke")
+FOVStroke.Thickness = 1.5
+FOVStroke.Color = State.FOVColor
+FOVStroke.Transparency = 0.2
+FOVStroke.Parent = FOVFrame
+
+local function UpdateFOV()
+    FOVFrame.Visible = State.ShowFOV
+    FOVFrame.Size = UDim2.new(0, State.FOV * 2, 0, State.FOV * 2)
+    FOVFrame.Position = UDim2.new(0, PointerPos.X, 0, PointerPos.Y)
+    FOVStroke.Color = State.FOVColor
+end
 
 -- ============================================================================
 -- AIM ENGINE & TARGETING
@@ -202,6 +222,136 @@ if hookMeta and getNamecall then
         end
         return origNamecall(self, ...)
     end))
+end
+
+-- ============================================================================
+-- NATIVE ESP ENGINE (BILLBOARDGUI + 2D SCREEN TRACERS)
+-- ============================================================================
+
+local PlayerESP = {}
+
+local function CleanupPlayerESP(plr)
+    if PlayerESP[plr] then
+        if PlayerESP[plr].Billboard then
+            pcall(function() PlayerESP[plr].Billboard:Destroy() end)
+        end
+        if PlayerESP[plr].TracerLine then
+            pcall(function() PlayerESP[plr].TracerLine:Destroy() end)
+        end
+        PlayerESP[plr] = nil
+    end
+end
+
+local function CreateNativeESP(plr)
+    local char = plr.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    -- 1. Native 3D Billboard ESP Box (Renders automatically in 3D world, 0 lag)
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ESP_Box"
+    bb.Adornee = root
+    bb.Size = UDim2.new(4.5, 0, 6, 0)
+    bb.AlwaysOnTop = true
+    bb.ResetOnSpawn = false
+    bb.Parent = SuiteGui
+
+    local boxFrame = Instance.new("Frame")
+    boxFrame.Name = "BoxFrame"
+    boxFrame.Size = UDim2.new(1, 0, 1, 0)
+    boxFrame.BackgroundColor3 = State.BoxColor1
+    boxFrame.BackgroundTransparency = State.BoxFill and State.BoxFillTransparency or 1
+    boxFrame.BorderSizePixel = 0
+    boxFrame.Parent = bb
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Name = "BoxStroke"
+    stroke.Color = State.BoxColor1
+    stroke.Thickness = 1.5
+    stroke.Parent = boxFrame
+
+    -- Name Tag above ESP Box
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(1, 0, 0, 14)
+    nameLabel.Position = UDim2.new(0, 0, 0, -18)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = plr.DisplayName
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextSize = 11
+    nameLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
+    nameLabel.Parent = boxFrame
+
+    local nameStroke = Instance.new("UIStroke")
+    nameStroke.Color = Color3.fromRGB(0, 0, 0)
+    nameStroke.Thickness = 1
+    nameStroke.Parent = nameLabel
+
+    -- 2. Native Screen Tracer Line
+    local tracerLine = Instance.new("Frame")
+    tracerLine.Name = "Tracer_" .. plr.Name
+    tracerLine.AnchorPoint = Vector2.new(0, 0.5)
+    tracerLine.BackgroundColor3 = State.TracerColor
+    tracerLine.BorderSizePixel = 0
+    tracerLine.ZIndex = 1
+    tracerLine.Visible = false
+    tracerLine.Parent = OverlayLayer
+
+    PlayerESP[plr] = {
+        Billboard = bb,
+        BoxFrame = boxFrame,
+        BoxStroke = stroke,
+        NameLabel = nameLabel,
+        TracerLine = tracerLine,
+    }
+end
+
+local function UpdateESP()
+    local vp = Camera.ViewportSize
+    local origin = Vector2.new(vp.X / 2, vp.Y)
+    if State.TracerOrigin == "Mouse" then
+        origin = PointerPos
+    elseif State.TracerOrigin == "Center" then
+        origin = Vector2.new(vp.X / 2, vp.Y / 2)
+    end
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and IsAlive(plr) and State.ESPEnabled then
+            if not PlayerESP[plr] or not PlayerESP[plr].Billboard.Parent then
+                CreateNativeESP(plr)
+            end
+
+            local esp = PlayerESP[plr]
+            if esp and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                local root = plr.Character.HumanoidRootPart
+                local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+
+                -- Update Box Appearance
+                esp.Billboard.Enabled = onScreen
+                esp.BoxStroke.Color = State.BoxColor1
+                esp.BoxFrame.BackgroundColor3 = State.BoxColor1
+                esp.BoxFrame.BackgroundTransparency = State.BoxFill and State.BoxFillTransparency or 1
+
+                -- Update Tracers (Math-based rotated GUI line)
+                if State.Tracers and onScreen then
+                    local target = Vector2.new(screenPos.X, screenPos.Y)
+                    local dist = (target - origin).Magnitude
+                    local angle = math.deg(math.atan2(target.Y - origin.Y, target.X - origin.X))
+
+                    esp.TracerLine.Visible = true
+                    esp.TracerLine.Size = UDim2.new(0, dist, 0, 1.5)
+                    esp.TracerLine.Position = UDim2.new(0, origin.X, 0, origin.Y)
+                    esp.TracerLine.Rotation = angle
+                    esp.TracerLine.BackgroundColor3 = State.TracerColor
+                else
+                    esp.TracerLine.Visible = false
+                end
+            end
+        else
+            CleanupPlayerESP(plr)
+        end
+    end
 end
 
 -- ============================================================================
@@ -287,7 +437,7 @@ local function ApplyChams(plr)
             hl.OutlineTransparency = 0
             hl.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
             hl.Adornee            = char
-            hl.Parent             = GetUIParent()
+            hl.Parent             = SuiteGui
             rec.highlight         = hl
         end
         rec.highlight.OutlineColor = State.ChamsColor1
@@ -298,199 +448,10 @@ local function ApplyChams(plr)
 end
 
 -- ============================================================================
--- ESP RENDER LOOP (BOXES, FILLS, TRACERS)
+-- NATIVE ROBLOX MENU WINDOW & CONTROLS
 -- ============================================================================
 
-local PlayerESP = {}
-
-local function CleanupPlayerESP(plr)
-    if PlayerESP[plr] then
-        for _, obj in pairs(PlayerESP[plr]) do
-            pcall(function() obj:Remove() end)
-        end
-        PlayerESP[plr] = nil
-    end
-end
-
-local function GetBoundingBox(char)
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return nil end
-    local cf, size = char:GetBoundingBox()
-
-    local c  = cf.Position
-    local hx = size.X / 2
-    local hy = size.Y / 2
-    local hz = size.Z / 2
-
-    local corners3D = {
-        c + Vector3.new(-hx,  hy, -hz),
-        c + Vector3.new( hx,  hy, -hz),
-        c + Vector3.new( hx, -hy, -hz),
-        c + Vector3.new(-hx, -hy, -hz),
-        c + Vector3.new(-hx,  hy,  hz),
-        c + Vector3.new( hx,  hy,  hz),
-        c + Vector3.new( hx, -hy,  hz),
-        c + Vector3.new(-hx, -hy,  hz),
-    }
-
-    local minX, minY =  math.huge,  math.huge
-    local maxX, maxY = -math.huge, -math.huge
-    local screenCorners = {}
-    local anyOnScreen   = false
-
-    for i, corner in ipairs(corners3D) do
-        local scr, onScr = Camera:WorldToViewportPoint(corner)
-        if onScr then anyOnScreen = true end
-        screenCorners[i] = Vector2.new(scr.X, scr.Y)
-        minX = math.min(minX, scr.X)
-        minY = math.min(minY, scr.Y)
-        maxX = math.max(maxX, scr.X)
-        maxY = math.max(maxY, scr.Y)
-    end
-
-    if not anyOnScreen then return nil end
-    return minX, minY, maxX, maxY, screenCorners
-end
-
-local function UpdateESP()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and IsAlive(plr) and State.ESPEnabled then
-            if not PlayerESP[plr] then
-                PlayerESP[plr] = {
-                    Box        = CreateDraw("Square", { Thickness = 1.2, Filled = false, Visible = false }),
-                    BoxOutline = CreateDraw("Square", { Thickness = 2.4, Color = Color3.new(0,0,0), Filled = false, Visible = false }),
-                    FillTop    = CreateDraw("Square", { Filled = true,  Thickness = 0, Transparency = 0.35, Visible = false }),
-                    FillBottom = CreateDraw("Square", { Filled = true,  Thickness = 0, Transparency = 0.35, Visible = false }),
-                    Tracer     = CreateDraw("Line",   { Thickness = 1.2, Visible = false }),
-                    C1  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C2  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C3  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C4  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C5  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C6  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C7  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    C8  = CreateDraw("Line", { Thickness = 1.4, Visible = false }),
-                    L3D = {}
-                }
-                for i = 1, 12 do
-                    PlayerESP[plr].L3D[i] = CreateDraw("Line", { Thickness = 1.2, Visible = false })
-                end
-            end
-
-            local esp = PlayerESP[plr]
-            local minX, minY, maxX, maxY, scrCorners = GetBoundingBox(plr.Character)
-
-            if minX and maxX and (maxX - minX > 2) and (maxY - minY > 2) then
-                local boxW    = maxX - minX
-                local boxH    = maxY - minY
-                local boxPos  = Vector2.new(minX, minY)
-                local boxSize = Vector2.new(boxW, boxH)
-
-                if State.BoxType == "Full" then
-                    esp.Box.Visible         = true
-                    esp.Box.Position        = boxPos
-                    esp.Box.Size            = boxSize
-                    esp.Box.Color           = State.BoxColor1
-                    esp.BoxOutline.Visible  = true
-                    esp.BoxOutline.Position = boxPos
-                    esp.BoxOutline.Size     = boxSize
-                else
-                    esp.Box.Visible        = false
-                    esp.BoxOutline.Visible = false
-                end
-
-                if State.BoxType == "Corner" then
-                    local cl = math.clamp(boxW / 4, 3, 25)
-                    local corners = {
-                        { esp.C1, esp.C2, boxPos,                  Vector2.new(boxPos.X + cl, boxPos.Y), Vector2.new(boxPos.X, boxPos.Y + cl) },
-                        { esp.C3, esp.C4, Vector2.new(maxX, minY), Vector2.new(maxX - cl, minY),         Vector2.new(maxX,     minY + cl)      },
-                        { esp.C5, esp.C6, Vector2.new(minX, maxY), Vector2.new(minX + cl, maxY),         Vector2.new(minX,     maxY - cl)      },
-                        { esp.C7, esp.C8, Vector2.new(maxX, maxY), Vector2.new(maxX - cl, maxY),         Vector2.new(maxX,     maxY - cl)      },
-                    }
-                    for _, c in ipairs(corners) do
-                        c[1].Visible = true; c[1].From = c[3]; c[1].To = c[4]; c[1].Color = State.BoxColor1
-                        c[2].Visible = true; c[2].From = c[3]; c[2].To = c[5]; c[2].Color = State.BoxColor1
-                    end
-                else
-                    for i = 1, 8 do esp["C"..i].Visible = false end
-                end
-
-                if State.BoxType == "3D" and scrCorners then
-                    local edges = {
-                        {1,2},{2,3},{3,4},{4,1},
-                        {5,6},{6,7},{7,8},{8,5},
-                        {1,5},{2,6},{3,7},{4,8},
-                    }
-                    for i, edge in ipairs(edges) do
-                        local l = esp.L3D[i]
-                        l.Visible = true
-                        l.From    = scrCorners[edge[1]]
-                        l.To      = scrCorners[edge[2]]
-                        l.Color   = State.BoxColor1
-                    end
-                else
-                    for i = 1, 12 do esp.L3D[i].Visible = false end
-                end
-
-                if State.BoxFill and State.BoxType ~= "3D" then
-                    local halfH = boxH / 2
-                    esp.FillTop.Visible       = true
-                    esp.FillTop.Position      = boxPos
-                    esp.FillTop.Size          = Vector2.new(boxW, halfH)
-                    esp.FillTop.Color         = State.BoxColor1
-                    esp.FillTop.Transparency  = State.BoxFillTransparency
-                    esp.FillBottom.Visible    = true
-                    esp.FillBottom.Position   = Vector2.new(minX, minY + halfH)
-                    esp.FillBottom.Size       = Vector2.new(boxW, halfH)
-                    esp.FillBottom.Color      = State.BoxFillGradient and State.BoxColor2 or State.BoxColor1
-                    esp.FillBottom.Transparency = State.BoxFillTransparency
-                else
-                    esp.FillTop.Visible    = false
-                    esp.FillBottom.Visible = false
-                end
-
-                if State.Tracers then
-                    local vp     = Camera.ViewportSize
-                    local origin = Vector2.new(vp.X / 2, vp.Y)
-                    if State.TracerOrigin == "Mouse" then
-                        origin = PointerPos
-                    elseif State.TracerOrigin == "Center" then
-                        origin = Vector2.new(vp.X / 2, vp.Y / 2)
-                    end
-                    esp.Tracer.Visible = true
-                    esp.Tracer.From    = origin
-                    esp.Tracer.To      = Vector2.new(minX + (boxW / 2), maxY)
-                    esp.Tracer.Color   = State.TracerColor
-                else
-                    esp.Tracer.Visible = false
-                end
-            else
-                esp.Box.Visible        = false
-                esp.BoxOutline.Visible = false
-                esp.FillTop.Visible    = false
-                esp.FillBottom.Visible = false
-                esp.Tracer.Visible     = false
-                for i = 1, 8  do esp["C"..i].Visible  = false end
-                for i = 1, 12 do esp.L3D[i].Visible   = false end
-            end
-        else
-            CleanupPlayerESP(plr)
-        end
-    end
-end
-
--- ============================================================================
--- NATIVE ROBLOX SCREENGUI (100% RELIABLE ON DELTA MOBILE & PC)
--- ============================================================================
-
-local SuiteGui = Instance.new("ScreenGui")
-SuiteGui.Name = "UniversalSuiteGui"
-SuiteGui.ResetOnSpawn = false
-SuiteGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-SuiteGui.DisplayOrder = 999
-SuiteGui.Parent = GetUIParent()
-
--- Mobile Floating Toggle Pill
+-- Mobile Floating Pill Button
 local FloatingPill = Instance.new("TextButton")
 FloatingPill.Name = "FloatingPill"
 FloatingPill.Size = UDim2.new(0, 48, 0, 48)
@@ -502,6 +463,7 @@ FloatingPill.TextColor3 = Color3.fromRGB(255, 43, 43)
 FloatingPill.Font = Enum.Font.GothamBold
 FloatingPill.Active = true
 FloatingPill.Draggable = true
+FloatingPill.ZIndex = 100
 FloatingPill.Parent = SuiteGui
 
 local PillCorner = Instance.new("UICorner")
@@ -522,7 +484,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
-MainFrame.ClipsDescendants = false
+MainFrame.ZIndex = 50
 MainFrame.Parent = SuiteGui
 
 local MainCorner = Instance.new("UICorner")
@@ -540,6 +502,7 @@ Header.Name = "Header"
 Header.Size = UDim2.new(1, 0, 0, 38)
 Header.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
 Header.BorderSizePixel = 0
+Header.ZIndex = 51
 Header.Parent = MainFrame
 
 local HeaderCorner = Instance.new("UICorner")
@@ -555,9 +518,9 @@ HeaderTitle.Font = Enum.Font.GothamBold
 HeaderTitle.TextSize = 14
 HeaderTitle.TextColor3 = Color3.fromRGB(240, 240, 245)
 HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
+HeaderTitle.ZIndex = 52
 HeaderTitle.Parent = Header
 
--- Close/Hide Button
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Size = UDim2.new(0, 28, 0, 28)
 CloseBtn.Position = UDim2.new(1, -34, 0, 5)
@@ -566,37 +529,39 @@ CloseBtn.Text = "✕"
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.TextSize = 13
 CloseBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
+CloseBtn.ZIndex = 52
 CloseBtn.Parent = Header
 
 local CloseCorner = Instance.new("UICorner")
 CloseCorner.CornerRadius = UDim.new(0, 6)
 CloseCorner.Parent = CloseBtn
 
--- Red Accent Line below Header
 local AccentLine = Instance.new("Frame")
 AccentLine.Size = UDim2.new(1, 0, 0, 2)
 AccentLine.Position = UDim2.new(0, 0, 0, 38)
 AccentLine.BackgroundColor3 = Color3.fromRGB(255, 43, 43)
 AccentLine.BorderSizePixel = 0
+AccentLine.ZIndex = 53
 AccentLine.Parent = MainFrame
 
--- Tab Navigation Bar
+-- Tab Navigation
 local TabBar = Instance.new("Frame")
 TabBar.Size = UDim2.new(1, 0, 0, 32)
 TabBar.Position = UDim2.new(0, 0, 0, 40)
 TabBar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 TabBar.BorderSizePixel = 0
+TabBar.ZIndex = 51
 TabBar.Parent = MainFrame
 
 local TabNames = { "Aim", "Visuals", "World", "Settings" }
 local TabButtons = {}
 local TabPages = {}
 
--- Container for Content
 local ContentArea = Instance.new("Frame")
 ContentArea.Size = UDim2.new(1, -20, 1, -84)
 ContentArea.Position = UDim2.new(0, 10, 0, 78)
 ContentArea.BackgroundTransparency = 1
+ContentArea.ZIndex = 51
 ContentArea.Parent = MainFrame
 
 for _, name in ipairs(TabNames) do
@@ -610,6 +575,7 @@ for _, name in ipairs(TabNames) do
     page.Visible = (name == State.ActiveTab)
     page.CanvasSize = UDim2.new(0, 0, 0, 0)
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.ZIndex = 52
     page.Parent = ContentArea
 
     local layout = Instance.new("UIListLayout")
@@ -653,6 +619,7 @@ for i, name in ipairs(TabNames) do
     btn.TextSize = 13
     btn.TextColor3 = (name == State.ActiveTab) and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(160, 160, 170)
     btn.BorderSizePixel = 0
+    btn.ZIndex = 52
     btn.Parent = TabBar
 
     local ind = Instance.new("Frame")
@@ -662,6 +629,7 @@ for i, name in ipairs(TabNames) do
     ind.BackgroundColor3 = Color3.fromRGB(255, 43, 43)
     ind.BorderSizePixel = 0
     ind.Visible = (name == State.ActiveTab)
+    ind.ZIndex = 53
     ind.Parent = btn
 
     btn.MouseButton1Click:Connect(function()
@@ -670,10 +638,7 @@ for i, name in ipairs(TabNames) do
     TabButtons[name] = btn
 end
 
--- ============================================================================
--- UI BUILDER CONTROLS
--- ============================================================================
-
+-- Controls
 local function AddToggle(tab, title, refKey)
     local page = TabPages[tab]
     if not page then return end
@@ -684,6 +649,7 @@ local function AddToggle(tab, title, refKey)
     row.BorderSizePixel = 0
     row.AutoButtonColor = false
     row.Text = ""
+    row.ZIndex = 53
     row.Parent = page
 
     local corner = Instance.new("UICorner")
@@ -699,6 +665,7 @@ local function AddToggle(tab, title, refKey)
     label.TextSize = 13
     label.TextColor3 = Color3.fromRGB(220, 220, 225)
     label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 54
     label.Parent = row
 
     local box = Instance.new("Frame")
@@ -706,6 +673,7 @@ local function AddToggle(tab, title, refKey)
     box.Position = UDim2.new(1, -32, 0.5, -10)
     box.BackgroundColor3 = Color3.fromRGB(32, 32, 38)
     box.BorderSizePixel = 0
+    box.ZIndex = 54
     box.Parent = row
 
     local boxCorner = Instance.new("UICorner")
@@ -718,6 +686,7 @@ local function AddToggle(tab, title, refKey)
     check.BackgroundColor3 = Color3.fromRGB(255, 43, 43)
     check.BorderSizePixel = 0
     check.Visible = State[refKey]
+    check.ZIndex = 55
     check.Parent = box
 
     local checkCorner = Instance.new("UICorner")
@@ -738,6 +707,7 @@ local function AddSlider(tab, title, refKey, min, max, isFloat)
     card.Size = UDim2.new(1, 0, 0, 46)
     card.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
     card.BorderSizePixel = 0
+    card.ZIndex = 53
     card.Parent = page
 
     local corner = Instance.new("UICorner")
@@ -753,6 +723,7 @@ local function AddSlider(tab, title, refKey, min, max, isFloat)
     label.TextSize = 13
     label.TextColor3 = Color3.fromRGB(220, 220, 225)
     label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 54
     label.Parent = card
 
     local valLabel = Instance.new("TextLabel")
@@ -764,6 +735,7 @@ local function AddSlider(tab, title, refKey, min, max, isFloat)
     valLabel.TextSize = 12
     valLabel.TextColor3 = Color3.fromRGB(180, 180, 190)
     valLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valLabel.ZIndex = 54
     valLabel.Parent = card
 
     local bar = Instance.new("TextButton")
@@ -773,6 +745,7 @@ local function AddSlider(tab, title, refKey, min, max, isFloat)
     bar.BorderSizePixel = 0
     bar.Text = ""
     bar.AutoButtonColor = false
+    bar.ZIndex = 54
     bar.Parent = card
 
     local barCorner = Instance.new("UICorner")
@@ -784,6 +757,7 @@ local function AddSlider(tab, title, refKey, min, max, isFloat)
     fill.Size = UDim2.new(initRatio, 0, 1, 0)
     fill.BackgroundColor3 = Color3.fromRGB(255, 43, 43)
     fill.BorderSizePixel = 0
+    fill.ZIndex = 55
     fill.Parent = bar
 
     local fillCorner = Instance.new("UICorner")
@@ -829,6 +803,7 @@ local function AddDropdown(tab, title, refKey, options)
     card.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
     card.BorderSizePixel = 0
     card.ClipsDescendants = true
+    card.ZIndex = 53
     card.Parent = page
 
     local corner = Instance.new("UICorner")
@@ -844,6 +819,7 @@ local function AddDropdown(tab, title, refKey, options)
     label.TextSize = 13
     label.TextColor3 = Color3.fromRGB(220, 220, 225)
     label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 54
     label.Parent = card
 
     local trigger = Instance.new("TextButton")
@@ -854,6 +830,7 @@ local function AddDropdown(tab, title, refKey, options)
     trigger.Font = Enum.Font.GothamMedium
     trigger.TextSize = 12
     trigger.TextColor3 = Color3.fromRGB(240, 240, 245)
+    trigger.ZIndex = 54
     trigger.Parent = card
 
     local trigCorner = Instance.new("UICorner")
@@ -866,6 +843,7 @@ local function AddDropdown(tab, title, refKey, options)
     optContainer.Size = UDim2.new(0, 140, 0, #options * rowH)
     optContainer.Position = UDim2.new(1, -150, 0, 36)
     optContainer.BackgroundTransparency = 1
+    optContainer.ZIndex = 55
     optContainer.Parent = card
 
     for idx, opt in ipairs(options) do
@@ -878,6 +856,7 @@ local function AddDropdown(tab, title, refKey, options)
         optBtn.TextSize = 12
         optBtn.TextColor3 = (State[refKey] == opt) and Color3.fromRGB(255, 43, 43) or Color3.fromRGB(180, 180, 190)
         optBtn.BorderSizePixel = 0
+        optBtn.ZIndex = 56
         optBtn.Parent = optContainer
 
         optBtn.MouseButton1Click:Connect(function()
@@ -915,6 +894,7 @@ local function AddButton(tab, title, callback)
     btn.TextSize = 13
     btn.TextColor3 = Color3.fromRGB(255, 60, 60)
     btn.BorderSizePixel = 0
+    btn.ZIndex = 53
     btn.Parent = page
 
     local corner = Instance.new("UICorner")
@@ -940,10 +920,8 @@ AddToggle("Aim", "Show FOV Circle", "ShowFOV")
 
 -- Visuals
 AddToggle("Visuals", "Box ESP Enabled", "ESPEnabled")
-AddDropdown("Visuals", "Box Styling", "BoxType", { "Full", "Corner", "3D" })
 AddToggle("Visuals", "Box Interior Fill", "BoxFill")
-AddToggle("Visuals", "Interior Gradient Mode", "BoxFillGradient")
-AddSlider("Visuals", "Fill Transparency", "BoxFillTransparency", 0.05, 0.9, true)
+AddSlider("Visuals", "Fill Transparency", "BoxFillTransparency", 0.1, 0.9, true)
 AddToggle("Visuals", "Player Tracers", "Tracers")
 AddDropdown("Visuals", "Tracer Origin", "TracerOrigin", { "Bottom", "Mouse", "Center" })
 AddToggle("Visuals", "Material Chams", "ChamsEnabled")
@@ -969,7 +947,7 @@ AddButton("Settings", "Unload Universal Suite", function()
     end
 end)
 
--- Visibility toggles (PC Keybind & Floating Button)
+-- UI Visibility Controls
 local function SetUIVisible(val)
     State.UIVisible = val
     MainFrame.Visible = val
@@ -983,6 +961,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     SetUIVisible(false)
 end)
 
+-- User Pointer & Input
 local inputKeyConn = UserInputService.InputBegan:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.Insert then
         SetUIVisible(not State.UIVisible)
@@ -1040,11 +1019,9 @@ end
 local renderConn = RunService.RenderStepped:Connect(function()
     if not State.Running then return end
 
-    -- FOV circle
-    FOVCircle.Visible  = State.ShowFOV
-    FOVCircle.Radius   = State.FOV
-    FOVCircle.Color    = State.FOVColor
-    FOVCircle.Position = PointerPos
+    UpdateFOV()
+    UpdateESP()
+    ApplyWorldMods()
 
     -- Camera smoothing aim assist (PC)
     if State.AimAssist and mousemove then
@@ -1055,9 +1032,6 @@ local renderConn = RunService.RenderStepped:Connect(function()
             mousemove(deltaX, deltaY)
         end
     end
-
-    UpdateESP()
-    ApplyWorldMods()
 
     if State.ChamsEnabled then
         for _, plr in ipairs(Players:GetPlayers()) do
@@ -1099,11 +1073,6 @@ local function UnloadSuite()
 
     for plr in pairs(ChamApplied) do RestoreChams(plr) end
     for plr in pairs(PlayerESP)   do CleanupPlayerESP(plr) end
-
-    for _, draw in ipairs(RenderObjects) do
-        pcall(function() draw:Remove() end)
-    end
-    table.clear(RenderObjects)
 
     if SuiteGui then
         pcall(function() SuiteGui:Destroy() end)
