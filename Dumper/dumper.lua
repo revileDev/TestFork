@@ -234,6 +234,7 @@ local Config = {
   AspectRatio = 1.0,
   ThirdPerson = false,
   ThirdPersonDist = 10,
+  ThirdPersonSeeArms = false,
   CrosshairEnabled = false,
   CrosshairStyle = "Cross",
   CrosshairColor = ColorPalette.Green,
@@ -243,6 +244,32 @@ local Config = {
   -- Utilities Tab
   AutoBhop = false,
   ShowTogglePill = true,
+
+  -- Rage Tab
+  AutoStrafe = false,
+  AutoStrafeMode = "Legit", -- "Legit" (keeps your W/S) | "Rage" (pure sideways)
+  Spinbot = false,
+  SpinbotSpeed = 10,
+  SpinbotMode = "Spin",
+  QuickStop = false,
+  EdgeJump = false,
+  AntiAimPitch = "Off",
+  ObstacleJump = false,
+  AlwaysSprint = false,
+  SilentWalk = false,
+  NoScopeSlow = false,
+  MinSpread = false,
+  AutoScope = false,
+  KeybindList = false,
+  SpectatorList = false,
+  ChatSpam = false,
+  ChatSpamText = "BloxStrikeSuite",
+  ChatSpamInterval = 4,
+  AutoWall = false,        -- scan for penetrable spots with an enemy behind them + redirect silent aim through them
+  AutoWallDots = true,
+  AutoWallColor = ColorPalette.Red,
+  MuzzleMarker = false,
+  MuzzleMarkerColor = ColorPalette.Red,
 
   -- Combat Tab (all active combat toggles start OFF by default)
   AimbotEnabled = false,
@@ -374,9 +401,14 @@ local function getParticipantArmor(p, char)
 end
 
 local function getParticipantDisplayName(p)
-  if p:IsA("Player") then return p.Name end
-  local dn = p:GetAttribute("DisplayName")
-  return (type(dn) == "string" and dn ~= "") and dn or p.Name
+  local nm
+  if p:IsA("Player") then nm = p.Name else
+    local dn = p:GetAttribute("DisplayName")
+    nm = (type(dn) == "string" and dn ~= "") and dn or p.Name
+  end
+  local alias = Config.StreamerAliasFn
+  if alias then nm = alias(p, nm) end
+  return nm
 end
 
 local function isEnemyParticipant(p)
@@ -1442,7 +1474,11 @@ local TrackedWorldItems = {}
 local BombPlantedAt = nil
 
 local function refreshWorldTagCache()
-  if not (Config.ESPEnabled and (Config.BombESP or Config.WeaponDropESP or Config.BuyStationESP)) and not Config.BombTimerHUD then
+  -- World ESP (bomb/dropped-weapon/buy-station) has its own dedicated toggles in the UI and must work
+  -- independently of "MASTER ESP" (which only controls player ESP) — it was previously ANDed with
+  -- Config.ESPEnabled here, which silently made Dropped Weapons ESP (and Bomb/Buy Station ESP) do
+  -- nothing at all whenever the player-ESP master toggle was off, with no indication why.
+  if not (Config.BombESP or Config.WeaponDropESP or Config.BuyStationESP) and not Config.BombTimerHUD then
     return
   end
   table.clear(TrackedWorldItems)
@@ -1539,32 +1575,53 @@ local function enforceNoFlash()
   if fcc and fcc:IsA("ColorCorrectionEffect") and fcc.Enabled then fcc.Enabled = false end
 end
 
+-- The game's SniperScope frame is Sharp/Blur image layers (their ImageTransparency is rewritten by the game EVERY
+-- frame) plus black Left/Right/Top/Bottom bar frames and nested Vignette images. The old version only touched the
+-- two direct children once per slow tick, so the game won the race instantly and the bars/vignette were never touched.
+-- This runs every render frame and fades every descendant while the scope is showing.
+local ScopeOrig = setmetatable({}, { __mode = "k" })
+local ScopeForced = false
 local function enforceScopeOverlay()
   local mg = PlayerGui:FindFirstChild("MainGui")
   local middle = mg and mg:FindFirstChild("Gameplay") and mg.Gameplay:FindFirstChild("Middle")
   local scope = middle and middle:FindFirstChild("SniperScope")
   if not scope then return end
-  for _, c in ipairs(scope:GetChildren()) do
-    if c:IsA("GuiObject") then
-      if Config.NoScopeOverlay then
-        if c:GetAttribute("_OrigImgT") == nil and (c:IsA("ImageLabel") or c:IsA("ImageButton")) then
-          c:SetAttribute("_OrigImgT", c.ImageTransparency)
-        end
-        if c:GetAttribute("_OrigBgT") == nil then c:SetAttribute("_OrigBgT", c.BackgroundTransparency) end
-        if c:IsA("ImageLabel") or c:IsA("ImageButton") then c.ImageTransparency = 1 end
-        c.BackgroundTransparency = 1
-      else
-        local oi = c:GetAttribute("_OrigImgT")
-        if oi ~= nil and (c:IsA("ImageLabel") or c:IsA("ImageButton")) then
-          c.ImageTransparency = oi; c:SetAttribute("_OrigImgT", nil)
-        end
-        local ob = c:GetAttribute("_OrigBgT")
-        if ob ~= nil then c.BackgroundTransparency = ob; c:SetAttribute("_OrigBgT", nil) end
+  local function restoreScope()
+    ScopeForced = false
+    for d, o in pairs(ScopeOrig) do
+      if d.Parent then
+        if o.bg ~= nil then d.BackgroundTransparency = o.bg end
+        if o.img ~= nil then d.ImageTransparency = o.img end
+        if o.stroke ~= nil then d.Transparency = o.stroke end
       end
     end
+    table.clear(ScopeOrig)
+  end
+  if Config.NoScopeOverlay then
+    if not scope.Visible then
+      if ScopeForced then restoreScope() end   -- scope closed: put everything back, stop walking the tree each frame
+      return
+    end
+    ScopeForced = true
+    for _, d in ipairs(scope:GetDescendants()) do
+      if d:IsA("GuiObject") then
+        local o = ScopeOrig[d]
+        if not o then
+          o = { bg = d.BackgroundTransparency }
+          if d:IsA("ImageLabel") or d:IsA("ImageButton") then o.img = d.ImageTransparency end
+          ScopeOrig[d] = o
+        end
+        if d.BackgroundTransparency ~= 1 then d.BackgroundTransparency = 1 end
+        if (d:IsA("ImageLabel") or d:IsA("ImageButton")) and d.ImageTransparency ~= 1 then d.ImageTransparency = 1 end
+      elseif d:IsA("UIStroke") then
+        if not ScopeOrig[d] then ScopeOrig[d] = { stroke = d.Transparency } end
+        if d.Transparency ~= 1 then d.Transparency = 1 end
+      end
+    end
+  elseif ScopeForced then
+    restoreScope()
   end
 end
-
 local TimeValues = { Dawn = 6.2, Noon = 12.5, Sunset = 18.2, Night = 1.0 }
 
 -- Each lighting feature saves the CURRENT value the moment it is switched on and restores exactly that when it is
@@ -1625,8 +1682,21 @@ end
 -- ============================================================================
 local OriginalVMPartProps = {}
 local OriginalCharPartLTM = {}
-local TPParts = { VM = {}, Body = {}, BuiltAt = 0, Char = nil }   -- cached part lists for third person (see stepThirdPersonVisuals)
+local TPParts = { VM = {}, Body = {}, BuiltAt = 0, Char = nil, VMFingerprint = "" }   -- cached part lists for third person (see stepThirdPersonVisuals)
 local WasThirdPerson = false
+
+-- Builds a cheap fingerprint of "which weapon viewmodel models are currently under the camera" (just
+-- their identities + count, not their full part lists) so a weapon swap can be detected on the VERY
+-- NEXT frame instead of waiting for the 0.4s periodic rebuild below.
+local function viewmodelFingerprint(cam)
+  local parts = {}
+  for _, child in ipairs(cam:GetChildren()) do
+    if child:IsA("Model") and child.Name ~= "ViewmodelStash" then
+      parts[#parts + 1] = tostring(child)
+    end
+  end
+  return table.concat(parts, "|")
+end
 
 local function restoreVMAndCharParts()
   TPParts.BuiltAt = 0
@@ -1690,8 +1760,39 @@ local function stepThirdPersonVisuals(cam)
     -- PERF: the part lists are cached and rebuilt every 0.4s (new viewmodels / respawns are picked up quickly);
     -- the per-frame work is just writing two properties. Before, GetDescendants() ran on the character and every
     -- viewmodel EVERY frame, which allocated large tables 60x per second.
+    --
+    -- BUT the 0.4s timer alone caused a real bug: dropping and picking up a weapon replaces the viewmodel
+    -- Model(s) under the camera immediately, not on a 0.4s schedule. If that swap happened mid-window, the
+    -- OLD (now-destroyed) parts stayed cached in OriginalVMPartProps with `d.Parent` nil (harmlessly skipped
+    -- below) — but the NEW weapon's parts were invisible to this loop until the next scheduled rebuild, so
+    -- they never got hidden/shown correctly and could end up stuck at whatever Transparency the game's own
+    -- draw/equip animation happened to leave them at when this code's "cache the original value on first
+    -- sight" logic (below) finally saw them — which, if that first sight landed mid-animation, silently
+    -- cached the WRONG "original" value. That's the random "weapon turns invisible" symptom; the character
+    -- body path above it has the identical pattern for arms/hands, matching "sometimes everything is invisible".
+    -- Fix: detect a viewmodel swap on the very next frame via a cheap identity fingerprint (not a timer), and
+    -- explicitly restore any now-orphaned cached parts before dropping them, instead of just abandoning them.
     local nowTP = os.clock()
-    if (nowTP - TPParts.BuiltAt) > 0.4 or TPParts.Char ~= myChar then
+    local vmFp = viewmodelFingerprint(cam)
+    if (nowTP - TPParts.BuiltAt) > 0.4 or TPParts.Char ~= myChar or vmFp ~= TPParts.VMFingerprint then
+      for _, d in ipairs(TPParts.VM) do
+        local props = OriginalVMPartProps[d]
+        if props and d.Parent then
+          d.Transparency = props.Transparency
+          d.LocalTransparencyModifier = props.LTM
+        end
+        OriginalVMPartProps[d] = nil
+      end
+      -- Same restore-before-drop treatment for the character body cache on a respawn (character identity
+      -- change) — otherwise a respawn mid-animation could leave the OLD character's arms stuck hidden with
+      -- no code left that will ever restore them (the new character's parts are different instances).
+      if TPParts.Char ~= myChar then
+        for _, d in ipairs(TPParts.Body) do
+          local ltm = OriginalCharPartLTM[d]
+          if ltm ~= nil and d.Parent then d.LocalTransparencyModifier = ltm end
+          OriginalCharPartLTM[d] = nil
+        end
+      end
       table.clear(TPParts.VM); table.clear(TPParts.Body)
       for _, child in ipairs(cam:GetChildren()) do
         if child:IsA("Model") and child.Name ~= "ViewmodelStash" then
@@ -1709,14 +1810,25 @@ local function stepThirdPersonVisuals(cam)
       end
       TPParts.Char = myChar
       TPParts.BuiltAt = nowTP
+      TPParts.VMFingerprint = vmFp
     end
+    local seeArms = Config.ThirdPersonSeeArms
     for _, d in ipairs(TPParts.VM) do
       if d.Parent then
-        if not OriginalVMPartProps[d] then
-          OriginalVMPartProps[d] = { Transparency = d.Transparency, LTM = d.LocalTransparencyModifier }
+        if seeArms then
+          local props = OriginalVMPartProps[d]
+          if props then
+            d.Transparency = props.Transparency
+            d.LocalTransparencyModifier = props.LTM
+            OriginalVMPartProps[d] = nil
+          end
+        else
+          if not OriginalVMPartProps[d] then
+            OriginalVMPartProps[d] = { Transparency = d.Transparency, LTM = d.LocalTransparencyModifier }
+          end
+          if d.Transparency ~= 1 then d.Transparency = 1 end
+          d.LocalTransparencyModifier = 1
         end
-        if d.Transparency ~= 1 then d.Transparency = 1 end
-        d.LocalTransparencyModifier = 1
       end
     end
     for _, d in ipairs(TPParts.Body) do
@@ -1923,6 +2035,311 @@ local function updateAutoBhop()
     end
   end
 end
+
+-- ============================================================================
+-- RAGE MODULES: autostrafe / spinbot / muzzle ground marker (own function scope: main chunk is at the 200-local limit)
+-- ============================================================================
+;(function()
+  local markerPart = nil
+  local markerErrShown = false
+  local rageRay = RaycastParams.new()
+  rageRay.FilterType = Enum.RaycastFilterType.Exclude
+  rageRay.IgnoreWater = true
+
+  -- SPINBOT + AUTOSTRAFE live in the game's own command stream. MovementV2 is server-authoritative: the client
+  -- samples one input command per tick ({Move, LookYaw, VerticalLook, Buttons}), predicts with it AND uploads it,
+  -- and the server's replicated character (what other players see) is built from the same LookYaw. Writing to a
+  -- Humanoid / the root part (what this used to do) is overwritten by the next predicted frame and never reaches
+  -- anyone else. Rewriting the input here changes the real simulated + replicated state. The camera is not part
+  -- of the command, so look/aim control is unaffected.
+  local lastRealYaw = nil
+  local obsRay = RaycastParams.new()
+  obsRay.FilterType = Enum.RaycastFilterType.Exclude
+  obsRay.IgnoreWater = true
+  local strafeSide = 1
+  local spinAngle = 0
+  local spinFlip = 1
+  local pitchFlip = 1
+  local function wrapPi(a)
+    return (a + math.pi) % (math.pi * 2) - math.pi
+  end
+
+  local airCap = (MV2Config and MV2Config.Default and MV2Config.Default.AirSpeedCap) or 2.25
+  local airAccel = (MV2Config and MV2Config.Default and MV2Config.Default.AirAccelerate) or 12
+
+  local function rewriteInput(input)
+    if type(input) ~= "table" or typeof(input.Move) ~= "Vector2" or type(input.LookYaw) ~= "number" then return input end
+    local doStrafe, doSpin = Config.AutoStrafe, Config.Spinbot
+    local doObs = Config.ObstacleJump
+    local realYaw = input.LookYaw
+    local yawDelta = lastRealYaw and wrapPi(realYaw - lastRealYaw) or 0
+    lastRealYaw = realYaw
+    local doSprint, doNoSlow, doSilent = Config.AlwaysSprint, Config.NoScopeSlow, Config.SilentWalk
+    local doStop = Config.QuickStop
+    local doEdge = Config.EdgeJump
+    local pitchMode = Config.AntiAimPitch
+    local doPitch = pitchMode ~= nil and pitchMode ~= "Off"
+    if not (doStrafe or doSpin or doObs or doSprint or doNoSlow or doSilent or doStop or doEdge or doPitch) then return input end
+    if LocalPlayer:GetAttribute("Dead") == true then return input end
+
+    local out = table.clone(input)
+    local mx, my = input.Move.X, input.Move.Y
+
+    local yaw = realYaw
+    if doSpin then
+      local mode = Config.SpinbotMode
+      if mode == "Jitter" then
+        spinFlip = -spinFlip
+        yaw = realYaw + spinFlip * math.rad(math.clamp(Config.SpinbotSpeed * 3, 40, 120))
+      elseif mode == "Backwards" then
+        yaw = realYaw + math.pi
+      elseif mode == "Sideways" then
+        yaw = realYaw + math.pi / 2
+      elseif mode == "Random" then
+        yaw = math.random() * math.pi * 2
+      else
+        spinAngle = (spinAngle + math.rad(Config.SpinbotSpeed * 2)) % (math.pi * 2)
+        yaw = spinAngle
+      end
+    end
+    local c, s = math.cos(yaw), math.sin(yaw)
+
+    local strafed = false
+    if doStrafe and RuntimeKinematics and (input.Move.X ~= 0 or input.Move.Y ~= 0) then
+      local char = getLocalCharacter()
+      local okG, onGround = pcall(RuntimeKinematics.isOnGround, char)
+      if okG and onGround == false and char then
+        -- choose which way to curve: Rage follows A/D (else the last side), Legit only follows your own mouse turn
+        local sign = nil
+        if yawDelta > 0.0008 then sign = 1 elseif yawDelta < -0.0008 then sign = -1 end   -- +yaw = turning left
+        if Config.AutoStrafeMode == "Rage" then
+          sign = -strafeSide   -- alternate every tick: fast left/right jitter that still builds speed, instead of curving
+        end
+        if sign then
+          strafeSide = sign
+          local okV, vel = pcall(RuntimeKinematics.getVelocity, char, char.PrimaryPart)
+          local hx, hz = 0, 0
+          if okV and typeof(vel) == "Vector3" then hx, hz = vel.X, vel.Z end
+          local speed = math.sqrt(hx * hx + hz * hz)
+          local dx, dz
+          if speed > 0.05 then dx, dz = hx / speed, hz / speed else
+            -- standing still in the air: head where the player is looking
+            dx, dz = -math.sin(realYaw), -math.cos(realYaw)
+          end
+          -- optimal air-strafe angle between velocity and wish direction (wish speed is capped by airCap)
+          local gain = airAccel * airCap / 60   -- speed the air-accelerate step can add this tick
+          local ratio = (airCap - gain) / math.max(speed, 0.001)
+          local theta = (ratio < 1) and math.acos(math.clamp(ratio, 0, 1)) or 0
+          theta = math.min(theta, math.rad(89)) * sign
+          local ct, st = math.cos(theta), math.sin(theta)
+          local wx = dx * ct + dz * st
+          local wz = -dx * st + dz * ct
+          -- invert the simulation's moveVectorToWorld for the yaw we are actually sending
+          mx = c * wx - s * wz
+          my = s * wx + c * wz
+          strafed = true
+        end
+      end
+    end
+
+    if doSpin and not strafed then
+      -- the simulation turns Move by LookYaw; counter-rotate so you still walk where you are actually steering
+      local d = realYaw - yaw
+      local u1, u2 = mx, -my
+      local cd, sd = math.cos(d), math.sin(d)
+      local n1 = cd * u1 - sd * u2
+      local n2 = sd * u1 + cd * u2
+      mx, my = n1, -n2
+    end
+
+    -- QUICK STOP: no movement keys held while sliding on the ground -> push the opposite way for a tick (counter-strafe)
+    -- so you stand still (accurate shot) almost instantly instead of coasting
+    local stopping = false
+    if doStop and not strafed and input.Move.X == 0 and input.Move.Y == 0 and RuntimeKinematics then
+      local char = getLocalCharacter()
+      local okG, onGround = pcall(RuntimeKinematics.isOnGround, char)
+      if okG and onGround == true and char then
+        local okV, vel = pcall(RuntimeKinematics.getVelocity, char, char.PrimaryPart)
+        if okV and typeof(vel) == "Vector3" then
+          local hs = math.sqrt(vel.X * vel.X + vel.Z * vel.Z)
+          if hs > 3 then
+            local k = math.min(1, hs / 8)
+            local wx, wz = -vel.X / hs * k, -vel.Z / hs * k
+            mx = c * wx - s * wz
+            my = s * wx + c * wz
+            stopping = true
+          end
+        end
+      end
+    end
+
+    local mag = math.sqrt(mx * mx + my * my)
+    if mag > 1 then mx, my = mx / mag, my / mag end
+    out.Move = Vector2.new(mx, my)
+    out.LookYaw = yaw
+
+    -- ANTI-AIM PITCH: the command's VerticalLook is the pitch other players see on your character. Real aim is left
+    -- alone whenever you are firing / aiming down sights so your own shots keep their true direction.
+    if doPitch and type(input.VerticalLook) == "number" then
+      local busy = false
+      local okF, f = pcall(function() return InputX.fire() or InputX.aim() end)
+      if okF and f then busy = true end
+      if not busy then
+        local v
+        if pitchMode == "Down" then v = -1.4
+        elseif pitchMode == "Up" then v = 1.4
+        elseif pitchMode == "Zero" then v = 0
+        elseif pitchMode == "Jitter" then pitchFlip = -pitchFlip; v = pitchFlip * 1.35
+        else v = (math.random() * 2 - 1) * 1.4 end
+        out.VerticalLook = v
+      end
+    end
+
+    local buttons = input.Buttons
+    if type(buttons) == "number" then
+      if doSprint and not stopping and mag > 0.1 and not bit32.btest(buttons, 2) and not bit32.btest(buttons, 4) then
+        buttons = bit32.bor(buttons, 16)
+      end
+      if doNoSlow then buttons = bit32.band(buttons, bit32.bnot(8)) end
+      -- Walk state is slower by design; never let it fight Always Sprint (that was cutting normal speed)
+      if doSilent and not doSprint and mag > 0.1 and RuntimeKinematics then
+        local okS, grounded = pcall(RuntimeKinematics.isOnGround, getLocalCharacter())
+        if okS and grounded == true then
+          buttons = bit32.bor(bit32.band(buttons, bit32.bnot(16)), 4)   -- Walk on, Sprint off
+        end
+      end
+      if doObs and mag > 0.1 and RuntimeKinematics then
+        local char = getLocalCharacter()
+        local root = char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
+        if root then
+          local okG, onGround = pcall(RuntimeKinematics.isOnGround, char)
+          if okG and onGround == true then
+            local wx = c * mx + s * my
+            local wz = -s * mx + c * my
+            local wl = math.sqrt(wx * wx + wz * wz)
+            if wl > 0.01 then
+              local dir = Vector3.new(wx / wl, 0, wz / wl) * 3.2
+              obsRay.FilterDescendantsInstances = { char, Workspace.CurrentCamera }
+              local p = root.Position
+              local low = Workspace:Raycast(p - Vector3.new(0, 2.3, 0), dir, obsRay)
+              if low and math.abs(low.Normal.Y) < 0.5 and low.Instance.CanCollide then
+                local high = Workspace:Raycast(p + Vector3.new(0, 0.6, 0), dir, obsRay)
+                if not high then buttons = bit32.bor(buttons, 1) end
+              end
+            end
+          end
+        end
+      end
+      -- EDGE JUMP: about to run off a real ledge (ground drops away ahead) -> jump so the momentum carries you across
+      if doEdge and mag > 0.1 and not bit32.btest(buttons, 1) and RuntimeKinematics then
+        local char = getLocalCharacter()
+        local root = char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
+        if root then
+          local okG, onGround = pcall(RuntimeKinematics.isOnGround, char)
+          if okG and onGround == true then
+            local wx = c * mx + s * my
+            local wz = -s * mx + c * my
+            local wl = math.sqrt(wx * wx + wz * wz)
+            if wl > 0.01 then
+              obsRay.FilterDescendantsInstances = { char, Workspace.CurrentCamera }
+              local ahead = root.Position + Vector3.new(wx / wl, 0, wz / wl) * 1.5
+              local down = Workspace:Raycast(ahead, Vector3.new(0, -9, 0), obsRay)
+              if not down or down.Position.Y < root.Position.Y - 7.5 then buttons = bit32.bor(buttons, 1) end
+            end
+          end
+        end
+      end
+      out.Buttons = buttons
+    end
+    return out
+  end
+  do
+    local okMod, CommandStream = pcall(function()
+      return require(ReplicatedStorage.MovementV2.Client.CommandStream)
+    end)
+    restoreIdentity()
+    if okMod and type(CommandStream) == "table" and type(CommandStream.sample) == "function" and typeof(hookfunction) == "function" then
+      if _G.__BSSRestoreSample then pcall(_G.__BSSRestoreSample); _G.__BSSRestoreSample = nil end
+      _G.__BSSGen = (_G.__BSSGen or 0) + 1
+      local myGen = _G.__BSSGen
+      local origSample
+      origSample = hookfunction(CommandStream.sample, function(self, input, ...)
+        if Unloaded or myGen ~= _G.__BSSGen then return origSample(self, input, ...) end
+        local prevId = typeof(getthreadidentity) == "function" and getthreadidentity() or nil
+        local okR, newInput = pcall(rewriteInput, input)
+        if prevId and typeof(setthreadidentity) == "function" then setthreadidentity(prevId) end
+        _G.__BSSHook = { calls = ((_G.__BSSHook and _G.__BSSHook.calls) or 0) + 1, ok = okR, out = okR and newInput or input, err = (not okR) and tostring(newInput) or nil }
+        return origSample(self, okR and newInput or input, ...)
+      end)
+      _G.__BSSRestoreSample = function()
+        if typeof(restorefunction) == "function" then pcall(restorefunction, CommandStream.sample) end
+      end
+    else
+      warn("[BloxStrikeSuite] spinbot/autostrafe: command stream hook unavailable")
+    end
+  end
+  local function hideMarker()
+    if markerPart then markerPart.Transparency = 1 end
+  end
+
+  local function stepMarker(cam)
+    if not Config.MuzzleMarker or LocalPlayer:GetAttribute("Dead") == true then hideMarker(); return end
+    local char = getLocalCharacter()
+    local filter = { cam }
+    if char then table.insert(filter, char) end
+    rageRay.FilterDescendantsInstances = filter
+    local res
+    for _ = 1, 8 do
+      res = Workspace:Raycast(cam.CFrame.Position, cam.CFrame.LookVector * 1000, rageRay)
+      if not res then break end
+      local h = res.Instance
+      if h.CanCollide == false and (h.Transparency >= 0.98 or h.Name:find("Zone")) then
+        table.insert(filter, h)
+        rageRay.FilterDescendantsInstances = filter
+      else
+        break
+      end
+    end
+    if not res then hideMarker(); return end
+    if not markerPart or not markerPart.Parent then
+      markerPart = Instance.new("Part")
+      markerPart.Name = "MuzzleMarker"
+      markerPart.Anchored = true
+      markerPart.CanCollide = false
+      markerPart.CanQuery = false
+      markerPart.CanTouch = false
+      markerPart.CastShadow = false
+      markerPart.Material = Enum.Material.Neon
+      markerPart.Size = Vector3.new(1.4, 0.05, 1.4)
+      markerPart.Parent = cam
+    end
+    markerPart.Color = Config.MuzzleMarkerColor
+    markerPart.Transparency = 0.15
+    local sz = math.max(1.4, (res.Position - cam.CFrame.Position).Magnitude * 0.03)
+    markerPart.Size = Vector3.new(sz, 0.05, sz)
+    local n = res.Normal
+    local up = n
+    local ref = math.abs(n.Y) > 0.95 and Vector3.new(1, 0, 0) or Vector3.new(0, 1, 0)
+    local right = ref:Cross(up).Unit
+    local fwd = right:Cross(up)
+    markerPart.CFrame = CFrame.fromMatrix(res.Position + n * 0.04, right, up, fwd)
+  end
+
+  local rageStepName = "BSS_RageStep_" .. tostring(os.clock()) .. tostring(math.random(1, 1000000))
+  RunService:BindToRenderStep(rageStepName, Enum.RenderPriority.Camera.Value + 6, function()
+    if Unloaded then
+      if markerPart then pcall(function() markerPart:Destroy() end); markerPart = nil end
+      pcall(function() RunService:UnbindFromRenderStep(rageStepName) end)
+      return
+    end
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+    if Config.MuzzleMarker or markerPart then
+      local okM, errM = pcall(stepMarker, cam)
+      if not okM and not markerErrShown then markerErrShown = true; warn("[BloxStrikeSuite] muzzle marker: " .. tostring(errM)) end
+    end
+  end)
+end)()
 
 -- ============================================================================
 -- FX MODULES: bullet tracers / grenade visualizer / graphics (lighting, weather, foliage sway, FPS boost)
@@ -3966,11 +4383,11 @@ uiFrame(Header, UDim2.new(1, 0, 0, 1), UDim2.new(0, 0, 1, -1), T.BORDER)
 makeDraggable(Header, Menu, MenuScale)
 uiLabel(Header, "BLOXSTRIKE", 16, T.TEXT, UDim2.fromOffset(14, 0), UDim2.fromOffset(92, HEADER_H))
 
-local Tabs = { "COMBAT", "ESP", "CHAMS", "WORLD", "VISUALS", "GRAPHICS", "UTILITIES" }
+local Tabs = { "COMBAT", "RAGE", "ESP", "CHAMS", "WORLD", "VISUALS", "GRAPHICS", "UTILITIES" }
 local TabButtons, TabPages, TabCols = {}, {}, {}
 local ActiveTab = Tabs[1]
 
-local tabHolder = uiFrame(Header, UDim2.fromOffset(528, HEADER_H), UDim2.fromOffset(106, 0))
+local tabHolder = uiFrame(Header, UDim2.fromOffset(540, HEADER_H), UDim2.fromOffset(106, 0))
 do
   local l = Instance.new("UIListLayout")
   l.FillDirection = Enum.FillDirection.Horizontal; l.Padding = UDim.new(0, 4)
@@ -4061,7 +4478,7 @@ for i, tabName in ipairs(Tabs) do
   TabPages[tabName] = page
   TabCols[tabName] = { Left = makeCol(page, false), Right = makeCol(page, true) }
 
-  local tBtn = uiButton(tabHolder, tabName, UDim2.fromOffset(72, 26), nil,
+  local tBtn = uiButton(tabHolder, tabName, UDim2.fromOffset(64, 26), nil,
     (i == 1) and T.CARD_ALT or T.SIDE, (i == 1) and T.ACCENT or T.BORDER, (i == 1) and T.TEXT or T.TEXT_DIM, 12)
   tBtn.Name = "Tab_" .. tabName
   tBtn.LayoutOrder = i
@@ -4476,9 +4893,6 @@ trackConn(HdrCases.Activated:Connect(function() openSkinStudio("CASES") end))
   addToggle(cmbR, "SILENT VIS CHECK", Config.SilentVisCheck, function(v) Config.SilentVisCheck = v end)
   addToggle(cmbR, "SILENT SMOKE CHECK", Config.SilentSmokeCheck, function(v) Config.SilentSmokeCheck = v end)
 
-  addSection(cmbR, "WALLBANG (PENETRATION)")
-  addCycle(cmbR, "WALLBANG MODE", { "Off", "Penetrable", "Full (All Walls)" }, 1, function(v) Config.WallbangMode = v end)
-
   addSection(cmbR, "TRIGGERBOT (AUTO SHOOT)")
   addToggle(cmbR, "ENABLE TRIGGERBOT", Config.TriggerbotEnabled, function(v) Config.TriggerbotEnabled = v end)
   addCycle(cmbR, "TRIGGER BIND", { "Always", "Hold Aim (any)", "Pad: L2", "Pad: L1", "Pad: R1", "Pad: X", "Pad: B", "Hold RMB", "Hold Alt", "Hold E" }, 1, function(v) Config.TriggerMode = v end, false, padDisplay)
@@ -4495,9 +4909,6 @@ trackConn(HdrCases.Activated:Connect(function() openSkinStudio("CASES") end))
     Config.RecoilControlPct = tonumber(v:match("%d+")) or 0
   end)
   addToggle(cmbR, "NO CAMERA KICK", Config.NoCameraKick, function(v) Config.NoCameraKick = v end)
-  addCycle(cmbR, "SPREAD REDUCTION", { "0%", "50%", "75%", "100%" }, 1, function(v)
-    Config.SpreadReductionPct = tonumber(v:match("%d+")) or 0
-  end)
   addToggle(cmbR, "AUTO RELOAD EMPTY", Config.AutoReload, function(v) Config.AutoReload = v end)
   addToggle(cmbR, "AUTO PISTOL (HOLD)", Config.AutoPistol, function(v) Config.AutoPistol = v end)
 end)()
@@ -4625,7 +5036,6 @@ local vsL, vsR = TabCols["VISUALS"].Left, TabCols["VISUALS"].Right
 addSection(vsL, "CLEAR VISION & LIGHTING")
 addToggle(vsL, "NO FLASHBANG", Config.NoFlash, function(v) Config.NoFlash = v; if v then enforceNoFlash() end end)
 addToggle(vsL, "NO SMOKE VOXELS", Config.NoSmoke, function(v) Config.NoSmoke = v; enforceNoSmokeAll() end)
-addToggle(vsL, "NO SCOPE VIGNETTE", Config.NoScopeOverlay, function(v) Config.NoScopeOverlay = v; enforceScopeOverlay() end)
 addToggle(vsL, "NO FOG / HAZE", Config.NoFog, function(v) Config.NoFog = v; applyLightingState() end)
 addToggle(vsL, "NO SHADOWS", Config.NoShadows, function(v) Config.NoShadows = v; applyLightingState() end)
 addToggle(vsL, "FULLBRIGHT", Config.Fullbright, function(v) Config.Fullbright = v; applyLightingState() end)
@@ -4649,28 +5059,67 @@ addCycle(vsR, "ASPECT VALUE", { "0.65", "0.75", "0.85", "1.00" }, 4, function(v)
     callRestored(CameraController.SetAspectRatio, Config.AspectRatio)
   end
 end)
-local _, setThirdPersonUI = addToggle(vsR, "THIRD PERSON [KEY: V]", Config.ThirdPerson, function(v)
-  Config.ThirdPerson = v; updateThirdPersonState(v)
-end)
-addCycle(vsR, "3RD PERSON DIST", { "6", "8", "10", "14", "18" }, 3, function(v) Config.ThirdPersonDist = tonumber(v) or 10 end)
 addToggle(vsR, "CUSTOM CROSSHAIR", Config.CrosshairEnabled, function(v) Config.CrosshairEnabled = v; syncCrosshairVisuals() end)
 addCycle(vsR, "CROSSHAIR STYLE", { "Cross", "Dot" }, 1, function(v) Config.CrosshairStyle = v; syncCrosshairVisuals() end)
 addCycle(vsR, "CROSSHAIR COLOR", ColorNames, 1, function(n) Config.CrosshairColor = ColorPalette[n]; syncCrosshairVisuals() end, true)
 addCycle(vsR, "CROSSHAIR SIZE", { "5px", "8px", "12px", "16px" }, 2, function(v) Config.CrosshairSize = tonumber(v:match("%d+")) or 8; syncCrosshairVisuals() end)
 addCycle(vsR, "CROSSHAIR GAP", { "2px", "4px", "6px", "10px" }, 2, function(v) Config.CrosshairGap = tonumber(v:match("%d+")) or 4; syncCrosshairVisuals() end)
 
--- TAB 5: UTILITIES
-local utL, utR = TabCols["UTILITIES"].Left, TabCols["UTILITIES"].Right
-addSection(utL, "MOVEMENT & ACTIONS")
-addToggle(utL, "AUTO BUNNY HOP (HOLD)", Config.AutoBhop, function(v)
+-- TAB: RAGE (new — holds bhop/third-person moved from their old tabs, plus new rage features)
+local ragL, ragR = TabCols["RAGE"].Left, TabCols["RAGE"].Right
+
+addSection(ragL, "MOVEMENT")
+addToggle(ragL, "AUTO BUNNY HOP (HOLD)", Config.AutoBhop, function(v)
   Config.AutoBhop = v
   if not v and LocalCharacterMod then callRestored(LocalCharacterMod.jump, false) end
 end)
-addAction(utL, "THIRD PERSON QUICK", "TOGGLE", Color3.fromRGB(0, 229, 255), function()
+addToggle(ragL, "AUTOSTRAFE", Config.AutoStrafe, function(v) Config.AutoStrafe = v end)
+addCycle(ragL, "AUTOSTRAFE MODE", { "Legit", "Rage" }, 1, function(v) Config.AutoStrafeMode = v end)
+addToggle(ragL, "AUTO JUMP OVER OBSTACLES", Config.ObstacleJump, function(v) Config.ObstacleJump = v end)
+addToggle(ragL, "ALWAYS SPRINT (WHILE MOVING)", Config.AlwaysSprint, function(v) Config.AlwaysSprint = v end)
+addToggle(ragL, "NO SCOPED MOVE SLOWDOWN", Config.NoScopeSlow, function(v) Config.NoScopeSlow = v end)
+addToggle(ragL, "SILENT WALK (NO FOOTSTEPS)", Config.SilentWalk, function(v) Config.SilentWalk = v end)
+
+addSection(ragL, "SNIPER")
+addToggle(ragL, "AUTO SCOPE (ENEMY IN VIEW)", Config.AutoScope, function(v) Config.AutoScope = v end)
+addToggle(ragL, "MIN SPREAD (NO MOVE INACCURACY)", Config.MinSpread, function(v) Config.MinSpread = v end)
+
+addSection(ragL, "VIEW")
+local _, setThirdPersonUI = addToggle(ragL, "THIRD PERSON [KEY: V]", Config.ThirdPerson, function(v)
+  Config.ThirdPerson = v; updateThirdPersonState(v)
+end)
+addCycle(ragL, "3RD PERSON DIST", { "6", "8", "10", "14", "18" }, 3, function(v) Config.ThirdPersonDist = tonumber(v) or 10 end)
+addToggle(ragL, "SEE ARMS/GUN IN 3RD PERSON", Config.ThirdPersonSeeArms, function(v) Config.ThirdPersonSeeArms = v end, { NoCount = true })
+addAction(ragL, "THIRD PERSON QUICK", "TOGGLE", Color3.fromRGB(0, 229, 255), function()
   Config.ThirdPerson = not Config.ThirdPerson
   setThirdPersonUI(Config.ThirdPerson)
   updateThirdPersonState(Config.ThirdPerson)
 end)
+addToggle(ragL, "NO SCOPE VIGNETTE", Config.NoScopeOverlay, function(v) Config.NoScopeOverlay = v; enforceScopeOverlay() end)
+
+addSection(ragR, "RAGE AIM")
+addToggle(ragR, "SPINBOT", Config.Spinbot, function(v) Config.Spinbot = v end)
+addCycle(ragR, "SPINBOT SPEED", { "Slow", "Medium", "Fast", "Insane" }, 2, function(v)
+  Config.SpinbotSpeed = ({ Slow = 4, Medium = 10, Fast = 20, Insane = 40 })[v] or 10
+end)
+addCycle(ragR, "SPINBOT MODE", { "Spin", "Jitter", "Backwards", "Sideways", "Random" }, 1, function(v) Config.SpinbotMode = v end)
+addCycle(ragR, "ANTI-AIM PITCH", { "Off", "Down", "Up", "Zero", "Jitter", "Random" }, 1, function(v) Config.AntiAimPitch = v end)
+addToggle(ragR, "QUICK STOP (COUNTER-STRAFE)", Config.QuickStop, function(v) Config.QuickStop = v end)
+addToggle(ragR, "EDGE JUMP (AUTO LEDGE JUMP)", Config.EdgeJump, function(v) Config.EdgeJump = v end)
+addToggle(ragR, "MUZZLE GROUND MARKER", Config.MuzzleMarker, function(v) Config.MuzzleMarker = v end)
+addCycle(ragR, "MUZZLE MARKER COLOR", ColorNames, 3, function(n) Config.MuzzleMarkerColor = ColorPalette[n] end, true)
+
+addSection(ragR, "WALLBANG & SPREAD")
+addCycle(ragR, "WALLBANG MODE", { "Off", "Penetrable", "Full (All Walls)" }, 1, function(v) Config.WallbangMode = v end)
+addCycle(ragR, "SPREAD REDUCTION", { "0%", "50%", "75%", "100%" }, 1, function(v)
+  Config.SpreadReductionPct = tonumber(v:match("%d+")) or 0
+end)
+addToggle(ragR, "AUTOWALL (PEN. POINT SCAN)", Config.AutoWall, function(v) Config.AutoWall = v end)
+addToggle(ragR, "AUTOWALL GLOW DOTS", Config.AutoWallDots, function(v) Config.AutoWallDots = v end, { NoCount = true })
+addCycle(ragR, "AUTOWALL DOT COLOR", ColorNames, 3, function(n) Config.AutoWallColor = ColorPalette[n] end, true)
+-- TAB 5: UTILITIES
+local utL, utR = TabCols["UTILITIES"].Left, TabCols["UTILITIES"].Right
+addSection(utL, "MOVEMENT & ACTIONS")
 addAction(utL, "CLEAR ACTIVE FLASH", "CLEAR", Color3.fromRGB(0, 230, 118), function()
   if FlashEffect and FlashEffect.CancelFlash then callRestored(FlashEffect.CancelFlash) end
 end)
@@ -4954,6 +5403,7 @@ local SuiteApi = nil
 function cleanup()
   if Unloaded then return end
   Unloaded = true
+  if _G.__BSSRestoreSample then pcall(_G.__BSSRestoreSample); _G.__BSSRestoreSample = nil end
   pcall(function() RunService:UnbindFromRenderStep(CAM_STEP_NAME) end)
   for _, c in ipairs(Connections) do pcall(function() c:Disconnect() end) end
   table.clear(Connections)
@@ -4998,6 +5448,1009 @@ function cleanup()
   end
   if _G.__BloxStrikeSuite == SuiteApi then _G.__BloxStrikeSuite = nil end
 end
+
+-- ===== GRENADE VISUALS: post-throw trail, in-air icons, smoke/fire radius circle, custom smoke/fire colour =====
+;(function()
+  Config.GrenadeTrails = false
+  Config.GrenadeTrailLife = 5
+  Config.GrenadeTrailColor = ColorPalette.Cyan
+  Config.GrenadeIcons = false
+  Config.GrenadeRadius = false
+  Config.SmokeColorOn = false
+  Config.SmokeColor = ColorPalette.Purple
+  Config.FireColorOn = false
+  Config.FireColor = ColorPalette.Cyan
+
+  local wr = TabCols["WORLD"].Right
+  addSection(wr, "THROWN GRENADES")
+  addToggle(wr, "GRENADE TRAIL (FULL ROUTE)", Config.GrenadeTrails, function(v) Config.GrenadeTrails = v end)
+  addCycle(wr, "TRAIL LIFETIME", { "3s", "5s", "8s", "12s" }, 2, function(v) Config.GrenadeTrailLife = tonumber(v:match("%d+")) or 5 end)
+  addCycle(wr, "TRAIL COLOR", ColorNames, 2, function(n) Config.GrenadeTrailColor = ColorPalette[n] end, true)
+  addToggle(wr, "IN-AIR GRENADE ICONS", Config.GrenadeIcons, function(v) Config.GrenadeIcons = v end)
+  addToggle(wr, "SMOKE / FIRE RADIUS CIRCLE", Config.GrenadeRadius, function(v) Config.GrenadeRadius = v end)
+  addToggle(wr, "CUSTOM SMOKE COLOR", Config.SmokeColorOn, function(v) Config.SmokeColorOn = v end)
+  addCycle(wr, "SMOKE COLOR", ColorNames, 5, function(n) Config.SmokeColor = ColorPalette[n] end, true)
+  addToggle(wr, "CUSTOM MOLOTOV FIRE COLOR", Config.FireColorOn, function(v) Config.FireColorOn = v end)
+  addCycle(wr, "FIRE COLOR", ColorNames, 2, function(n) Config.FireColor = ColorPalette[n] end, true)
+
+  local Grenades = {}      -- [model] = { host, trail, gui }
+  local IconCache = {}
+  local Discs = {}         -- [folder] = part
+  local Colored = setmetatable({}, { __mode = "k" })
+  local weaponsDb = ReplicatedStorage:FindFirstChild("Database") and ReplicatedStorage.Database:FindFirstChild("Custom")
+    and ReplicatedStorage.Database.Custom:FindFirstChild("Weapons")
+
+  local function iconFor(name)
+    if IconCache[name] ~= nil then return IconCache[name] end
+    local img = false
+    local m = weaponsDb and weaponsDb:FindFirstChild(name)
+    local data = m and safeRequire(m)
+    if type(data) == "table" and type(data.Icon) == "string" then img = data.Icon end
+    IconCache[name] = img
+    return img
+  end
+
+  local function makeHost(model, name)
+    local host = Instance.new("Part")
+    host.Name = "GrenadeFxHost"; host.Anchored = true; host.CanCollide = false; host.CanQuery = false; host.CanTouch = false
+    host.CastShadow = false; host.Transparency = 1; host.Size = Vector3.new(0.2, 0.2, 0.2)
+    host.CFrame = model:GetPivot()
+    host.Parent = Workspace.CurrentCamera
+    local a0 = Instance.new("Attachment", host); a0.Position = Vector3.new(0, 0.08, 0)
+    local a1 = Instance.new("Attachment", host); a1.Position = Vector3.new(0, -0.08, 0)
+    local trail = Instance.new("Trail", host)
+    trail.Attachment0 = a0; trail.Attachment1 = a1
+    trail.Lifetime = Config.GrenadeTrailLife; trail.MinLength = 0.02; trail.FaceCamera = true
+    trail.LightEmission = 1; trail.Color = ColorSequence.new(Config.GrenadeTrailColor)
+    trail.Transparency = NumberSequence.new(0.1)
+    trail.WidthScale = NumberSequence.new(1.4)
+    trail.Enabled = Config.GrenadeTrails
+    local gui = Instance.new("BillboardGui", host)
+    gui.Size = UDim2.fromOffset(34, 34); gui.AlwaysOnTop = true; gui.Enabled = Config.GrenadeIcons
+    local icon = iconFor(name)
+    if icon then
+      local il = Instance.new("ImageLabel", gui)
+      il.BackgroundTransparency = 1; il.Size = UDim2.fromScale(1, 1); il.Image = icon
+    else
+      local tl = Instance.new("TextLabel", gui)
+      tl.BackgroundTransparency = 1; tl.Size = UDim2.fromScale(1, 1); tl.Text = name; tl.Font = T.FONT
+      tl.TextSize = 12; tl.TextColor3 = T.TEXT; tl.TextStrokeTransparency = 0.4
+    end
+    return { host = host, trail = trail, gui = gui }
+  end
+
+  local function recolorEmitters(folder, color, darker)
+    for _, d in ipairs(folder:GetDescendants()) do
+      if d:IsA("ParticleEmitter") and Colored[d] ~= color then
+        Colored[d] = color
+        local c = color
+        if darker and d.Parent and d.Parent.Name == "OuterFireVoxel" then c = color:Lerp(Color3.new(0, 0, 0), 0.35) end
+        d.Color = ColorSequence.new(c)
+      end
+    end
+  end
+
+  local function updateDisc(folder, isFire)
+    local sumX, sumZ, n, minY = 0, 0, 0, math.huge
+    local parts = {}
+    for _, p in ipairs(folder:GetChildren()) do
+      if p:IsA("BasePart") then
+        local pos = p.Position
+        sumX += pos.X; sumZ += pos.Z; n += 1
+        if pos.Y < minY then minY = pos.Y end
+        table.insert(parts, p)
+      end
+    end
+    if n == 0 then return end
+    local cx, cz = sumX / n, sumZ / n
+    local maxR = 0
+    for _, p in ipairs(parts) do
+      local d = math.sqrt((p.Position.X - cx) ^ 2 + (p.Position.Z - cz) ^ 2) + math.max(p.Size.X, p.Size.Z) * 0.5
+      if d > maxR then maxR = d end
+    end
+    local disc = Discs[folder]
+    if not disc or not disc.Parent then
+      disc = Instance.new("Part")
+      disc.Name = "GrenadeRadiusDisc"; disc.Shape = Enum.PartType.Cylinder; disc.Anchored = true
+      disc.CanCollide = false; disc.CanQuery = false; disc.CanTouch = false; disc.CastShadow = false
+      disc.Material = Enum.Material.Neon; disc.Transparency = 0.72
+      disc.Parent = Workspace.CurrentCamera
+      Discs[folder] = disc
+    end
+    disc.Color = isFire and Color3.fromRGB(255, 140, 40) or Color3.fromRGB(235, 235, 245)
+    disc.Size = Vector3.new(0.06, maxR * 2, maxR * 2)
+    disc.CFrame = CFrame.new(cx, minY - 0.1, cz) * CFrame.Angles(0, 0, math.pi / 2)
+  end
+
+  local acc = 0
+  trackConn(RunService.RenderStepped:Connect(function(dt)
+    if Unloaded then return end
+    -- follow the grenades every frame (the game moves the model every render step)
+    for model, g in pairs(Grenades) do
+      if model.Parent then
+        g.host.CFrame = model:GetPivot()
+        g.trail.Enabled = Config.GrenadeTrails
+        g.gui.Enabled = Config.GrenadeIcons
+        g.trail.Color = ColorSequence.new(Config.GrenadeTrailColor)
+      else
+        g.trail.Enabled = false
+        g.gui.Enabled = false
+        Grenades[model] = nil
+        game:GetService("Debris"):AddItem(g.host, Config.GrenadeTrailLife + 1)
+      end
+    end
+    acc += dt
+    if acc < 0.25 then return end
+    acc = 0
+
+    if Config.GrenadeTrails or Config.GrenadeIcons then
+      for _, m in ipairs(CollectionService:GetTagged("Grenade")) do
+        if not Grenades[m] and m:IsDescendantOf(Workspace) and m:GetAttribute("SimulationFinished") ~= true then
+          local g = makeHost(m, tostring(m:GetAttribute("GrenadeName") or "Grenade"))
+          g.trail.Lifetime = Config.GrenadeTrailLife
+          Grenades[m] = g
+        end
+      end
+    end
+
+    local debris = Workspace:FindFirstChild("Debris")
+    local seen = {}
+    if debris and (Config.GrenadeRadius or Config.SmokeColorOn or Config.FireColorOn) then
+      for _, f in ipairs(debris:GetChildren()) do
+        local isSmoke = string.sub(f.Name, 1, 11) == "VoxelSmoke_"
+        local isFire = string.sub(f.Name, 1, 10) == "VoxelFire_"
+        if isSmoke or isFire then
+          seen[f] = true
+          if Config.GrenadeRadius then updateDisc(f, isFire) end
+          if isSmoke and Config.SmokeColorOn then recolorEmitters(f, Config.SmokeColor, false) end
+          if isFire and Config.FireColorOn then recolorEmitters(f, Config.FireColor, true) end
+        end
+      end
+    end
+    for f, disc in pairs(Discs) do
+      if not seen[f] or not f.Parent or not Config.GrenadeRadius then
+        disc:Destroy(); Discs[f] = nil
+      end
+    end
+  end))
+
+  table.insert(Connections, { Disconnect = function()
+    for _, g in pairs(Grenades) do pcall(function() g.host:Destroy() end) end
+    for _, d in pairs(Discs) do pcall(function() d:Destroy() end) end
+  end })
+end)()
+
+-- ===== INSTANT EQUIP =====
+-- The weapon-switch delay is client-gated by WeaponTimings (fire lockout + pull-out fraction) and by the length of the
+-- viewmodel's "Equip" animation. Both are shortened here; the server may still apply its own equip lockout.
+;(function()
+  Config.InstantEquip = false
+  local timings = safeRequire(CommonFolder and CommonFolder:FindFirstChild("WeaponTimings"))
+  local InventoryController = safeRequire(ControllersFolder and ControllersFolder:FindFirstChild("InventoryController"))
+  local FAST = { EQUIP_ACTION_LOCKOUT = 0, MELEE_EQUIP_LOCKOUT = 0.05, EQUIP_PULLOUT_FRACTION = 0.02, DEFAULT_EQUIP_PULLOUT = 0.02 }
+  local mutable = nil
+  local WeaponMod = safeRequire(ReplicatedStorage:FindFirstChild("Components") and ReplicatedStorage.Components:FindFirstChild("Weapon"))
+
+  -- WeaponTimings is table.freeze'd and the Weapon component keeps it in an upvalue, so it can't be edited in place.
+  -- Swap that upvalue for an unfrozen clone once; the original (still frozen) table is kept as the source of truth.
+  local function install()
+    if mutable then return true end
+    if type(timings) ~= "table" or type(WeaponMod) ~= "table" then return false end
+    local getups = (debug and debug.getupvalues) or getupvalues
+    local setup = (debug and debug.setupvalue) or setupvalue
+    if type(getups) ~= "function" or type(setup) ~= "function" then return false end
+    local function scan(visit)
+      for _, fn in pairs(WeaponMod) do
+        if type(fn) == "function" and islclosure(fn) then
+          for i, v in pairs(getups(fn)) do
+            if type(v) == "table" and rawget(v, "EQUIP_ACTION_LOCKOUT") ~= nil and rawget(v, "BURST_SHOT_COUNT") ~= nil then
+              visit(fn, i, v)
+            end
+          end
+        end
+      end
+    end
+    scan(function(_, _, v)   -- an unfrozen copy left by a previous load of this script
+      if v ~= timings and not table.isfrozen(v) then mutable = mutable or v end
+    end)
+    mutable = mutable or table.clone(timings)
+    scan(function(fn, i, v)
+      if v == timings then pcall(setup, fn, i, mutable) end
+    end)
+    return mutable ~= nil
+  end
+
+  local function apply(on)
+    if on then
+      if not install() then warn("[BloxStrikeSuite] instant equip: could not reach WeaponTimings"); return end
+      for k, v in pairs(FAST) do mutable[k] = v end
+    elseif mutable then
+      for k in pairs(FAST) do mutable[k] = timings[k] end
+      -- put the game's own (frozen) table back into every Weapon function so nothing of ours stays wired in
+      local getups = (debug and debug.getupvalues) or getupvalues
+      local setup = (debug and debug.setupvalue) or setupvalue
+      for _, fn in pairs(WeaponMod) do
+        if type(fn) == "function" and islclosure(fn) then
+          for i, v in pairs(getups(fn)) do
+            if v == mutable then pcall(setup, fn, i, timings) end
+          end
+        end
+      end
+      mutable = nil
+    end
+  end
+  addSection(TabCols["UTILITIES"].Left, "WEAPON")
+  addToggle(TabCols["UTILITIES"].Left, "INSTANT EQUIP", Config.InstantEquip, function(v)
+    Config.InstantEquip = v
+  end)
+
+  local sped = setmetatable({}, { __mode = "k" })
+  local lastApplied = false
+  local checkedStale = false
+  trackConn(RunService.RenderStepped:Connect(function()
+    if Unloaded then return end
+    if Config.InstantEquip ~= lastApplied then
+      lastApplied = Config.InstantEquip
+      apply(lastApplied)
+    elseif not lastApplied and not mutable and not checkedStale then
+      checkedStale = true
+      -- a clone left in the game's functions by a previous load of this script: put the original back
+      install(); apply(false)
+    end
+    if not Config.InstantEquip or not InventoryController then return end
+    local ok, eq = pcall(InventoryController.peekCurrentEquippedForMovement)
+    if not ok or type(eq) ~= "table" or type(eq.WeaponEquippedTick) ~= "number" then return end
+    if tick() - eq.WeaponEquippedTick > 1.4 then return end
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+    for _, m in ipairs(cam:GetChildren()) do
+      if m:IsA("Model") then
+        local animator = m:FindFirstChildWhichIsA("Animator", true)
+        if animator then
+          for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+            if not sped[tr] and tr.Animation and string.find(string.lower(tr.Animation.Name), "equip") then
+              sped[tr] = true
+              tr:AdjustSpeed(40)
+            end
+          end
+        end
+      end
+    end
+  end))
+  table.insert(Connections, { Disconnect = function() apply(false) end })
+end)()
+
+-- ===== AUTOBUY (RAGE tab): buys a configured loadout at the start of every buy period =====
+;(function()
+  Config.AutoBuy = false
+  Config.AutoBuyPrimary = "Auto Rifle"
+  Config.AutoBuySecondary = "None"
+  Config.AutoBuyArmor = "Kevlar + Helmet"
+  Config.AutoBuyKit = true
+  Config.AutoBuyFlash = 1
+  Config.AutoBuySmoke = true
+  Config.AutoBuyHE = false
+  Config.AutoBuyFire = true
+  Config.AutoBuyDecoy = false
+
+  local rr = TabCols["RAGE"].Right
+  addSection(rr, "AUTOBUY")
+  addToggle(rr, "AUTOBUY (EVERY BUY PERIOD)", Config.AutoBuy, function(v) Config.AutoBuy = v end)
+  addCycle(rr, "PRIMARY", { "None", "Auto Rifle", "AWP", "SSG 08", "AK-47", "M4A4", "M4A1-S", "Galil AR", "FAMAS", "SG 553", "AUG", "P90",
+    "MP9", "MAC-10", "Negev", "Nova", "XM1014", "MAG-7", "Sawed-Off" }, 2, function(v) Config.AutoBuyPrimary = v end)
+  addCycle(rr, "SECONDARY", { "None", "Desert Eagle", "P250", "Five-SeveN", "Tec-9", "Dual Berettas", "R8 Revolver" }, 1,
+    function(v) Config.AutoBuySecondary = v end)
+  addCycle(rr, "ARMOR", { "None", "Kevlar", "Kevlar + Helmet" }, 3, function(v) Config.AutoBuyArmor = v end)
+  addToggle(rr, "DEFUSE KIT (CT)", Config.AutoBuyKit, function(v) Config.AutoBuyKit = v end)
+  addCycle(rr, "FLASHBANGS", { "0", "1", "2" }, 2, function(v) Config.AutoBuyFlash = tonumber(v) or 0 end)
+  addToggle(rr, "SMOKE GRENADE", Config.AutoBuySmoke, function(v) Config.AutoBuySmoke = v end)
+  addToggle(rr, "HE GRENADE", Config.AutoBuyHE, function(v) Config.AutoBuyHE = v end)
+  addToggle(rr, "MOLOTOV / INCENDIARY", Config.AutoBuyFire, function(v) Config.AutoBuyFire = v end)
+  addToggle(rr, "DECOY", Config.AutoBuyDecoy, function(v) Config.AutoBuyDecoy = v end)
+
+  local InventoryController = safeRequire(ControllersFolder and ControllersFolder:FindFirstChild("InventoryController"))
+  local weaponsDb = ReplicatedStorage:FindFirstChild("Database") and ReplicatedStorage.Database:FindFirstChild("Custom")
+    and ReplicatedStorage.Database.Custom:FindFirstChild("Weapons")
+  local COST, WTEAM = {}, {}
+  if weaponsDb then
+    for _, m in ipairs(weaponsDb:GetChildren()) do
+      local d = safeRequire(m)
+      if type(d) == "table" and d.Cost then COST[m.Name] = d.Cost; WTEAM[m.Name] = d.Team end
+    end
+  end
+  local EQ_COST = { ["Kevlar"] = 650, ["Kevlar + Helmet"] = 1000, ["Defuse Kit"] = 400 }
+
+  local function ownedNames()
+    local owned = {}
+    if InventoryController and InventoryController.getCurrentInventory then
+      local ok, inv = pcall(InventoryController.getCurrentInventory)
+      if ok and type(inv) == "table" then
+        for _, slot in pairs(inv) do
+          if type(slot) == "table" and type(slot._items) == "table" then
+            for _, it in pairs(slot._items) do
+              if type(it) == "table" and it.Name then owned[it.Name] = (owned[it.Name] or 0) + 1 end
+            end
+          end
+        end
+      end
+    end
+    return owned
+  end
+
+  local function teamOk(name, team)
+    local t = WTEAM[name]
+    return t == nil or t == "Both" or t == team
+  end
+
+  -- returns the ordered purchase list [{name, equipment}] for the current team
+  local AutoBuy = {}
+  function AutoBuy.plan()
+    local team = LocalPlayer:GetAttribute("Team")
+    local list = {}
+    local primary = Config.AutoBuyPrimary
+    if primary == "Auto Rifle" then primary = (team == "Terrorists") and "AK-47" or "M4A4" end
+    if primary ~= "None" and teamOk(primary, team) then table.insert(list, { primary, false }) end
+    local armor = Config.AutoBuyArmor
+    if armor ~= "None" then table.insert(list, { armor, true }) end
+    if Config.AutoBuySecondary ~= "None" and teamOk(Config.AutoBuySecondary, team) then table.insert(list, { Config.AutoBuySecondary, false }) end
+    local flashNeeded = (tonumber(Config.AutoBuyFlash) or 0) - (ownedNames()["Flashbang"] or 0)
+    for _ = 1, math.max(0, flashNeeded) do table.insert(list, { "Flashbang", false }) end
+    if Config.AutoBuySmoke and teamOk("Smoke Grenade", team) then table.insert(list, { "Smoke Grenade", false }) end
+    if Config.AutoBuyHE then table.insert(list, { "HE Grenade", false }) end
+    if Config.AutoBuyFire then table.insert(list, { team == "Terrorists" and "Molotov" or "Incendiary Grenade", false }) end
+    if Config.AutoBuyDecoy then table.insert(list, { "Decoy Grenade", false }) end
+    if Config.AutoBuyKit and team == "Counter-Terrorists" then table.insert(list, { "Defuse Kit", true }) end
+    return list
+  end
+
+  -- cheaper stand-ins when the chosen primary is out of budget
+  local FALLBACK = {
+    Terrorists = { "AK-47", "Galil AR", "MAC-10", "Nova", "Sawed-Off" },
+    ["Counter-Terrorists"] = { "M4A4", "FAMAS", "MP9", "Nova", "MAG-7" },
+  }
+  local PRIMARY_SET = {}
+  for _, n in ipairs({ "AK-47", "M4A4", "M4A1-S", "AWP", "SSG 08", "Galil AR", "FAMAS", "AUG", "SG 553", "MP9", "MAC-10",
+    "Negev", "Nova", "XM1014", "MAG-7", "Sawed-Off", "P90", "MP7", "MP5-SD", "UMP-45", "PP-Bizon", "SCAR-20", "G3SG1" }) do PRIMARY_SET[n] = true end
+
+  local BuyMenuMod = safeRequire(ReplicatedStorage:FindFirstChild("Interface") and ReplicatedStorage.Interface:FindFirstChild("Screens")
+    and ReplicatedStorage.Interface.Screens:FindFirstChild("Gameplay") and ReplicatedStorage.Interface.Screens.Gameplay:FindFirstChild("Middle")
+    and ReplicatedStorage.Interface.Screens.Gameplay.Middle:FindFirstChild("BuyMenu"))
+  function AutoBuy.findButton(name, isEq)
+    local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    local menu = gui and gui:FindFirstChild("BuyMenu", true)
+    if not menu then return nil end
+    local fallback
+    for _, d in ipairs(menu:GetDescendants()) do
+      if d:IsA("GuiButton") and d:GetAttribute("Weapon") == name then
+        if (d:GetAttribute("IsEquipment") == true) == (isEq == true) then return d end
+        fallback = fallback or d
+      end
+    end
+    return fallback
+  end
+  local buying = false
+  function AutoBuy.run()
+    if buying or not (Remotes and Remotes.Inventory and Remotes.Inventory.BuyMenuPurchase) then return end
+    buying = true
+    task.spawn(function()
+     local okRun, errRun = pcall(function()
+      local bought, tried = {}, {}
+      -- ONE pass: inventory/money replicate a round-trip later, so re-planning right away re-buys the same items
+      for pass = 1, 1 do
+        if Unloaded or Workspace:GetAttribute("GameState") ~= "Buy Period" or LocalPlayer:GetAttribute("Dead") == true then break end
+        local owned = ownedNames()
+        local money = tonumber(LocalPlayer:GetAttribute("Money")) or 0
+        local armorAttr = LocalPlayer:GetAttribute("Armor")
+        local hasKit = LocalPlayer:GetAttribute("HasDefuseKit") == true
+        local team = LocalPlayer:GetAttribute("Team")
+        local sent = 0
+        for _, item in ipairs(AutoBuy.plan()) do
+          if Unloaded or Workspace:GetAttribute("GameState") ~= "Buy Period" then break end
+          local name, isEq = item[1], item[2]
+          local cost = isEq and EQ_COST[name] or COST[name] or 0
+          local skip = false
+          if not isEq and owned[name] and name ~= "Flashbang" then skip = true end
+          if isEq and name == "Defuse Kit" and hasKit then skip = true end
+          if isEq and name ~= "Defuse Kit" and type(armorAttr) == "string" and string.find(armorAttr, name, 1, true) then skip = true end
+          -- primary too expensive: drop to the best affordable stand-in instead of buying nothing
+          if not skip and not isEq and PRIMARY_SET[name] and cost > money then
+            for _, alt in ipairs(FALLBACK[team] or {}) do
+              if not owned[alt] and COST[alt] and COST[alt] <= money and teamOk(alt, team) then name, cost = alt, COST[alt]; break end
+            end
+          end
+          local key = name .. ":" .. tostring(not isEq and name == "Flashbang" and (owned.Flashbang or 0) or pass)
+          if not skip and cost <= money and not (tried[name] and tried[name] >= 2 and name ~= "Flashbang") then
+            restoreIdentity()
+            -- go through the game's own buy-menu purchase() (same gating, sounds and packet as clicking the item);
+            -- raw remote only if that module isn't reachable
+            -- The server ignores a purchase whose Path is empty: the real button sends e.g.
+            -- "Loadout.Grenades.Options.1". So fire the game's own buy button for this item (it supplies the right Path).
+            local ok, err
+            local btn = AutoBuy.findButton(name, isEq)
+            if btn and typeof(getconnections) == "function" then
+              ok, err = pcall(function()
+                local conns = getconnections(btn.MouseButton1Click)
+                if #conns == 0 then error("no click handler") end
+                for _, c in ipairs(conns) do c:Fire() end
+              end)
+            elseif BuyMenuMod and type(BuyMenuMod.purchase) == "function" then
+              ok, err = pcall(BuyMenuMod.purchase, name, "", isEq)
+            else
+              ok, err = pcall(Remotes.Inventory.BuyMenuPurchase.Send, { Equipment = isEq, Name = name, Path = "" })
+            end
+            if ok then
+              money -= cost; sent += 1; tried[name] = (tried[name] or 0) + 1
+              table.insert(bought, name)
+            else warn("[BloxStrikeSuite] autobuy " .. name .. ": " .. tostring(err)) end
+            task.wait(0.22)
+          end
+        end
+        if sent == 0 then break end
+        task.wait(0.35)   -- let the server apply it, then re-plan against what we really own
+      end
+      AutoBuy.lastBought = bought
+      if #bought > 0 then print("[BloxStrikeSuite] autobuy: " .. table.concat(bought, ", ")) end
+     end)
+     if not okRun then warn("[BloxStrikeSuite] autobuy: " .. tostring(errRun)) end
+     buying = false
+    end)
+  end
+
+  addAction(rr, "BUY LOADOUT NOW", "BUY", T.GOLD, function() AutoBuy.run() end)
+  _G.__BSSAutoBuy = AutoBuy
+
+  -- fire once per buy period, as soon as it opens, and also if AutoBuy is switched on mid-period
+  local doneKey = nil
+  local function periodKey()
+    return tostring(Workspace:GetAttribute("MatchSessionId")) .. "|" .. tostring(Workspace:GetAttribute("GameStateTransitionServerTime"))
+  end
+  trackConn(RunService.Heartbeat:Connect(function()
+    if Unloaded or not Config.AutoBuy then return end
+    if Workspace:GetAttribute("GameState") ~= "Buy Period" or LocalPlayer:GetAttribute("Dead") == true then return end
+    if buying then return end
+    if LocalPlayer:GetAttribute("Money") == nil or LocalPlayer:GetAttribute("Team") == nil then return end
+    local k = periodKey()
+    if doneKey == k then return end
+    doneKey = k
+    AutoBuy.run()
+  end))
+end)()
+
+-- ===== AUTO SCOPE: scopes the equipped sniper when an enemy is in view =====
+;(function()
+  local InventoryController = safeRequire(ControllersFolder and ControllersFolder:FindFirstChild("InventoryController"))
+  local ray = RaycastParams.new()
+  ray.FilterType = Enum.RaycastFilterType.Exclude
+  ray.IgnoreWater = true
+  local lastTry = 0
+  trackConn(RunService.Heartbeat:Connect(function()
+    if Unloaded or not Config.AutoScope or not InventoryController then return end
+    local now = os.clock()
+    if now - lastTry < 0.15 then return end
+    lastTry = now
+    if LocalPlayer:GetAttribute("Dead") == true or Workspace:GetAttribute("GameState") == "Buy Period" then return end
+    local ok, eq = pcall(InventoryController.peekCurrentEquippedForMovement)
+    if not ok or type(eq) ~= "table" or not eq.Properties or eq.Properties.AimingOptions ~= "SniperScope" then return end
+    if eq.IsAiming or eq.IsDestroyed or not eq.IsEquipped or type(eq.scope) ~= "function" then return end
+    local cam = Workspace.CurrentCamera
+    local me = getLocalCharacter()
+    if not cam or not me then return end
+    local vp = cam.ViewportSize
+    local center = Vector2.new(vp.X * 0.5, vp.Y * 0.5)
+    for _, p in ipairs(getParticipants()) do
+      if p == LocalPlayer or not isEnemyParticipant(p) then continue end
+      local char, culled = resolveParticipantCharacter(p)
+      if not char or culled or not isParticipantAlive(p, char) then continue end
+      local head = char:FindFirstChild("Head")
+      if head and head:IsA("BasePart") then
+        local sp, on = cam:WorldToViewportPoint(head.Position)
+        if on and sp.Z > 0 and (Vector2.new(sp.X, sp.Y) - center).Magnitude <= 260 then
+          ray.FilterDescendantsInstances = { me, cam }
+          local hit = Workspace:Raycast(cam.CFrame.Position, head.Position - cam.CFrame.Position, ray)
+          if not hit or hit.Instance:IsDescendantOf(char) then
+            task.spawn(function() pcall(function() eq:scope() end) end)
+            return
+          end
+        end
+      end
+    end
+  end))
+end)()
+
+-- ===== KNIFEBOT: swings the equipped melee weapon (through the game's own Melee:shoot) when an enemy is in reach =====
+;(function()
+  Config.Knifebot = false
+  Config.KnifebotSnap = true
+  Config.KnifebotBots = true
+
+  local rr = TabCols["RAGE"].Right
+  addSection(rr, "KNIFEBOT")
+  addToggle(rr, "KNIFEBOT (AUTO SWING)", Config.Knifebot, function(v) Config.Knifebot = v end)
+  addToggle(rr, "SNAP VIEW TO TARGET", Config.KnifebotSnap, function(v) Config.KnifebotSnap = v end, { NoCount = true })
+  addToggle(rr, "INCLUDE AI BOTS", Config.KnifebotBots, function(v) Config.KnifebotBots = v end, { NoCount = true })
+
+  local InventoryController = safeRequire(ControllersFolder and ControllersFolder:FindFirstChild("InventoryController"))
+  local lastSwing = 0
+  local ray = RaycastParams.new()
+  ray.FilterType = Enum.RaycastFilterType.Exclude
+  ray.IgnoreWater = true
+
+  trackConn(RunService.RenderStepped:Connect(function()
+    if Unloaded or not Config.Knifebot or not InventoryController then return end
+    if LocalPlayer:GetAttribute("Dead") == true or LocalPlayer:GetAttribute("IsSpectating") == true
+      or Workspace:GetAttribute("GameState") == "Buy Period" then return end
+    if UserInputService:GetFocusedTextBox() ~= nil or (Menu and Menu.Visible) then return end
+    local ok, eq = pcall(InventoryController.peekCurrentEquippedForMovement)
+    if not ok or type(eq) ~= "table" or not eq.Properties or eq.Properties.Slot ~= "Melee" then return end
+    if eq.IsDestroyed or not eq.IsEquipped then return end
+    local cam = Workspace.CurrentCamera
+    local me = getLocalCharacter()
+    if not cam or not me then return end
+    local reach = tonumber(eq.Properties.Range) or 6
+    local origin = cam.CFrame.Position
+    local best, bestD
+    for _, p in ipairs(getParticipants()) do
+      if p == LocalPlayer or not isEnemyParticipant(p) then continue end
+      if not p:IsA("Player") and not Config.KnifebotBots then continue end
+      local char, culled = resolveParticipantCharacter(p)
+      if not char or culled or not isParticipantAlive(p, char) then continue end
+      local part = char:FindFirstChild("UpperTorso") or char:FindFirstChild("HumanoidRootPart")
+      if part and part:IsA("BasePart") then
+        local d = (part.Position - origin).Magnitude
+        if d <= reach and (not bestD or d < bestD) then
+          ray.FilterDescendantsInstances = { me, cam }
+          local hit = Workspace:Raycast(origin, part.Position - origin, ray)
+          if not hit or hit.Instance:IsDescendantOf(char) then best, bestD = part, d end   -- line of sight only
+        end
+      end
+    end
+    if not best then return end
+    if Config.KnifebotSnap then
+      cam.CFrame = CFrame.lookAt(origin, best.Position)
+    end
+    local now = os.clock()
+    if now - lastSwing >= 0.22 then
+      lastSwing = now
+      task.spawn(function() pcall(function() eq:shoot() end) end)
+    end
+  end))
+end)()
+
+-- ===== GLOBAL FONT PICKER =====
+;(function()
+  Config.GlobalFont = "Default"
+  Config.GlobalFontGame = false
+  local FONTS = { "Default", "Gotham", "GothamMedium", "GothamBold", "GothamBlack", "SourceSans", "SourceSansBold", "Code", "RobotoMono",
+    "Roboto", "Arial", "ArialBold", "Nunito", "Ubuntu", "Oswald", "Merriweather", "Michroma", "Highway", "SciFi", "Arcade", "Cartoon",
+    "Fantasy", "Bangers", "Creepster", "FredokaOne", "PatrickHand", "Antique" }
+  local ur = TabCols["UTILITIES"].Right
+  addSection(ur, "TEXT")
+  addCycle(ur, "GLOBAL FONT", FONTS, 1, function(v) Config.GlobalFont = v end)
+  addToggle(ur, "ALSO CHANGE GAME UI FONT", Config.GlobalFontGame, function(v) Config.GlobalFontGame = v end)
+
+  local Orig = setmetatable({}, { __mode = "k" })
+  local function isText(d) return d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") end
+  local function sweep(root, font)
+    for _, d in ipairs(root:GetDescendants()) do
+      if isText(d) then
+        if font then
+          if Orig[d] == nil then Orig[d] = d.Font end
+          if d.Font ~= font then d.Font = font end
+        elseif Orig[d] ~= nil then
+          d.Font = Orig[d]; Orig[d] = nil
+        end
+      end
+    end
+  end
+
+  local acc, lastKey = 0, nil
+  trackConn(RunService.Heartbeat:Connect(function(dt)
+    if Unloaded then return end
+    acc += dt
+    if acc < 0.7 then return end
+    acc = 0
+    local font = (Config.GlobalFont ~= "Default") and Enum.Font[Config.GlobalFont] or nil
+    local key = tostring(Config.GlobalFont) .. tostring(Config.GlobalFontGame)
+    if not font and lastKey == nil then return end
+    lastKey = (font ~= nil or Config.GlobalFontGame) and key or nil
+    sweep(ScreenGui, font)
+    if Config.GlobalFontGame then
+      sweep(PlayerGui, font)
+    else
+      for d, f in pairs(Orig) do
+        if d.Parent and d:IsDescendantOf(PlayerGui) then d.Font = f; Orig[d] = nil end
+      end
+    end
+  end))
+  table.insert(Connections, { Disconnect = function()
+    for d, f in pairs(Orig) do if d.Parent then pcall(function() d.Font = f end) end end
+  end })
+end)()
+
+-- ===== STREAMER MODE: local-only name masking (your name, optionally everyone else's) =====
+-- Only what THIS client renders is changed (game UI text + this suite's ESP). Other players still see your real name.
+;(function()
+  Config.StreamerMode = false
+  Config.StreamerHideOthers = false
+  Config.StreamerName = "Random"
+
+  local ul = TabCols["UTILITIES"].Left
+  addSection(ul, "STREAMER MODE")
+  addToggle(ul, "STREAMER MODE (HIDE MY NAME)", Config.StreamerMode, function(v) Config.StreamerMode = v end)
+  addToggle(ul, "ALSO HIDE OTHER PLAYERS", Config.StreamerHideOthers, function(v) Config.StreamerHideOthers = v end)
+  local row = makeRow(ul, "CUSTOM NAME")
+  local box = Instance.new("TextBox", row)
+  box.Size = UDim2.new(0, 132, 0, 22); box.Position = UDim2.new(1, -140, 0.5, -11)
+  box.BackgroundColor3 = T.INPUT; box.BorderSizePixel = 0; box.ClearTextOnFocus = false
+  box.Font = T.FONT; box.TextSize = 12; box.TextColor3 = T.ACCENT; box.PlaceholderText = "blank = random"
+  box.PlaceholderColor3 = T.TEXT_DIM; box.Text = ""
+  Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+  registerItem(ul, row, false, "CUSTOM NAME")
+  trackConn(box.FocusLost:Connect(function()
+    local s = box.Text:gsub("^%s+", ""):gsub("%s+$", "")
+    Config.StreamerName = (s ~= "") and string.sub(s, 1, 20) or "Random"
+  end))
+
+  local randomName = "User" .. tostring(math.random(1000, 9999))
+  local otherAlias, otherN = {}, 0
+  local function myAlias()
+    return Config.StreamerName ~= "Random" and Config.StreamerName or randomName
+  end
+  local function aliasFor(name, isSelf)
+    if isSelf then return myAlias() end
+    if not otherAlias[name] then otherN += 1; otherAlias[name] = "Player" .. otherN end
+    return otherAlias[name]
+  end
+  local function active() return Config.StreamerMode end
+
+  Config.StreamerAliasFn = function(p, nm)
+    if not Config.StreamerMode then return nm end
+    if p == LocalPlayer then return myAlias() end
+    if Config.StreamerHideOthers then return aliasFor(nm, false) end
+    return nm
+  end
+
+  local Orig = setmetatable({}, { __mode = "k" })     -- label -> original text
+  local Watched = setmetatable({}, { __mode = "k" })
+  local function escPat(s) return (s:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")) end
+
+  local function mapping()
+    local m = {}
+    m[LocalPlayer.Name] = myAlias(); m[LocalPlayer.DisplayName] = myAlias()
+    if Config.StreamerHideOthers then
+      for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then m[p.Name] = aliasFor(p.Name, false); m[p.DisplayName] = aliasFor(p.Name, false) end
+      end
+    end
+    return m
+  end
+
+  local function process(obj, m)
+    local txt = obj.Text
+    if txt == "" then return end
+    local out = txt
+    for real, alias in pairs(m) do
+      if #real >= 3 and string.find(out, real, 1, true) then
+        out = string.gsub(out, escPat(real), (alias:gsub("%%", "%%%%")))
+      end
+    end
+    if out ~= txt then
+      Orig[obj] = { txt, out }
+      obj.Text = out
+    end
+  end
+
+  local function watch(obj, m)
+    if Watched[obj] then return end
+    Watched[obj] = true
+    obj:GetPropertyChangedSignal("Text"):Connect(function()
+      if Unloaded or not active() then return end
+      local mm = mapping()
+      task.defer(function() if obj.Parent then pcall(process, obj, mm) end end)
+    end)
+  end
+
+  local function restoreAll()
+    for obj, rec in pairs(Orig) do
+      if obj.Parent and obj.Text == rec[2] then pcall(function() obj.Text = rec[1] end) end
+    end
+    table.clear(Orig)
+  end
+
+  local was = false
+  local acc = 0
+  trackConn(RunService.Heartbeat:Connect(function(dt)
+    if Unloaded then return end
+    acc += dt
+    if acc < 0.6 then return end
+    acc = 0
+    if not Config.StreamerMode then
+      if was then was = false; restoreAll() end
+      return
+    end
+    was = true
+    local m = mapping()
+    for _, d in ipairs(PlayerGui:GetDescendants()) do
+      if d:IsA("TextLabel") or d:IsA("TextButton") then
+        if not d:IsDescendantOf(ScreenGui) then
+          pcall(process, d, m)
+          watch(d, m)
+        end
+      end
+    end
+  end))
+  table.insert(Connections, { Disconnect = function() restoreAll() end })
+end)()
+
+-- ===== HIT / KILL FEEDBACK: sounds (game's own audio library), notifications =====
+;(function()
+  local HIT_SOUNDS = {
+    ["Classic Ding"] = 4817809188, ["Headshot 1"] = 109001457067748, ["Headshot 2"] = 132217235664144,
+    ["Headshot 3"] = 134238109611527, ["Headshot 4"] = 107873869943020, ["Helmet Hit"] = 125321912363999,
+    ["Flesh 1"] = 107667789878316, ["Flesh 2"] = 124912612009209, ["Flesh 3"] = 92566163061648,
+    ["Flesh 4"] = 117996590042443, ["UI Click"] = 86919772875161, ["UI Highlight"] = 128542537508033,
+    ["Purchase Ding"] = 134998174688363, ["Zap"] = 79873000109115,
+  }
+  local HIT_NAMES = { "Classic Ding", "Headshot 1", "Headshot 2", "Headshot 3", "Headshot 4", "Helmet Hit", "Flesh 1", "Flesh 2",
+    "Flesh 3", "Flesh 4", "UI Click", "UI Highlight", "Purchase Ding", "Zap" }
+  local KILL_SOUNDS = {
+    ["Item Reveal"] = 92737314376950, ["Purchase Ding"] = 134998174688363, ["Helmet Hit"] = 125321912363999,
+    ["Headshot 2"] = 132217235664144, ["Glass Shatter"] = 93523702106264, ["Zap"] = 79873000109115,
+    ["Countdown Beep"] = 100963371018337, ["UI Click"] = 72315850035802, ["Classic Ding"] = 4817809188,
+  }
+  local KILL_NAMES = { "Item Reveal", "Purchase Ding", "Helmet Hit", "Headshot 2", "Glass Shatter", "Zap", "Countdown Beep", "UI Click", "Classic Ding" }
+
+  Config.HitSoundType = "Headshot 1"
+  Config.HitSoundVolume = 0.8
+  Config.KillSound = false
+  Config.KillSoundType = "Item Reveal"
+  Config.KillSoundVolume = 0.8
+  Config.NotifyHit = false
+  Config.NotifyKill = false
+  Config.NotifyTime = 1.5
+  Config.NotifyPos = "Center"
+  Config.NotifySize = 18
+  Config.NotifyHitColor = ColorPalette.White
+  Config.NotifyKillColor = ColorPalette.Red
+
+  local holder = Instance.new("Frame", ScreenGui)
+  holder.Name = "SuiteNotify"; holder.BackgroundTransparency = 1; holder.Size = UDim2.fromOffset(320, 160)
+  holder.AnchorPoint = Vector2.new(0.5, 0.5); holder.ZIndex = 50
+  local layout = Instance.new("UIListLayout", holder)
+  layout.SortOrder = Enum.SortOrder.LayoutOrder; layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+  layout.VerticalAlignment = Enum.VerticalAlignment.Center; layout.Padding = UDim.new(0, 2)
+  local order = 0
+  local function placeHolder()
+    local p = Config.NotifyPos
+    if p == "Top" then holder.Position = UDim2.fromScale(0.5, 0.16)
+    elseif p == "Bottom" then holder.Position = UDim2.fromScale(0.5, 0.82)
+    else holder.Position = UDim2.new(0.5, 0, 0.5, 90) end
+  end
+  placeHolder()
+
+  local SoundService = game:GetService("SoundService")
+  local Feedback = {}
+  function Feedback.notify(text, color)
+    placeHolder()
+    order += 1
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency = 1; l.Size = UDim2.new(1, 0, 0, Config.NotifySize + 4)
+    l.Font = T.FONT; l.TextSize = Config.NotifySize; l.TextColor3 = color; l.Text = text
+    l.TextStrokeTransparency = 0.35; l.LayoutOrder = order; l.ZIndex = 51; l.Parent = holder
+    local life = Config.NotifyTime
+    TweenService:Create(l, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
+    task.delay(life, function()
+      if l.Parent then
+        local tw = TweenService:Create(l, TweenInfo.new(0.35), { TextTransparency = 1, TextStrokeTransparency = 1 })
+        tw:Play(); tw.Completed:Wait(); l:Destroy()
+      end
+    end)
+  end
+
+  local function play(id, vol)
+    local s = Instance.new("Sound")
+    s.SoundId = "rbxassetid://" .. tostring(id); s.Volume = vol; s.Parent = SoundService
+    s.Ended:Once(function() s:Destroy() end)
+    task.delay(6, function() if s.Parent then s:Destroy() end end)
+    s:Play()
+  end
+
+  function Feedback.active() return Config.HitSound or Config.KillSound or Config.NotifyHit or Config.NotifyKill end
+
+  -- kind: "hit" | "headshot" | "wallbang"
+  function Feedback.onHit(kind)
+    restoreIdentity()
+    if Config.HitSound then play(HIT_SOUNDS[Config.HitSoundType] or 4817809188, Config.HitSoundVolume) end
+    if Config.NotifyHit then
+      local txt = kind == "headshot" and "HEADSHOT" or (kind == "wallbang" and "WALLBANG" or "HIT")
+      Feedback.notify(txt, Config.NotifyHitColor)
+    end
+  end
+
+  function Feedback.onKill(data)
+    restoreIdentity()
+    if Config.KillSound then play(KILL_SOUNDS[Config.KillSoundType] or 92737314376950, Config.KillSoundVolume) end
+    if Config.NotifyKill then
+      local victim = type(data) == "table" and (data.Victim and tostring(data.Victim.Name or data.Victim) or "") or ""
+      local tags = {}
+      if type(data) == "table" and data.Headshot then table.insert(tags, "HEADSHOT") end
+      if type(data) == "table" and data.Wallbang then table.insert(tags, "WALLBANG") end
+      local txt = "KILLED " .. string.upper(victim) .. (#tags > 0 and ("  [" .. table.concat(tags, " + ") .. "]") or "")
+      Feedback.notify(txt, Config.NotifyKillColor)
+    end
+  end
+  FX.Feedback = Feedback
+
+  local ur = TabCols["UTILITIES"].Right
+  addSection(ur, "HIT / KILL FEEDBACK")
+  addCycle(ur, "HIT SOUND TYPE", HIT_NAMES, "Headshot 1", function(v) Config.HitSoundType = v end)
+  addCycle(ur, "HIT SOUND VOLUME", { "20%", "40%", "60%", "80%", "100%", "150%" }, 4, function(v)
+    Config.HitSoundVolume = (tonumber(v:match("%d+")) or 80) / 100
+  end)
+  addAction(ur, "TEST HIT SOUND", "PLAY", T.ACCENT, function() play(HIT_SOUNDS[Config.HitSoundType] or 4817809188, Config.HitSoundVolume) end)
+  addToggle(ur, "KILL SOUND", Config.KillSound, function(v) Config.KillSound = v end)
+  addCycle(ur, "KILL SOUND TYPE", KILL_NAMES, "Item Reveal", function(v) Config.KillSoundType = v end)
+  addCycle(ur, "KILL SOUND VOLUME", { "20%", "40%", "60%", "80%", "100%", "150%" }, 4, function(v)
+    Config.KillSoundVolume = (tonumber(v:match("%d+")) or 80) / 100
+  end)
+  addAction(ur, "TEST KILL SOUND", "PLAY", T.ACCENT, function() play(KILL_SOUNDS[Config.KillSoundType] or 92737314376950, Config.KillSoundVolume) end)
+  addToggle(ur, "HIT NOTIFICATIONS", Config.NotifyHit, function(v) Config.NotifyHit = v end)
+  addToggle(ur, "KILL NOTIFICATIONS", Config.NotifyKill, function(v) Config.NotifyKill = v end)
+  addCycle(ur, "NOTIFICATION TIME", { "0.8s", "1.5s", "2.5s", "4s", "6s" }, 2, function(v) Config.NotifyTime = tonumber(v:match("[%d%.]+")) or 1.5 end)
+  addCycle(ur, "NOTIFICATION POSITION", { "Center", "Top", "Bottom" }, 1, function(v) Config.NotifyPos = v; placeHolder() end)
+  addCycle(ur, "NOTIFICATION SIZE", { "14", "18", "24", "30" }, 2, function(v) Config.NotifySize = tonumber(v) or 18 end)
+  addCycle(ur, "HIT COLOR", ColorNames, 7, function(n) Config.NotifyHitColor = ColorPalette[n] end, true)
+  addCycle(ur, "KILL COLOR", ColorNames, 3, function(n) Config.NotifyKillColor = ColorPalette[n] end, true)
+  addAction(ur, "TEST NOTIFICATIONS", "SHOW", T.ACCENT, function()
+    Feedback.notify("HIT", Config.NotifyHitColor)
+    Feedback.notify("KILLED EXAMPLE  [HEADSHOT]", Config.NotifyKillColor)
+  end)
+  table.insert(Connections, { Disconnect = function() holder:Destroy() end })
+end)()
+
+-- ===== HUD LISTS (keybinds / spectators) + CHAT SPAMMER =====
+;(function()
+  addSection(utL, "HUD LISTS")
+  addToggle(utL, "KEYBIND LIST", Config.KeybindList, function(v) Config.KeybindList = v end)
+  addToggle(utL, "SPECTATOR LIST", Config.SpectatorList, function(v) Config.SpectatorList = v end)
+
+  local hud = Instance.new("Frame", ScreenGui)
+  hud.Name = "SuiteListHUD"; hud.AnchorPoint = Vector2.new(1, 0)
+  hud.Position = UDim2.new(1, -12, 0, 150); hud.Size = UDim2.fromOffset(190, 20)
+  hud.AutomaticSize = Enum.AutomaticSize.Y
+  hud.BackgroundColor3 = T.SIDE; hud.BackgroundTransparency = 0.25; hud.BorderSizePixel = 0
+  hud.Visible = false; hud.ZIndex = 30
+  Instance.new("UICorner", hud).CornerRadius = UDim.new(0, 5)
+  local hs = Instance.new("UIStroke", hud); hs.Color = T.BORDER; hs.Thickness = 1
+  local pad = Instance.new("UIPadding", hud)
+  pad.PaddingLeft = UDim.new(0, 8); pad.PaddingRight = UDim.new(0, 8); pad.PaddingTop = UDim.new(0, 5); pad.PaddingBottom = UDim.new(0, 5)
+  local lbl = Instance.new("TextLabel", hud)
+  lbl.BackgroundTransparency = 1; lbl.Size = UDim2.new(1, 0, 0, 0); lbl.AutomaticSize = Enum.AutomaticSize.Y
+  lbl.Font = T.FONT; lbl.TextSize = 13; lbl.TextColor3 = T.TEXT; lbl.RichText = true
+  lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.TextYAlignment = Enum.TextYAlignment.Top; lbl.ZIndex = 31
+
+  local BINDS = {
+    { "Aimbot", "AimbotEnabled", function() return Config.AimbotMode end },
+    { "Silent Aim", "SilentAimEnabled", function() return "auto" end },
+    { "Triggerbot", "TriggerbotEnabled", function() return Config.TriggerMode end },
+    { "Autowall", "AutoWall", function() return "auto" end },
+    { "Third Person", "ThirdPerson", function() return "V" end },
+    { "Bunny Hop", "AutoBhop", function() return "hold jump" end },
+    { "Autostrafe", "AutoStrafe", function() return Config.AutoStrafeMode end },
+    { "Obstacle Jump", "ObstacleJump", function() return "auto" end },
+    { "Spinbot", "Spinbot", function() return Config.SpinbotMode end },
+    { "Quick Stop", "QuickStop", function() return "auto" end },
+    { "Edge Jump", "EdgeJump", function() return "auto" end },
+    { "No Scope", "NoScopeOverlay", function() return "auto" end },
+  }
+  local function esc(s) return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")) end
+
+  local acc = 0
+  trackConn(RunService.Heartbeat:Connect(function(dt)
+    if Unloaded then return end
+    acc += dt
+    if acc < 0.25 then return end
+    acc = 0
+    if not (Config.KeybindList or Config.SpectatorList) then
+      if hud.Visible then hud.Visible = false end
+      return
+    end
+    local lines = {}
+    if Config.KeybindList then
+      table.insert(lines, "<b>KEYBINDS</b>")
+      local any = false
+      for _, b in ipairs(BINDS) do
+        if Config[b[2]] then
+          any = true
+          table.insert(lines, string.format("%s  <font color=\"#9aa0a6\">[%s]</font>", esc(b[1]), esc(b[3]())))
+        end
+      end
+      if not any then table.insert(lines, "<font color=\"#9aa0a6\">none active</font>") end
+    end
+    if Config.SpectatorList then
+      if #lines > 0 then table.insert(lines, "") end
+      local n = tonumber(LocalPlayer:GetAttribute("Spectators")) or 0
+      table.insert(lines, string.format("<b>SPECTATORS</b>  <font color=\"#9aa0a6\">(%d watching you)</font>", n))
+      -- the game only replicates a COUNT of who is watching you; names are server-side. These are the players that
+      -- are currently in spectate mode (dead/observing), i.e. the only ones who can be watching you.
+      local names = {}
+      for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p:GetAttribute("IsSpectating") == true then table.insert(names, esc(p.DisplayName)) end
+      end
+      if #names > 0 then
+        table.insert(lines, "<font color=\"#9aa0a6\">in spectate mode: " .. table.concat(names, ", ") .. "</font>")
+      end
+    end
+    lbl.Text = table.concat(lines, "\n")
+    hud.Visible = true
+
+    -- keep this panel clear of the other HUD panels (radar, telemetry bar) wherever they have been dragged to:
+    -- start at the top-right and slide below / above anything it would overlap
+    local screenH = ScreenGui.AbsoluteSize.Y
+    local hh, hw = hud.AbsoluteSize.Y, hud.AbsoluteSize.X
+    local hx = hud.AbsolutePosition.X
+    local base = ScreenGui.AbsolutePosition.Y
+    local y = base + 70
+    local others = {}
+    if RadarFrame.Visible then table.insert(others, RadarFrame) end
+    if TelemetryBar.Visible then table.insert(others, TelemetryBar) end
+    for _ = 1, 3 do
+      local moved = false
+      for _, o in ipairs(others) do
+        local ox, oy = o.AbsolutePosition.X, o.AbsolutePosition.Y
+        local ow, oh = o.AbsoluteSize.X, o.AbsoluteSize.Y
+        local hOverlap = hx < ox + ow + 6 and hx + hw > ox - 6
+        local vOverlap = y < oy + oh + 8 and y + hh > oy - 8
+        if hOverlap and vOverlap then
+          if oy + oh + 8 + hh <= base + screenH - 10 then y = oy + oh + 8     -- fits below it
+          else y = math.max(base + 10, oy - 8 - hh) end                       -- otherwise go above it
+          moved = true
+        end
+      end
+      if not moved then break end
+    end
+    hud.Position = UDim2.new(1, -12, 0, math.floor(y - base))
+  end))
+
+  -- ---- CHAT SPAMMER ----
+  addSection(utL, "CHAT SPAMMER")
+  addToggle(utL, "CHAT SPAMMER", Config.ChatSpam, function(v) Config.ChatSpam = v end)
+  addCycle(utL, "SPAM INTERVAL", { "2s", "4s", "6s", "10s", "20s" }, 2, function(v)
+    Config.ChatSpamInterval = tonumber(v:match("%d+")) or 4
+  end)
+  local row = makeRow(utL, "SPAM TEXT")
+  row.Size = UDim2.new(1, -4, 0, ROW_H)
+  local box = Instance.new("TextBox", row)
+  box.Size = UDim2.new(0, 132, 0, 22); box.Position = UDim2.new(1, -140, 0.5, -11)
+  box.BackgroundColor3 = T.INPUT; box.BorderSizePixel = 0; box.ClearTextOnFocus = false
+  box.Font = T.FONT; box.TextSize = 12; box.TextColor3 = T.ACCENT; box.PlaceholderText = "message..."
+  box.PlaceholderColor3 = T.TEXT_DIM; box.Text = Config.ChatSpamText; box.TextTruncate = Enum.TextTruncate.AtEnd
+  Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+  trackConn(box.FocusLost:Connect(function()
+    local s = box.Text:gsub("^%s+", ""):gsub("%s+$", "")
+    Config.ChatSpamText = s ~= "" and string.sub(s, 1, 200) or "BloxStrikeSuite"
+    box.Text = Config.ChatSpamText
+  end))
+  registerItem(utL, row, false, "SPAM TEXT")
+
+  local TextChatService = game:GetService("TextChatService")
+  local lastSpam = 0
+  task.spawn(function()
+    while not Unloaded do
+      task.wait(0.25)
+      if Config.ChatSpam and os.clock() - lastSpam >= Config.ChatSpamInterval then
+        lastSpam = os.clock()
+        restoreIdentity()
+        local chans = TextChatService:FindFirstChild("TextChannels")
+        local general = chans and chans:FindFirstChild("RBXGeneral")
+        if general then
+          local ok, err = pcall(function() general:SendAsync(Config.ChatSpamText) end)
+          if not ok then warn("[BloxStrikeSuite] chat spam: " .. tostring(err)) end
+        end
+      end
+    end
+  end)
+end)()
 
 addSection(utR, "SKINS & CASES")
 addAction(utR, "SKIN CHANGER STUDIO", "OPEN", T.ACCENT, function() openSkinStudio("SKINS") end)
@@ -5047,6 +6500,7 @@ RunService:BindToRenderStep(CAM_STEP_NAME, Enum.RenderPriority.Camera.Value + 5,
   if Config.ThirdPerson or WasThirdPerson then
     stepThirdPersonVisuals(cam)
   end
+  if Config.NoScopeOverlay or ScopeForced then enforceScopeOverlay() end
 end)
 
 local LastSlowTick = 0
@@ -5477,8 +6931,8 @@ trackConn(RunService.RenderStepped:Connect(function()
     end
   end
 
-  -- 4. WORLD ESP (Bomb / Weapons / Buy Stations)
-  if Config.ESPEnabled and (Config.BombESP or Config.WeaponDropESP or Config.BuyStationESP) then
+  -- 4. WORLD ESP (Bomb / Weapons / Buy Stations) — independent of MASTER ESP, see refreshWorldTagCache
+  if Config.BombESP or Config.WeaponDropESP or Config.BuyStationESP then
     local activeW = {}
     for inst, meta in pairs(TrackedWorldItems) do
       local show = (meta.Kind == "Bomb" and Config.BombESP)
@@ -5660,6 +7114,18 @@ end))
     [Enum.Material.Fabric] = 25,
   }
 
+  -- Mirrors ReplicatedStorage.Shared.Raycast.checkMaterialDepth (the game's own penetration rule):
+  -- MaterialVariant "Sandy Brick"/"IndoorWall" are never penetrable and accumulate separately; the "Reactor" map
+  -- makes every normally-0 material strictly impenetrable (allowance -1).
+  local VARIANT_PEN = { ["Sandy Brick"] = 0, ["IndoorWall"] = 0 }
+  local function penRule(inst, mat)
+    local mv = inst.MaterialVariant
+    if mv ~= "" and VARIANT_PEN[mv] ~= nil then return VARIANT_PEN[mv], "V:" .. mv end
+    local allow = (inst:HasTag("BreakableGlass") or (inst.Parent and inst.Parent:HasTag("BreakableGlass"))) and 25 or (MAT_PEN[mat] or 0)
+    if allow == 0 and Workspace:GetAttribute("Map") == "Reactor" then allow = -1 end
+    return allow, mat
+  end
+
   local function isPartIgnoredForTrace(part)
     if not part or not part:IsA("BasePart") then return true end
     if part.Name == "CollisionCapsule" or part.Name == "HumanoidRootPart" then return true end
@@ -5782,9 +7248,9 @@ end))
       end
       local thickness = (hit.Position - exitHit.Position).Magnitude
       local mat = (inst.Parent and inst.Parent:HasTag("BreakableDoor")) and Enum.Material.Metal or inst.Material
-      local matAllow = (inst:HasTag("BreakableGlass") or (inst.Parent and inst.Parent:HasTag("BreakableGlass"))) and 25 or (MAT_PEN[mat] or 0)
-      penDepths[mat] = (penDepths[mat] or 0) + thickness
-      if penDepths[mat] > matAllow + maxBudget then
+      local matAllow, depthKey = penRule(inst, mat)
+      penDepths[depthKey] = (penDepths[depthKey] or 0) + thickness
+      if penDepths[depthKey] > matAllow + maxBudget then
         return false, false
       end
 
@@ -5860,9 +7326,9 @@ end))
           local ex = Workspace:Raycast(backStart, h.Position - backStart, inc)
           if not ex then break end
           local thickness = (h.Position - ex.Position).Magnitude
-          local matAllow = (inst:HasTag("BreakableGlass") or (inst.Parent and inst.Parent:HasTag("BreakableGlass"))) and 25 or (MAT_PEN[mat] or 0)
-          penDepths[mat] = (penDepths[mat] or 0) + thickness
-          if penDepths[mat] > matAllow + (weaponPen or 0.65) then
+          local matAllow, depthKey = penRule(inst, mat)
+          penDepths[depthKey] = (penDepths[depthKey] or 0) + thickness
+          if penDepths[depthKey] > matAllow + (weaponPen or 0.65) then
             break
           end
           table.insert(hits, {
@@ -6019,6 +7485,247 @@ end))
     return best
   end
 
+  -- ---- AUTOWALL (a.k.a. "autowall" / "auto wallbang" scan) ----
+  -- For every enemy that is NOT directly visible, tries several body points (head / shoulders / chest) and keeps the
+  -- one whose line from the camera crosses the thinnest penetrable cover. The first wall surface that line hits is
+  -- the "entry point" (drawn as a glowing dot); silent aim then fires along that exact line, so the bullet goes
+  -- through the wall/corner and hits the player behind it.
+  local AutoWall = { Targets = {}, LastScan = 0, Dots = {}, ScanOrigin = nil }
+
+  -- returns reachable, entryPos, totalThickness. reachable=false -> blocked by something the bullet can't pass.
+  -- reachable=true with entryPos=nil -> the point is directly visible (no wall at all).
+  local WT_RP = RaycastParams.new()
+  WT_RP.FilterType = Enum.RaycastFilterType.Exclude
+  WT_RP.CollisionGroup = "Bullet"
+  local WT_INC = RaycastParams.new()
+  WT_INC.FilterType = Enum.RaycastFilterType.Include
+  WT_INC.CollisionGroup = "Bullet"
+  local function wallTrace(origin, targetPos, targetModel, weaponPen, baseExcl)
+    local excl = baseExcl and table.clone(baseExcl) or buildBaseExcludeList()
+    local rp = WT_RP
+    rp.FilterDescendantsInstances = excl
+    local penDepths, cur, entry, total = {}, origin, nil, 0
+    for _ = 1, 6 do
+      local rem = targetPos - cur
+      local remDist = rem.Magnitude
+      if remDist < 0.35 then return true, entry, total end
+      local hit = Workspace:Raycast(cur, rem, rp)
+      if not hit then return true, entry, total end
+      local inst = hit.Instance
+      if targetModel and (inst == targetModel or inst:IsDescendantOf(targetModel)) then return true, entry, total end
+      if isPartIgnoredForTrace(inst) then
+        table.insert(excl, inst)
+        rp.FilterDescendantsInstances = excl
+      else
+        local dir = rem / remDist
+        local inc = WT_INC
+        inc.FilterDescendantsInstances = { inst }
+        local backStart = hit.Position + dir * 250
+        local exitHit = Workspace:Raycast(backStart, hit.Position - backStart, inc)
+        if not exitHit then return false end
+        local thickness = (hit.Position - exitHit.Position).Magnitude
+        local mat = (inst.Parent and inst.Parent:HasTag("BreakableDoor")) and Enum.Material.Metal or inst.Material
+        local matAllow, depthKey = penRule(inst, mat)
+        penDepths[depthKey] = (penDepths[depthKey] or 0) + thickness
+        if penDepths[depthKey] > matAllow + weaponPen then return false end
+        entry = entry or hit.Position
+        total = total + thickness
+        table.insert(excl, inst)
+        rp.FilterDescendantsInstances = excl
+        cur = exitHit.Position + dir * 0.05
+      end
+    end
+    return false
+  end
+
+  function AutoWall.scan(cam, origin)
+    local list = {}
+    local eq = getEquippedWeapon()
+    local weaponPen = (eq and eq.Properties and eq.Properties.Penetration) or 0.65
+    local maxRange = (eq and eq.Properties and eq.Properties.Range) or 1000
+    local vp = cam.ViewportSize
+    local center = Vector2.new(vp.X * 0.5, vp.Y * 0.5)
+    local right = cam.CFrame.RightVector
+    local mode = Config.SilentHitbox
+    local baseExcl = buildBaseExcludeList()
+    local look = cam.CFrame.LookVector
+    for _, p in ipairs(getParticipants()) do
+      if p == LocalPlayer then continue end
+      local isBot = not p:IsA("Player")
+      if isBot and not Config.AimbotBots then continue end
+      if Config.AimbotTeamCheck and not isEnemyParticipant(p) then continue end
+      local char, isCulled = resolveParticipantCharacter(p)
+      if not char or isCulled or not isParticipantAlive(p, char) then continue end
+      local head = char:FindFirstChild("Head")
+      local chest = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+      if not (head and head:IsA("BasePart") and chest and chest:IsA("BasePart")) then continue end
+      local toChest = chest.Position - origin
+      if toChest.Magnitude > maxRange then continue end
+      if toChest:Dot(look) < 0 then continue end   -- behind the camera: its dot could never be on screen
+      -- centre points first; the off-centre ones are only tried if no centre point can be shot through
+      local pts = {}
+      if mode ~= "Chest" then table.insert(pts, head.Position) end
+      if mode ~= "Head" then table.insert(pts, chest.Position) end
+      if mode ~= "Chest" then
+        table.insert(pts, head.Position + right * 0.4)
+        table.insert(pts, head.Position - right * 0.4)
+      end
+      if mode ~= "Head" then
+        table.insert(pts, chest.Position + right * 0.55)
+        table.insert(pts, chest.Position - right * 0.55)
+      end
+      local best, visible = nil, false
+      for idx, pt in ipairs(pts) do
+        if best and idx > 2 and best.thick < 0.6 then break end   -- already a clean thin shot, skip the extra points
+        if Config.SilentSmokeCheck and isRayBlockedBySmoke(origin, pt) then continue end
+        local ok, entry, thick = wallTrace(origin, pt, char, weaponPen, baseExcl)
+        if ok and entry == nil then visible = true; break end
+        if ok and entry and (not best or thick < best.thick) then
+          best = { entity = p, aim = pt, entry = entry, thick = thick }
+        end
+      end
+      if best and not visible then
+        local sp, on = cam:WorldToViewportPoint(best.entry)
+        if on and sp.Z > 0.1 then
+          best.screenDist = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+          table.insert(list, best)
+        end
+      end
+    end
+    return list
+  end
+
+  function AutoWall.pick(list, fovPx)
+    local best
+    for _, t in ipairs(list) do
+      if t.screenDist <= fovPx and (not best or t.screenDist < best.screenDist) then best = t end
+    end
+    return best
+  end
+
+  function AutoWall.render(cam, now)
+    local active = Config.AutoWall and (Config.AutoWallDots or Config.SilentAimEnabled) and LocalPlayer:GetAttribute("Dead") ~= true
+      and Workspace:GetAttribute("GameState") ~= "Buy Period"
+    if active and now - AutoWall.LastScan >= 0.12 then
+      AutoWall.LastScan = now
+      local ok, list = pcall(AutoWall.scan, cam, cam.CFrame.Position)
+      AutoWall.Targets = ok and list or {}
+    elseif not active then
+      AutoWall.Targets = {}
+    end
+    local showDots = active and Config.AutoWallDots
+    local vp = cam.ViewportSize
+    local center = Vector2.new(vp.X * 0.5, vp.Y * 0.5)
+    local bestPick = (active and Config.SilentAimEnabled) and AutoWall.pick(AutoWall.Targets, Config.SilentAimFOV) or nil
+    local dt = math.clamp(now - (AutoWall.LastRender or now), 0, 0.1)
+    AutoWall.LastRender = now
+    local smooth = 1 - math.exp(-dt * 20)
+    local fadeStep = dt * 7
+    local map = AutoWall.DotMap
+    if not map then map = {}; AutoWall.DotMap = map end
+
+    -- one dot per enemy (keyed by entity) so it eases between scans instead of snapping, and fades in/out
+    local seen = {}
+    if showDots then
+      for _, t in ipairs(AutoWall.Targets) do seen[t.entity] = t end
+    end
+    for ent, t in pairs(seen) do
+      local d = map[ent]
+      if not d then
+        local root = Instance.new("Frame", ScreenGui)
+        root.Name = "AutoWallDot"; root.AnchorPoint = Vector2.new(0.5, 0.5); root.ZIndex = 41
+        root.Size = UDim2.fromOffset(40, 40); root.BackgroundTransparency = 1; root.BorderSizePixel = 0
+        local ring = Instance.new("Frame", root)
+        ring.Name = "Ring"; ring.AnchorPoint = Vector2.new(0.5, 0.5); ring.Position = UDim2.fromScale(0.5, 0.5)
+        ring.BackgroundTransparency = 1; ring.ZIndex = 41
+        Instance.new("UICorner", ring).CornerRadius = UDim.new(1, 0)
+        local rs = Instance.new("UIStroke", ring); rs.Thickness = 1.6
+        local halo = Instance.new("Frame", root)
+        halo.Name = "Halo"; halo.AnchorPoint = Vector2.new(0.5, 0.5); halo.Position = UDim2.fromScale(0.5, 0.5)
+        halo.Size = UDim2.fromOffset(22, 22); halo.BorderSizePixel = 0; halo.ZIndex = 41
+        Instance.new("UICorner", halo).CornerRadius = UDim.new(1, 0)
+        local core = Instance.new("Frame", root)
+        core.Name = "Core"; core.AnchorPoint = Vector2.new(0.5, 0.5); core.Position = UDim2.fromScale(0.5, 0.5)
+        core.Size = UDim2.fromOffset(8, 8); core.BorderSizePixel = 0; core.ZIndex = 43
+        Instance.new("UICorner", core).CornerRadius = UDim.new(1, 0)
+        local cs = Instance.new("UIStroke", core); cs.Thickness = 1.4; cs.Color = Color3.new(1, 1, 1)
+        local lbl = Instance.new("TextLabel", root)
+        lbl.Name = "Pen"; lbl.AnchorPoint = Vector2.new(0.5, 0); lbl.Position = UDim2.new(0.5, 0, 1, -2)
+        lbl.Size = UDim2.fromOffset(60, 12); lbl.BackgroundTransparency = 1; lbl.ZIndex = 43
+        lbl.Font = T.FONT; lbl.TextSize = 10; lbl.TextStrokeTransparency = 0.4
+        d = { root = root, ring = ring, ringStroke = rs, halo = halo, core = core, coreStroke = cs, lbl = lbl, alpha = 0, x = nil, y = nil }
+        map[ent] = d
+      end
+      local sp, on = cam:WorldToViewportPoint(t.entry)
+      if on and sp.Z > 0.1 then
+        if not d.x then d.x, d.y = sp.X, sp.Y end
+        d.x += (sp.X - d.x) * smooth
+        d.y += (sp.Y - d.y) * smooth
+        d.target = true
+      else
+        d.target = false
+      end
+      d.t = t
+    end
+
+    for ent, d in pairs(map) do
+      local t = seen[ent]
+      local want = (t and d.target) and 1 or 0
+      d.alpha = d.alpha + math.clamp(want - d.alpha, -fadeStep, fadeStep)
+      if d.alpha <= 0.01 and want == 0 then
+        d.root:Destroy()
+        map[ent] = nil
+      else
+        local picked = t ~= nil and t == bestPick
+        local c = picked and Color3.fromRGB(80, 255, 120) or Config.AutoWallColor
+        -- thinner wall = brighter / more certain; thick wall = fainter
+        local conf = t and math.clamp(1 - t.thick / 3, 0.35, 1) or 0.5
+        local pulse = 0.5 + 0.5 * math.sin(now * (picked and 7 or 4))
+        local a = d.alpha
+        d.root.Position = UDim2.fromOffset(d.x or 0, d.y or 0)
+        d.root.Visible = true
+        local ringSz = (picked and 30 or 24) + pulse * 6
+        d.ring.Size = UDim2.fromOffset(ringSz, ringSz)
+        d.ringStroke.Color = c
+        d.ringStroke.Transparency = 1 - a * (0.85 - 0.5 * pulse) * conf
+        d.halo.BackgroundColor3 = c
+        d.halo.BackgroundTransparency = 1 - a * (0.30 + 0.12 * pulse) * conf
+        d.core.BackgroundColor3 = c
+        d.core.BackgroundTransparency = 1 - a
+        d.coreStroke.Transparency = 1 - a * 0.9
+        local cs = picked and 10 or 8
+        d.core.Size = UDim2.fromOffset(cs, cs)
+        if t then
+          d.lbl.Text = string.format("%.1f", t.thick)
+          d.lbl.TextColor3 = c
+        end
+        d.lbl.TextTransparency = 1 - a * 0.8
+        d.lbl.TextStrokeTransparency = 1 - a * 0.6
+      end
+    end
+
+    -- aim line from screen centre to the point silent aim will shoot through
+    local line = AutoWall.Line
+    local pd = bestPick and map[bestPick.entity]
+    if pd and pd.x and pd.alpha > 0.3 then
+      if not line then
+        line = Instance.new("Frame", ScreenGui)
+        line.Name = "AutoWallLine"; line.AnchorPoint = Vector2.new(0.5, 0.5); line.BorderSizePixel = 0; line.ZIndex = 40
+        AutoWall.Line = line
+      end
+      local dx, dy = pd.x - center.X, pd.y - center.Y
+      local len = math.sqrt(dx * dx + dy * dy)
+      line.Size = UDim2.fromOffset(math.max(len - 16, 0), 1.5)
+      line.Position = UDim2.fromOffset(center.X + dx * 0.5, center.Y + dy * 0.5)
+      line.Rotation = math.deg(math.atan2(dy, dx))
+      line.BackgroundColor3 = Color3.fromRGB(80, 255, 120)
+      line.BackgroundTransparency = 0.55
+      line.Visible = len > 20
+    elseif line then
+      line.Visible = false
+    end
+  end
+
   local PAD_MODE_CODES = {
     ["Pad: L2"] = Enum.KeyCode.ButtonL2, ["Pad: R2"] = Enum.KeyCode.ButtonR2,
     ["Pad: L1"] = Enum.KeyCode.ButtonL1, ["Pad: R1"] = Enum.KeyCode.ButtonR1,
@@ -6092,33 +7799,32 @@ end))
   local hitFlashUntil = 0
   local hitFlashColor = Color3.new(1, 1, 1)
 
-  local function triggerHitFeedback(col)
+  local function triggerHitFeedback(col, kind)
+    -- This runs inside a remote-event listener callback (Remotes.VFX.CreateImpact.Listen below), which
+    -- Roblox invokes at a LOWER thread identity than our own script's direct call chain — observed
+    -- live as "The current thread cannot access 'Instance' (lacking capability Plugin)" from
+    -- SoundService:PlayLocalSound further down. Restore our elevated identity first, same pattern
+    -- used everywhere else in this file after a call that can leave identity changed (see
+    -- restoreIdentity()/callRestored() above).
+    local prevId = typeof(getthreadidentity) == "function" and getthreadidentity() or nil
+    restoreIdentity()
     if Config.HitMarker then
       hitFlashColor = col or Color3.new(1, 1, 1)
       hitFlashUntil = os.clock() + 0.22
       for _, t in ipairs(hitTicks) do t.BackgroundColor3 = hitFlashColor; t.BackgroundTransparency = 0 end
       HitCross.Visible = true
     end
-    if Config.HitSound then
-      local played = false
-      if HitSoundInst.IsLoaded then
-        played = pcall(function() SoundService:PlayLocalSound(HitSoundInst) end)
-      end
-      if not played and SoundClass then
-        pcall(function()
-          SoundClass.new("Other"):play({ Parent = PlayerGui, Name = "Toggle Scope" })
-        end)
-      end
-    end
+    if FX.Feedback and kind ~= "kill" then pcall(FX.Feedback.onHit, kind) end
+    if prevId and typeof(setthreadidentity) == "function" then setthreadidentity(prevId) end
   end
 
   if Remotes and Remotes.VFX and Remotes.VFX.CreateImpact and type(Remotes.VFX.CreateImpact.Listen) == "function" then
     local okImp, unImp = pcall(Remotes.VFX.CreateImpact.Listen, function(data)
-      if Unloaded or (not Config.HitMarker and not Config.HitSound) or type(data) ~= "table" then return end
+      if Unloaded or (not Config.HitMarker and not (FX.Feedback and FX.Feedback.active())) or type(data) ~= "table" then return end
       if tostring(data.AttackerUserId) == tostring(LocalPlayer.UserId) and not data.Exit then
         if data.Material == "Blood Splatter" or data.WasHelmetHeadshot or data.IsWallbang then
           local c = data.WasHelmetHeadshot and Color3.fromRGB(255, 65, 65) or (data.IsWallbang and Color3.fromRGB(255, 200, 40) or Color3.new(1, 1, 1))
-          triggerHitFeedback(c)
+          triggerHitFeedback(c, data.WasHelmetHeadshot and "headshot" or (data.IsWallbang and "wallbang" or "hit"))
         end
       end
     end)
@@ -6128,9 +7834,14 @@ end))
   end
   if Remotes and Remotes.UI and Remotes.UI.UIPlayerKilled and type(Remotes.UI.UIPlayerKilled.Listen) == "function" then
     local okKill, unKill = pcall(Remotes.UI.UIPlayerKilled.Listen, function(data)
-      if Unloaded or (not Config.HitMarker and not Config.HitSound) or type(data) ~= "table" then return end
+      if Unloaded or type(data) ~= "table" then return end
       if data.Killer == LocalPlayer.Name or data.KillerUserId == LocalPlayer.UserId then
-        triggerHitFeedback(Color3.fromRGB(255, 215, 0))
+        if Config.HitMarker then triggerHitFeedback(Color3.fromRGB(255, 215, 0), "kill") end
+        if FX.Feedback then
+          local prevId = typeof(getthreadidentity) == "function" and getthreadidentity() or nil
+          pcall(FX.Feedback.onKill, data)
+          if prevId and typeof(setthreadidentity) == "function" then setthreadidentity(prevId) end
+        end
       end
     end)
     if okKill and type(unKill) == "function" then
@@ -6175,6 +7886,10 @@ end))
       if not Unloaded and Config.SpreadReductionPct > 0 and type(sp) == "number" then
         sp = sp * math.clamp(1 - Config.SpreadReductionPct * 0.01, 0, 1)
       end
+      if not Unloaded and Config.MinSpread and type(sp) == "number" then
+        local r = self and self.Properties and self.Properties.Spread and self.Properties.Spread.Range
+        if r and type(r.Min) == "number" then sp = math.min(sp, r.Min) end
+      end
       return sp
     end
   end
@@ -6183,6 +7898,10 @@ end))
     BulletMod._performRaycast = function(self, spreadVal, ...)
       if not Unloaded and Config.SpreadReductionPct > 0 and type(spreadVal) == "number" then
         spreadVal = spreadVal * math.clamp(1 - Config.SpreadReductionPct * 0.01, 0, 1)
+      end
+      if not Unloaded and Config.MinSpread and type(spreadVal) == "number" then
+        local r = self and self.Properties and self.Properties.Spread and self.Properties.Spread.Range
+        if r and type(r.Min) == "number" then spreadVal = math.min(spreadVal, r.Min) end
       end
       local res = origPerformRaycast(self, spreadVal, ...)
       if not Unloaded and Config.SilentAimEnabled and type(res) == "table" and typeof(res.Origin) == "Vector3" then
@@ -6193,6 +7912,11 @@ end))
             Config.SilentVisCheck, Config.SilentSmokeCheck,
             Config.AimbotTeamCheck, Config.AimbotBots, Config.AimbotZombies, false
           )
+          if not tgt and Config.AutoWall and cam then
+            local okW, list = pcall(AutoWall.scan, cam, res.Origin)
+            local pick = okW and AutoWall.pick(list, Config.SilentAimFOV) or nil
+            if pick then tgt = { pos = pick.aim } end
+          end
           if tgt and tgt.pos then
             local delta = tgt.pos - res.Origin
             if delta.Magnitude > 0.25 then
@@ -6272,6 +7996,8 @@ end))
     if cam then
       local vp = cam.ViewportSize
       local cx, cy = vp.X * 0.5, vp.Y * 0.5
+
+      AutoWall.render(cam, now)
 
       if Config.AimbotEnabled and Config.AimbotShowFOV then
         AimRing.Size = UDim2.fromOffset(Config.AimbotFOV * 2, Config.AimbotFOV * 2)
@@ -6438,9 +8164,9 @@ end))
                 if Config.WallbangMode == "Penetrable" then
                   local thk = (h.Position - ex.Position).Magnitude
                   local mat = (inst.Parent and inst.Parent:HasTag("BreakableDoor")) and Enum.Material.Metal or inst.Material
-                  local allow = (inst:HasTag("BreakableGlass") or (inst.Parent and inst.Parent:HasTag("BreakableGlass"))) and 25 or (MAT_PEN[mat] or 0)
-                  penDepths[mat] = (penDepths[mat] or 0) + thk
-                  if penDepths[mat] > allow + wPen then break end
+                  local allow, depthKey = penRule(inst, mat)
+                  penDepths[depthKey] = (penDepths[depthKey] or 0) + thk
+                  if penDepths[depthKey] > allow + wPen then break end
                 end
                 table.insert(excl, inst); rp.FilterDescendantsInstances = excl
                 cur = ex.Position + ray.Direction * 0.05
